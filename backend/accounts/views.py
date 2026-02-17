@@ -101,7 +101,9 @@ class ConceptListView(APIView):
     
     def get(self, request):
         subject = request.query_params.get('subject', '')
-        concepts = Concept.objects.filter(subject__icontains=subject) if subject else Concept.objects.all()
+        access_filter = Q(created_by__isnull=True) | Q(created_by=request.user)
+        concepts_qs = Concept.objects.filter(access_filter)
+        concepts = concepts_qs.filter(subject__icontains=subject) if subject else concepts_qs
         serializer = ConceptSerializer(concepts, many=True)
         return Response(serializer.data)
 
@@ -112,7 +114,9 @@ class StartLearningSessionView(APIView):
         concept_id = request.data.get('concept_id')
         
         try:
-            concept = Concept.objects.get(id=concept_id)
+            concept = Concept.objects.get(
+                Q(id=concept_id) & (Q(created_by__isnull=True) | Q(created_by=request.user))
+            )
             
             # Create learning session
             session = LearningSession.objects.create(
@@ -260,7 +264,10 @@ class GetTeachingContentView(APIView):
     
     def get(self, request, atom_id):
         try:
-            atom = TeachingAtom.objects.get(id=atom_id)
+            atom = TeachingAtom.objects.select_related('concept').get(
+                Q(id=atom_id)
+                & (Q(concept__created_by__isnull=True) | Q(concept__created_by=request.user))
+            )
             
             # If no content, generate it using Groq (you'll need to implement this)
             if not atom.explanation:
@@ -296,7 +303,10 @@ class GetPracticeQuestionsView(APIView):
         count = int(request.query_params.get('count', 3))
         
         try:
-            atom = TeachingAtom.objects.get(id=atom_id)
+            atom = TeachingAtom.objects.select_related('concept').get(
+                Q(id=atom_id)
+                & (Q(concept__created_by__isnull=True) | Q(concept__created_by=request.user))
+            )
             
             # Get questions of appropriate difficulty
             questions = Question.objects.filter(
@@ -337,7 +347,10 @@ class SubmitPracticeAnswerView(APIView):
         hint_used = request.data.get('hint_used', False)
         
         try:
-            question = Question.objects.get(id=question_id)
+            question = Question.objects.select_related('atom__concept').get(
+                Q(id=question_id)
+                & (Q(atom__concept__created_by__isnull=True) | Q(atom__concept__created_by=request.user))
+            )
             correct = (selected == question.correct_index)
             
             # Get or create progress
@@ -351,7 +364,7 @@ class SubmitPracticeAnswerView(APIView):
                 progress.hint_usage += 1
             
             # Update mastery score using BKT
-            from ..learning_engine.knowledge_tracing import bkt_update
+            from learning_engine.knowledge_tracing import bkt_update
             
             old_mastery = progress.mastery_score
             new_mastery = bkt_update(old_mastery, correct)
@@ -407,7 +420,10 @@ class GetHintView(APIView):
         error_count = request.data.get('error_count', 0)
         
         try:
-            question = Question.objects.get(id=question_id)
+            question = Question.objects.select_related('atom__concept').get(
+                Q(id=question_id)
+                & (Q(atom__concept__created_by__isnull=True) | Q(atom__concept__created_by=request.user))
+            )
             
             # Progressive hint system
             hints = [
@@ -444,6 +460,12 @@ class GetLearningProgressView(APIView):
     permission_classes = [permissions.IsAuthenticated]
     
     def get(self, request):
+        # Ensure user has a learning profile (older users may not)
+        try:
+            profile = request.user.learning_profile
+        except Exception:
+            profile, _ = LearningProfile.objects.get_or_create(user=request.user)
+
         # Get all progress for user
         progress = StudentProgress.objects.filter(user=request.user).select_related('atom__concept')
         
@@ -484,5 +506,94 @@ class GetLearningProgressView(APIView):
             'concepts': list(concepts.values()),
             'overall_mastery': overall_mastery,
             'total_atoms': total_atoms,
-            'learning_streak': request.user.learning_profile.learning_streak
+            'learning_streak': profile.learning_streak
         })
+        
+        
+        
+from learning_engine.question_generator import QuestionGenerator
+
+class GenerateConceptView(APIView):
+    """Generate atoms and questions for a concept"""
+    permission_classes = [permissions.IsAuthenticated]
+    
+    def post(self, request):
+        subject = request.data.get('subject')
+        concept = request.data.get('concept')
+        
+        if not subject or not concept:
+            return Response(
+                {'error': 'Please provide both subject and concept'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        try:
+            generator = QuestionGenerator()
+            result = generator.generate_complete_concept(subject, concept)
+            
+            # Save to database
+            from accounts.models import Concept, TeachingAtom, Question
+            
+            # Create or get concept
+            concept_obj, created = Concept.objects.get_or_create(
+                name=concept,
+                subject=subject,
+                created_by=request.user,
+                defaults={'difficulty': 'medium'}
+            )
+            
+            # Save atoms and questions
+            for atom_name, atom_data in result['atoms'].items():
+                atom_obj, _ = TeachingAtom.objects.get_or_create(
+                    name=atom_name,
+                    concept=concept_obj
+                )
+                
+                for q_data in atom_data['questions']:
+                    Question.objects.get_or_create(
+                        atom=atom_obj,
+                        question_text=q_data['question'],
+                        defaults={
+                            'difficulty': q_data['difficulty'],
+                            'cognitive_operation': q_data['cognitive_operation'],
+                            'estimated_time': q_data['estimated_time'],
+                            'options': q_data['options'],
+                            'correct_index': q_data['correct_index']
+                        }
+                    )
+            
+            return Response({
+                'success': True,
+                'concept_id': concept_obj.id,
+                'atoms': list(result['atoms'].keys())
+            })
+            
+        except Exception as e:
+            return Response(
+                {'error': str(e)},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
+
+class GetAtomsView(APIView):
+    """Get atoms for a concept"""
+    permission_classes = [permissions.IsAuthenticated]
+    
+    def get(self, request, concept_id):
+        try:
+            from accounts.models import Concept, TeachingAtom
+            
+            concept = Concept.objects.get(
+                Q(id=concept_id) & (Q(created_by__isnull=True) | Q(created_by=request.user))
+            )
+            atoms = TeachingAtom.objects.filter(concept=concept).values('id', 'name', 'order')
+            
+            return Response({
+                'concept': concept.name,
+                'atoms': list(atoms)
+            })
+            
+        except Concept.DoesNotExist:
+            return Response(
+                {'error': 'Concept not found'},
+                status=status.HTTP_404_NOT_FOUND
+            )

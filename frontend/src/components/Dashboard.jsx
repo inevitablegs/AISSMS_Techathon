@@ -1,38 +1,36 @@
-import React, { useEffect, useState } from 'react';
-import { useNavigate, Link } from 'react-router-dom';
+import React, { useCallback, useEffect, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
-import { LearningProvider } from '../context/LearningContext';
-import AdaptiveLearning from './Learning/AdaptiveLearning';
 import axios from '../axiosConfig';
 
 const Dashboard = () => {
     const [dashboardData, setDashboardData] = useState(null);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState('');
-    const [showLearning, setShowLearning] = useState(false);
+    
     
     const { user, logout } = useAuth();
     const navigate = useNavigate();
 
-    useEffect(() => {
-        fetchDashboardData();
-    }, []);
-
-    const fetchDashboardData = async () => {
+    const fetchDashboardData = useCallback(async () => {
         try {
             const response = await axios.get('/auth/api/dashboard/');
             setDashboardData(response.data);
             setLoading(false);
-        } catch (error) {
+        } catch (err) {
             setError('Failed to fetch dashboard data');
             setLoading(false);
             
-            if (error.response?.status === 401) {
+            if (err.response?.status === 401) {
                 logout();
                 navigate('/login');
             }
         }
-    };
+    }, [logout, navigate]);
+
+    useEffect(() => {
+        fetchDashboardData();
+    }, [fetchDashboardData]);
 
     const handleLogout = () => {
         logout();
@@ -55,14 +53,6 @@ const Dashboard = () => {
         );
     }
 
-    if (showLearning) {
-        return (
-            <LearningProvider>
-                <AdaptiveLearning />
-            </LearningProvider>
-        );
-    }
-
     return (
         <div className="min-h-screen bg-gray-100">
             <nav className="bg-white shadow-lg">
@@ -78,7 +68,7 @@ const Dashboard = () => {
                                 Welcome, {user?.first_name}!
                             </span>
                             <button
-                                onClick={() => setShowLearning(true)}
+                                onClick={() => navigate('/learn')}
                                 className="bg-green-500 hover:bg-green-700 text-white font-bold py-2 px-4 rounded"
                             >
                                 Start Learning
@@ -145,10 +135,17 @@ const Dashboard = () => {
                             <div className="border-t border-gray-200 px-4 py-5 sm:px-6">
                                 <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                                     <button
-                                        onClick={() => setShowLearning(true)}
+                                        onClick={() => navigate('/learn')}
                                         className="bg-blue-500 hover:bg-blue-700 text-white font-bold py-3 px-4 rounded-lg text-center"
                                     >
                                         🎯 Start Adaptive Learning
+                                    </button>
+
+                                    <button
+                                        onClick={() => navigate('/learn/start')}
+                                        className="bg-green-600 hover:bg-green-700 text-white font-bold py-3 px-4 rounded-lg text-center"
+                                    >
+                                        ▶ Start Session (Any Concept)
                                     </button>
                                     <button
                                         className="bg-purple-500 hover:bg-purple-700 text-white font-bold py-3 px-4 rounded-lg text-center"

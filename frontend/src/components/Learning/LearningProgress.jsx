@@ -6,7 +6,7 @@ const LearningProgress = ({ onContinue }) => {
 
     useEffect(() => {
         loadLearningProgress();
-    }, []);
+    }, [loadLearningProgress]);
 
     const getPhaseIcon = (phase) => {
         const icons = {

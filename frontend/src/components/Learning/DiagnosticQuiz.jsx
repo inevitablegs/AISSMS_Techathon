@@ -1,17 +1,17 @@
-import React, { useState, useEffect } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { useLearning } from '../../context/LearningContext';
 
 const DiagnosticQuiz = ({ sessionId, questions, onComplete }) => {
     const [currentIndex, setCurrentIndex] = useState(0);
     const [answers, setAnswers] = useState([]);
-    const [timeStart, setTimeStart] = useState(null);
+    const timeStartRef = useRef(0);
     const [selected, setSelected] = useState(null);
     const [submitted, setSubmitted] = useState(false);
 
     const { submitDiagnostic, loading } = useLearning();
 
     useEffect(() => {
-        setTimeStart(Date.now());
+        timeStartRef.current = Date.now();
     }, [currentIndex]);
 
     const currentQuestion = questions[currentIndex];
@@ -25,7 +25,7 @@ const DiagnosticQuiz = ({ sessionId, questions, onComplete }) => {
     const handleSubmit = () => {
         if (selected === null) return;
 
-        const timeTaken = (Date.now() - timeStart) / 1000; // in seconds
+        const timeTaken = (Date.now() - timeStartRef.current) / 1000; // in seconds
 
         const answer = {
             question_id: currentQuestion.id,

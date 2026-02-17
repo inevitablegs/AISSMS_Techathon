@@ -1,21 +1,11 @@
-import React, { createContext, useState, useContext, useEffect } from 'react';
+import React, { createContext, useState, useContext } from 'react';
 import axios from '../axiosConfig';
 
 const AuthContext = createContext(null);
 
 export const AuthProvider = ({ children }) => {
     const [user, setUser] = useState(null);
-    const [loading, setLoading] = useState(true);
-
-    useEffect(() => {
-        const token = localStorage.getItem('access_token');
-        if (token) {
-            // You might want to validate token here
-            setLoading(false);
-        } else {
-            setLoading(false);
-        }
-    }, []);
+    const [loading] = useState(false);
 
     const login = async (username, password) => {
         try {

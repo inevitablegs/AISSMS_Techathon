@@ -25,6 +25,13 @@ class Concept(models.Model):
     
     name = models.CharField(max_length=200)
     subject = models.CharField(max_length=100)
+    created_by = models.ForeignKey(
+        User,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name='created_concepts'
+    )
     description = models.TextField(blank=True)
     prerequisites = models.ManyToManyField('self', symmetrical=False, blank=True)
     difficulty = models.CharField(max_length=10, choices=DIFFICULTY_CHOICES, default='medium')
@@ -32,7 +39,7 @@ class Concept(models.Model):
     
     class Meta:
         ordering = ['subject', 'order']
-        unique_together = ['name', 'subject']
+        unique_together = ['name', 'subject', 'created_by']
 
 class TeachingAtom(models.Model):
     """Atomic learning units"""

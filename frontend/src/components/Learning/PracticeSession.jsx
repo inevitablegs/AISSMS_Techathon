@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { useLearning } from '../../context/LearningContext';
 
 const PracticeSession = ({ atomId, onComplete }) => {
@@ -7,21 +7,19 @@ const PracticeSession = ({ atomId, onComplete }) => {
     const [selected, setSelected] = useState(null);
     const [submitted, setSubmitted] = useState(false);
     const [hint, setHint] = useState(null);
-    const [hintLevel, setHintLevel] = useState(0);
     const [errorCount, setErrorCount] = useState(0);
+    const [lastAnswerCorrect, setLastAnswerCorrect] = useState(null);
     const [sessionData, setSessionData] = useState({
         questionsAnswered: [],
         masteryScore: 0,
         streak: 0
     });
 
+    const questionStartRef = useRef(0);
+
     const { getPracticeQuestions, submitPracticeAnswer, getHint, loading } = useLearning();
 
-    useEffect(() => {
-        loadQuestions();
-    }, [atomId]);
-
-    const loadQuestions = async (difficulty = 'easy') => {
+    const loadQuestions = useCallback(async (difficulty = 'easy') => {
         const result = await getPracticeQuestions(atomId, difficulty, 3);
         if (result.success) {
             setQuestions(result.data.questions);
@@ -29,8 +27,23 @@ const PracticeSession = ({ atomId, onComplete }) => {
                 ...prev,
                 masteryScore: result.data.mastery_score
             }));
+
+            setCurrentIndex(0);
+            setSelected(null);
+            setSubmitted(false);
+            setHint(null);
+            setLastAnswerCorrect(null);
+            questionStartRef.current = Date.now();
         }
-    };
+    }, [atomId, getPracticeQuestions]);
+
+    useEffect(() => {
+        loadQuestions();
+    }, [loadQuestions]);
+
+    useEffect(() => {
+        questionStartRef.current = Date.now();
+    }, [currentIndex, questions]);
 
     const currentQuestion = questions[currentIndex];
 
@@ -43,16 +56,17 @@ const PracticeSession = ({ atomId, onComplete }) => {
     const handleSubmit = async () => {
         if (selected === null) return;
 
-        const startTime = Date.now();
+        const timeTaken = (Date.now() - questionStartRef.current) / 1000;
         const result = await submitPracticeAnswer(
             currentQuestion.id,
             selected,
-            (Date.now() - startTime) / 1000,
+            timeTaken,
             hint !== null
         );
 
         if (result.success) {
             setSubmitted(true);
+            setLastAnswerCorrect(result.data.correct);
             setSessionData(prev => ({
                 ...prev,
                 masteryScore: result.data.mastery_score,
@@ -75,17 +89,12 @@ const PracticeSession = ({ atomId, onComplete }) => {
                     setSelected(null);
                     setSubmitted(false);
                     setHint(null);
-                    setHintLevel(0);
+                    setLastAnswerCorrect(null);
                 }, 1500);
             } else {
                 // End of questions, load more
                 setTimeout(() => {
                     loadQuestions(result.data.next_difficulty);
-                    setCurrentIndex(0);
-                    setSelected(null);
-                    setSubmitted(false);
-                    setHint(null);
-                    setHintLevel(0);
                 }, 1500);
             }
         }
@@ -97,7 +106,6 @@ const PracticeSession = ({ atomId, onComplete }) => {
         const result = await getHint(currentQuestion.id, errorCount);
         if (result.success) {
             setHint(result.data.hint);
-            setHintLevel(result.data.hint_level);
         }
     };
 
@@ -180,13 +188,11 @@ const PracticeSession = ({ atomId, onComplete }) => {
 
                 {submitted && (
                     <div className={`mt-4 p-4 rounded-lg ${
-                        sessionData.streak > sessionData.streak - 1
+                        lastAnswerCorrect
                             ? 'bg-green-100 text-green-800'
                             : 'bg-red-100 text-red-800'
                     }`}>
-                        {sessionData.streak > sessionData.streak - 1
-                            ? '✅ Correct!'
-                            : '❌ Try again next time!'}
+                        {lastAnswerCorrect ? '✅ Correct!' : '❌ Try again next time!'}
                     </div>
                 )}
 

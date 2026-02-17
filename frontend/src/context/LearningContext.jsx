@@ -1,4 +1,4 @@
-import React, { createContext, useState, useContext } from 'react';
+import React, { createContext, useCallback, useMemo, useState, useContext } from 'react';
 import axios from '../axiosConfig';
 
 const LearningContext = createContext(null);
@@ -10,7 +10,13 @@ export const LearningProvider = ({ children }) => {
     const [learningProgress, setLearningProgress] = useState(null);
     const [loading, setLoading] = useState(false);
 
-    const startLearningSession = async (conceptId) => {
+    const normalizePositiveInt = (value) => {
+        const num = typeof value === 'string' ? Number(value) : value;
+        if (!Number.isInteger(num) || num <= 0) return null;
+        return num;
+    };
+
+    const startLearningSession = useCallback(async (conceptId) => {
         setLoading(true);
         try {
             const response = await axios.post('/auth/api/start-session/', {
@@ -26,9 +32,9 @@ export const LearningProvider = ({ children }) => {
         } finally {
             setLoading(false);
         }
-    };
+    }, []);
 
-    const submitDiagnostic = async (sessionId, answers) => {
+    const submitDiagnostic = useCallback(async (sessionId, answers) => {
         setLoading(true);
         try {
             const response = await axios.post('/auth/api/submit-diagnostic/', {
@@ -45,14 +51,19 @@ export const LearningProvider = ({ children }) => {
         } finally {
             setLoading(false);
         }
-    };
+    }, []);
 
-    const getTeachingContent = async (atomId) => {
+    const getTeachingContent = useCallback(async (atomId) => {
+        const normalizedAtomId = normalizePositiveInt(atomId);
+        if (normalizedAtomId === null) {
+            return { success: false, error: 'Invalid atom id. Please restart the session step.' };
+        }
+
         setLoading(true);
         try {
-            const response = await axios.get(`/auth/api/teaching/${atomId}/`);
+            const response = await axios.get(`/auth/api/teaching/${normalizedAtomId}/`);
             setCurrentAtom({
-                id: atomId,
+                id: normalizedAtomId,
                 ...response.data
             });
             return { success: true, data: response.data };
@@ -64,9 +75,9 @@ export const LearningProvider = ({ children }) => {
         } finally {
             setLoading(false);
         }
-    };
+    }, []);
 
-    const getPracticeQuestions = async (atomId, difficulty = 'easy', count = 3) => {
+    const getPracticeQuestions = useCallback(async (atomId, difficulty = 'easy', count = 3) => {
         setLoading(true);
         try {
             const response = await axios.get(
@@ -81,9 +92,9 @@ export const LearningProvider = ({ children }) => {
         } finally {
             setLoading(false);
         }
-    };
+    }, []);
 
-    const submitPracticeAnswer = async (questionId, selected, timeTaken, hintUsed = false) => {
+    const submitPracticeAnswer = useCallback(async (questionId, selected, timeTaken, hintUsed = false) => {
         try {
             const response = await axios.post('/auth/api/submit-answer/', {
                 question_id: questionId,
@@ -98,9 +109,9 @@ export const LearningProvider = ({ children }) => {
                 error: error.response?.data?.error || 'Failed to submit answer'
             };
         }
-    };
+    }, []);
 
-    const getHint = async (questionId, errorCount = 0) => {
+    const getHint = useCallback(async (questionId, errorCount = 0) => {
         try {
             const response = await axios.post('/auth/api/get-hint/', {
                 question_id: questionId,
@@ -113,9 +124,9 @@ export const LearningProvider = ({ children }) => {
                 error: error.response?.data?.error || 'Failed to get hint'
             };
         }
-    };
+    }, []);
 
-    const loadLearningProgress = async () => {
+    const loadLearningProgress = useCallback(async () => {
         setLoading(true);
         try {
             const response = await axios.get('/auth/api/progress/');
@@ -129,9 +140,9 @@ export const LearningProvider = ({ children }) => {
         } finally {
             setLoading(false);
         }
-    };
+    }, []);
 
-    const value = {
+    const value = useMemo(() => ({
         currentSession,
         diagnosticResults,
         currentAtom,
@@ -144,7 +155,20 @@ export const LearningProvider = ({ children }) => {
         submitPracticeAnswer,
         getHint,
         loadLearningProgress
-    };
+    }), [
+        currentSession,
+        diagnosticResults,
+        currentAtom,
+        learningProgress,
+        loading,
+        startLearningSession,
+        submitDiagnostic,
+        getTeachingContent,
+        getPracticeQuestions,
+        submitPracticeAnswer,
+        getHint,
+        loadLearningProgress
+    ]);
 
     return (
         <LearningContext.Provider value={value}>

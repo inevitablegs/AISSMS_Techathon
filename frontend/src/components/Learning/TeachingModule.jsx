@@ -1,23 +1,36 @@
-import React, { useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import { useLearning } from '../../context/LearningContext';
 
 const TeachingModule = ({ atomId, onComplete }) => {
     const [content, setContent] = useState(null);
+    const [error, setError] = useState('');
     const [showExample, setShowExample] = useState(false);
     const [showAnalogy, setShowAnalogy] = useState(false);
     
     const { getTeachingContent, loading } = useLearning();
 
-    useEffect(() => {
-        loadContent();
-    }, [atomId]);
-
-    const loadContent = async () => {
+    const loadContent = useCallback(async () => {
         const result = await getTeachingContent(atomId);
         if (result.success) {
             setContent(result.data);
+        } else {
+            setError(result.error || 'Failed to load content.');
         }
-    };
+    }, [atomId, getTeachingContent]);
+
+    useEffect(() => {
+        setContent(null);
+        setError('');
+        setShowExample(false);
+        setShowAnalogy(false);
+
+        if (atomId === null || atomId === undefined) {
+            setError('No teaching atom selected. Please restart this learning step.');
+            return;
+        }
+
+        loadContent();
+    }, [atomId, loadContent]);
 
     const handleContinue = () => {
         onComplete(atomId);
@@ -34,7 +47,7 @@ const TeachingModule = ({ atomId, onComplete }) => {
     if (!content) {
         return (
             <div className="text-center py-12">
-                <p className="text-red-600">Failed to load content.</p>
+                <p className="text-red-600">{error || 'Failed to load content.'}</p>
             </div>
         );
     }

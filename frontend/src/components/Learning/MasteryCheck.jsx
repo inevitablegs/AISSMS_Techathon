@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import { useLearning } from '../../context/LearningContext';
 
 const MasteryCheck = ({ atomId, onComplete }) => {
@@ -9,11 +9,7 @@ const MasteryCheck = ({ atomId, onComplete }) => {
 
     const { getPracticeQuestions, submitPracticeAnswer } = useLearning();
 
-    useEffect(() => {
-        loadMasteryQuestions();
-    }, [atomId]);
-
-    const loadMasteryQuestions = async () => {
+    const loadMasteryQuestions = useCallback(async () => {
         // Get mixed difficulty questions for mastery check
         const easyResult = await getPracticeQuestions(atomId, 'easy', 1);
         const mediumResult = await getPracticeQuestions(atomId, 'medium', 1);
@@ -24,7 +20,11 @@ const MasteryCheck = ({ atomId, onComplete }) => {
         ];
         
         setQuestions(allQuestions);
-    };
+    }, [atomId, getPracticeQuestions]);
+
+    useEffect(() => {
+        loadMasteryQuestions();
+    }, [loadMasteryQuestions]);
 
     const handleAnswer = async (selected, timeTaken) => {
         const result = await submitPracticeAnswer(

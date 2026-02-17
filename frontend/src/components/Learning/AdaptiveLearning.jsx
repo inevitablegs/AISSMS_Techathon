@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useLearning } from '../../context/LearningContext';
 import axios from '../../axiosConfig';
@@ -10,7 +10,6 @@ import LearningProgress from './LearningProgress';
 
 const AdaptiveLearning = ({ subject } = {}) => {
     const [step, setStep] = useState('select'); // select, diagnostic, teaching, practice, mastery, progress
-    const [selectedConcept, setSelectedConcept] = useState(null);
     const [availableConcepts, setAvailableConcepts] = useState([]);
     const [currentAtomId, setCurrentAtomId] = useState(null);
     
@@ -18,16 +17,10 @@ const AdaptiveLearning = ({ subject } = {}) => {
     const { 
         startLearningSession, 
         currentSession, 
-        diagnosticResults,
         loadLearningProgress 
     } = useLearning();
 
-    useEffect(() => {
-        // Load available concepts
-        fetchConcepts();
-    }, [subject]);
-
-    const fetchConcepts = async () => {
+    const fetchConcepts = useCallback(async () => {
         try {
             const subjectFilter = typeof subject === 'string' ? subject.trim() : '';
             const url = subjectFilter
@@ -52,10 +45,14 @@ const AdaptiveLearning = ({ subject } = {}) => {
                     : fallback
             );
         }
-    };
+    }, [subject]);
+
+    useEffect(() => {
+        // Load available concepts
+        fetchConcepts();
+    }, [fetchConcepts]);
 
     const handleConceptSelect = async (concept) => {
-        setSelectedConcept(concept);
         const result = await startLearningSession(concept.id);
         
         if (result.success) {
@@ -64,10 +61,17 @@ const AdaptiveLearning = ({ subject } = {}) => {
     };
 
     const handleDiagnosticComplete = (results) => {
-        setStep('teaching');
-        if (results.next_atom) {
-            setCurrentAtomId(results.next_atom);
+        const nextAtom = results?.next_atom;
+        if (nextAtom) {
+            setCurrentAtomId(nextAtom);
+            setStep('teaching');
+            return;
         }
+
+        // No weak atoms identified; go to progress summary instead of calling teaching/null.
+        setCurrentAtomId(null);
+        setStep('progress');
+        loadLearningProgress();
     };
 
     const handleTeachingComplete = (atomId) => {

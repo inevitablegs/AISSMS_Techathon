@@ -3,7 +3,8 @@ from .views import (
     RegisterView, LoginView, DashboardView,
     ConceptListView, StartLearningSessionView, SubmitDiagnosticView,
     GetTeachingContentView, GetPracticeQuestionsView, SubmitPracticeAnswerView,
-    GetHintView, GetLearningProgressView
+    GetHintView, GetLearningProgressView,
+    GenerateConceptView, GetAtomsView
 )
 
 urlpatterns = [
@@ -20,4 +21,8 @@ urlpatterns = [
     path('api/submit-answer/', SubmitPracticeAnswerView.as_view(), name='submit_answer'),
     path('api/get-hint/', GetHintView.as_view(), name='get_hint'),
     path('api/progress/', GetLearningProgressView.as_view(), name='learning_progress'),
+    
+    # Atom generation endpoints
+    path('api/generate-concept/', GenerateConceptView.as_view(), name='generate_concept'),
+    path('api/concepts/<int:concept_id>/atoms/', GetAtomsView.as_view(), name='get_atoms'),
 ]

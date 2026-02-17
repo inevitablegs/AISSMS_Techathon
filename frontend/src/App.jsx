@@ -7,6 +7,7 @@ import Register from './components/Register';
 import Dashboard from './components/Dashboard';
 import ProtectedRoute from './components/ProtectedRoute';
 import LearningRoute from './components/Learning/LearningRoute';
+import StartAnyConceptSessionRoute from './components/Learning/StartAnyConceptSessionRoute';
 
 
 function App() {
@@ -40,6 +41,15 @@ function App() {
                         element={
                             <ProtectedRoute>
                                 <LearningRoute />
+                            </ProtectedRoute>
+                        }
+                    />
+
+                    <Route
+                        path="/learn/start"
+                        element={
+                            <ProtectedRoute>
+                                <StartAnyConceptSessionRoute />
                             </ProtectedRoute>
                         }
                     />
