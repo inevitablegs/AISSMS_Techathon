@@ -1,17 +1,14 @@
+# backend/learning_engine/adaptive_flow.py - Enhanced version
+
 import json
 import random
 from typing import Dict, List, Optional, Tuple, Any
 from django.conf import settings
 from groq import Groq
-
-from .models import TeachingAtomState, LearningPhase, PacingDecision, ErrorType
-from .knowledge_tracing import (
-    bkt_update, irt_probability, update_theta,
-    classify_behavior, update_mastery_from_behavior, classify_error_type
-)
+from .models import TeachingAtomState, LearningPhase
 
 class AdaptiveLearningEngine:
-    """Main adaptive learning engine"""
+    """Enhanced adaptive learning engine with knowledge levels"""
     
     def __init__(self):
         self.groq_client = None
@@ -20,43 +17,48 @@ class AdaptiveLearningEngine:
             self.groq_client = Groq(api_key=groq_key)
     
     def generate_teaching_content(self, atom_name: str, subject: str, 
-                                  concept: str) -> Dict[str, str]:
+                                  concept: str, knowledge_level: str) -> Dict[str, str]:
         """
-        Generate teaching content for an atom using Groq
+        Generate teaching content for an atom based on knowledge level
         """
         if not self.groq_client:
-            # Fallback content
-            return {
-                "explanation": f"{atom_name} is a fundamental concept in {concept}.",
-                "example": f"Example of {atom_name} in practice.",
-                "analogy": f"Think of {atom_name} like organizing information.",
-                "misconception": f"Don't confuse {atom_name} with related concepts."
-            }
+            return self._get_fallback_content(atom_name, concept, knowledge_level)
+        
+        level_descriptions = {
+            'zero': "Complete beginner - needs fundamental concepts explained from scratch",
+            'beginner': "Has basic understanding but needs clear explanations and examples",
+            'intermediate': "Knows the basics - needs deeper insights and applications",
+            'advanced': "Strong understanding - needs advanced concepts and edge cases"
+        }
         
         prompt = f"""
-        You are creating a short teaching module for a single atomic concept.
+        You are creating a personalized teaching module for a single atomic concept.
         
         Subject: {subject}
         Concept: {concept}
         Atomic Concept: {atom_name}
+        Student Knowledge Level: {level_descriptions.get(knowledge_level, 'intermediate')}
         
         Generate:
-        1. A clear, simple explanation (2-3 sentences max)
-        2. One concrete example
-        3. One analogy from everyday life
-        4. One common misconception to watch out for
+        1. A clear explanation tailored to their knowledge level (2-4 sentences)
+        2. A concrete example relevant to their level
+        3. An analogy from everyday life that matches their understanding
+        4. A common misconception to watch out for
+        5. A practical application or "why this matters"
         
         Rules:
         - ONE idea only
         - No jargon without explanation
-        - Make it memorable
+        - Make it memorable and relevant
+        - If advanced, include edge cases or limitations
         
         Return STRICT JSON:
         {{
             "explanation": "Clear explanation here",
             "example": "Concrete example here",
             "analogy": "Everyday analogy here",
-            "misconception": "Common mistake students make"
+            "misconception": "Common mistake students make",
+            "practical_application": "Why this matters in real life"
         }}
         """
         
@@ -65,11 +67,10 @@ class AdaptiveLearningEngine:
                 model="llama-3.3-70b-versatile",
                 messages=[{"role": "user", "content": prompt}],
                 temperature=0.3,
-                max_tokens=500,
+                max_tokens=800,
             )
             
             raw_text = response.choices[0].message.content
-            # Extract JSON from response (handle markdown code blocks)
             if "```" in raw_text:
                 raw_text = raw_text.split("```")[1]
                 if raw_text.startswith("json"):
@@ -78,58 +79,63 @@ class AdaptiveLearningEngine:
             return json.loads(raw_text.strip())
         except Exception as e:
             print(f"Warning: Could not generate teaching content: {e}")
+            return self._get_fallback_content(atom_name, concept, knowledge_level)
+    
+    def _get_fallback_content(self, atom_name: str, concept: str, level: str) -> Dict:
+        """Fallback content based on knowledge level"""
+        if level == 'advanced':
             return {
-                "explanation": f"{atom_name} is a key concept.",
-                "example": f"Example of {atom_name}.",
-                "analogy": f"Think of {atom_name} like a system.",
-                "misconception": f"Common mistake with {atom_name}."
+                "explanation": f"{atom_name} represents an advanced aspect of {concept} with complex interactions and edge cases.",
+                "example": f"Advanced example: In production systems, {atom_name} manifests through...",
+                "analogy": f"Think of {atom_name} like a sophisticated system where multiple components interact.",
+                "misconception": f"Even experts sometimes confuse {atom_name} with similar advanced concepts.",
+                "practical_application": f"Understanding {atom_name} helps in optimizing system performance."
+            }
+        elif level == 'intermediate':
+            return {
+                "explanation": f"{atom_name} is a key component of {concept} that builds on foundational knowledge.",
+                "example": f"Example: When working with {concept}, {atom_name} helps you...",
+                "analogy": f"Think of {atom_name} like a well-organized tool in your toolkit.",
+                "misconception": f"Don't confuse {atom_name} with its related concepts.",
+                "practical_application": f"Mastering {atom_name} improves your problem-solving efficiency."
+            }
+        else:  # zero or beginner
+            return {
+                "explanation": f"{atom_name} is a fundamental building block of {concept}. It's like learning a basic rule.",
+                "example": f"Simple example: Just like learning the alphabet before writing words, {atom_name} comes first.",
+                "analogy": f"Think of {atom_name} like learning to crawl before you walk.",
+                "misconception": f"Beginners often think {atom_name} is harder than it really is.",
+                "practical_application": f"Understanding {atom_name} opens the door to mastering {concept}."
             }
     
-    def get_adaptive_hint(self, question: Dict, error_count: int, 
-                         atom_name: str, question_text: str) -> str:
+    def determine_pacing(self, diagnostic_results: Dict, knowledge_level: str) -> str:
         """
-        Get adaptive hint based on error count and question content
-        """
-        hints = [
-            "Think about what the question is asking.",
-            f"Consider how this relates to {atom_name}.",
-        ]
-        
-        # More specific hints based on question content
-        q_text = question_text.lower()
-        
-        if "address" in q_text:
-            hints.append("With N address lines, you can access 2^N locations.")
-            hints.append("Each address line DOUBLES the possible memory size.")
-        
-        if "cache" in q_text or "ram" in q_text:
-            hints.append("Cache is closer to the CPU and faster, but smaller than RAM.")
-            hints.append("Think of the hierarchy: CPU → Cache → RAM → Disk")
-        
-        if "rom" in q_text:
-            hints.append("ROM retains data even when power is off.")
-            hints.append("ROM typically stores the bootloader/firmware.")
-        
-        if "mapping" in q_text or "share" in q_text:
-            hints.append("Different memory types can use different address ranges.")
-            hints.append("For example: 0000-7FFF might be ROM, 8000-FFFF might be RAM.")
-        
-        # Escalate hints based on error count
-        hint_level = min(error_count, len(hints) - 1)
-        return hints[hint_level]
-    
-    def determine_pacing(self, diagnostic_results: Dict) -> str:
-        """
-        Determine learning pace based on diagnostic results
+        Determine learning pace based on diagnostic results and initial knowledge level
         """
         accuracy = diagnostic_results.get('accuracy', 0)
         
-        if accuracy < 0.4:
-            return PacingDecision.SHARP_SLOWDOWN.value
-        elif accuracy < 0.7:
-            return PacingDecision.SLOW_DOWN.value
-        else:
-            return PacingDecision.SPEED_UP.value
+        # Adjust thresholds based on knowledge level
+        if knowledge_level == 'advanced':
+            if accuracy < 0.6:
+                return 'slow_down'
+            elif accuracy < 0.8:
+                return 'stay'
+            else:
+                return 'speed_up'
+        elif knowledge_level == 'intermediate':
+            if accuracy < 0.5:
+                return 'slow_down'
+            elif accuracy < 0.75:
+                return 'stay'
+            else:
+                return 'speed_up'
+        else:  # zero or beginner
+            if accuracy < 0.4:
+                return 'sharp_slowdown'
+            elif accuracy < 0.7:
+                return 'slow_down'
+            else:
+                return 'speed_up'
     
     def get_contextual_analogy(self, atom_name: str, concept: str) -> Dict:
         """

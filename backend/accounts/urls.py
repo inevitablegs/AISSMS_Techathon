@@ -1,7 +1,7 @@
 from django.urls import path
 from .views import (
-    RegisterView, LoginView, DashboardView,
-    ConceptListView, StartLearningSessionView, SubmitDiagnosticView,
+    CompleteDiagnosticView, GetDiagnosticQuestionsView, MarkAtomTaughtView, RegisterView, LoginView, DashboardView,
+    ConceptListView, StartLearningSessionView, SubmitDiagnosticAnswerView, SubmitDiagnosticView,
     GetTeachingContentView, GetPracticeQuestionsView, SubmitPracticeAnswerView,
     GetHintView, GetLearningProgressView,
     GenerateConceptView, GetAtomsView
@@ -25,4 +25,17 @@ urlpatterns = [
     # Atom generation endpoints
     path('api/generate-concept/', GenerateConceptView.as_view(), name='generate_concept'),
     path('api/concepts/<int:concept_id>/atoms/', GetAtomsView.as_view(), name='get_atoms'),
+    
+    
+    path('api/teaching/<int:atom_id>/', GetTeachingContentView.as_view(), name='teaching_content'),
+    
+    # Teaching-first flow endpoints
+    
+    path('api/mark-atom-taught/', MarkAtomTaughtView.as_view(), name='mark_atom_taught'),
+    path('api/diagnostic-questions/<int:atom_id>/', GetDiagnosticQuestionsView.as_view(), name='diagnostic_questions'),
+    path('api/submit-diagnostic-answer/', SubmitDiagnosticAnswerView.as_view(), name='submit_diagnostic_answer'),
+    path('api/complete-diagnostic/', CompleteDiagnosticView.as_view(), name='complete_diagnostic'),
+    
+    # Keep existing endpoints for backward compatibility
+    path('api/teaching/<int:atom_id>/', GetTeachingContentView.as_view(), name='teaching_content'),
 ]

@@ -9,18 +9,18 @@ export const LearningProvider = ({ children }) => {
     const [currentAtom, setCurrentAtom] = useState(null);
     const [learningProgress, setLearningProgress] = useState(null);
     const [loading, setLoading] = useState(false);
+    const [knowledgeLevel, setKnowledgeLevel] = useState('intermediate');
+    const [learningPace, setLearningPace] = useState('normal');
+    const [masteryData, setMasteryData] = useState({});
 
-    const normalizePositiveInt = (value) => {
-        const num = typeof value === 'string' ? Number(value) : value;
-        if (!Number.isInteger(num) || num <= 0) return null;
-        return num;
-    };
 
-    const startLearningSession = useCallback(async (conceptId) => {
+    const startLearningSession = useCallback(async (conceptId, level = 'intermediate') => {
         setLoading(true);
+        setKnowledgeLevel(level);
         try {
             const response = await axios.post('/auth/api/start-session/', {
-                concept_id: conceptId
+                concept_id: conceptId,
+                knowledge_level: level
             });
             setCurrentSession(response.data);
             return { success: true, data: response.data };
@@ -42,6 +42,17 @@ export const LearningProvider = ({ children }) => {
                 answers: answers
             });
             setDiagnosticResults(response.data);
+            setLearningPace(response.data.pacing || 'normal');
+            
+            // Track weak atoms for mastery management
+            if (response.data.weak_atoms) {
+                const weakMap = {};
+                response.data.weak_atoms.forEach(id => {
+                    weakMap[id] = { status: 'needs_attention', attempts: 0 };
+                });
+                setMasteryData(weakMap);
+            }
+            
             return { success: true, data: response.data };
         } catch (error) {
             return {
@@ -50,6 +61,82 @@ export const LearningProvider = ({ children }) => {
             };
         } finally {
             setLoading(false);
+        }
+    }, []);
+
+    const getMasteryRecommendation = useCallback((atomId) => {
+        const data = masteryData[atomId];
+        if (!data) return { action: 'proceed', confidence: 'high' };
+        
+        if (data.status === 'needs_attention' && data.attempts > 2) {
+            return { action: 'review', confidence: 'low' };
+        }
+        
+        return { action: 'proceed', confidence: 'medium' };
+    }, [masteryData]);
+    
+
+    const normalizePositiveInt = (value) => {
+        const num = typeof value === 'string' ? Number(value) : value;
+        if (!Number.isInteger(num) || num <= 0) return null;
+        return num;
+    };
+
+    const markAtomTaught = useCallback(async (atomId, timeSpent) => {
+        try {
+            const response = await axios.post('/auth/api/mark-atom-taught/', {
+                atom_id: atomId,
+                time_spent: timeSpent
+            });
+            return { success: true, data: response.data };
+        } catch (error) {
+            return {
+                success: false,
+                error: error.response?.data?.error || 'Failed to mark atom as taught'
+            };
+        }
+    }, []);
+
+    const getDiagnosticQuestions = useCallback(async (atomId) => {
+        try {
+            const response = await axios.get(`/auth/api/diagnostic-questions/${atomId}/`);
+            return { success: true, data: response.data };
+        } catch (error) {
+            return {
+                success: false,
+                error: error.response?.data?.error || 'Failed to get diagnostic questions'
+            };
+        }
+    }, []);
+
+    const submitDiagnosticAnswer = useCallback(async (questionId, selected, timeTaken) => {
+        try {
+            const response = await axios.post('/auth/api/submit-diagnostic-answer/', {
+                question_id: questionId,
+                selected: selected,
+                time_taken: timeTaken
+            });
+            return { success: true, data: response.data };
+        } catch (error) {
+            return {
+                success: false,
+                error: error.response?.data?.error || 'Failed to submit answer'
+            };
+        }
+    }, []);
+
+    const completeDiagnostic = useCallback(async (atomId, answers) => {
+        try {
+            const response = await axios.post('/auth/api/complete-diagnostic/', {
+                atom_id: atomId,
+                answers: answers
+            });
+            return { success: true, data: response.data };
+        } catch (error) {
+            return {
+                success: false,
+                error: error.response?.data?.error || 'Failed to complete diagnostic'
+            };
         }
     }, []);
 
@@ -154,7 +241,18 @@ export const LearningProvider = ({ children }) => {
         getPracticeQuestions,
         submitPracticeAnswer,
         getHint,
-        loadLearningProgress
+        loadLearningProgress,
+        knowledgeLevel,
+        learningPace,
+        masteryData,
+        setKnowledgeLevel,
+        startLearningSession,
+        submitDiagnostic,
+        getMasteryRecommendation,
+        markAtomTaught,
+        getDiagnosticQuestions,
+        submitDiagnosticAnswer,
+        completeDiagnostic
     }), [
         currentSession,
         diagnosticResults,
@@ -167,7 +265,17 @@ export const LearningProvider = ({ children }) => {
         getPracticeQuestions,
         submitPracticeAnswer,
         getHint,
-        loadLearningProgress
+        loadLearningProgress,
+        knowledgeLevel,
+        learningPace,
+        masteryData,
+        startLearningSession,
+        submitDiagnostic,
+        getMasteryRecommendation,
+        markAtomTaught,
+        getDiagnosticQuestions,
+        submitDiagnosticAnswer,
+        completeDiagnostic
     ]);
 
     return (

@@ -1,175 +1,156 @@
-import React, { useEffect, useRef, useState } from 'react';
-import { useLearning } from '../../context/LearningContext';
+// frontend/src/components/Learning/DiagnosticQuiz.jsx - Updated version
 
-const DiagnosticQuiz = ({ sessionId, questions, onComplete }) => {
+import React, { useState, useEffect } from 'react';
+
+const DiagnosticQuiz = ({ atomId, questions, onSubmitAnswer, onComplete }) => {
     const [currentIndex, setCurrentIndex] = useState(0);
     const [answers, setAnswers] = useState([]);
-    const timeStartRef = useRef(0);
-    const [selected, setSelected] = useState(null);
-    const [submitted, setSubmitted] = useState(false);
-
-    const { submitDiagnostic, loading } = useLearning();
+    const [startTime, setStartTime] = useState(Date.now());
+    const [showFeedback, setShowFeedback] = useState(false);
+    const [feedbackMessage, setFeedbackMessage] = useState('');
 
     useEffect(() => {
-        timeStartRef.current = Date.now();
+        setStartTime(Date.now());
     }, [currentIndex]);
 
-    const currentQuestion = questions[currentIndex];
+    const handleAnswer = async (selectedIndex) => {
+        const timeTaken = Math.floor((Date.now() - startTime) / 1000);
+        const currentQuestion = questions[currentIndex];
+        
+        // Submit answer
+        const result = await onSubmitAnswer(
+            currentQuestion.id,
+            selectedIndex,
+            timeTaken
+        );
 
-    const handleOptionSelect = (index) => {
-        if (!submitted) {
-            setSelected(index);
-        }
-    };
-
-    const handleSubmit = () => {
-        if (selected === null) return;
-
-        const timeTaken = (Date.now() - timeStartRef.current) / 1000; // in seconds
-
-        const answer = {
+        const isCorrect = result.success ? result.data.correct : false;
+        
+        // Store answer
+        const newAnswers = [...answers, {
             question_id: currentQuestion.id,
-            selected: selected,
+            selected: selectedIndex,
+            correct: isCorrect,
             time_taken: timeTaken
-        };
-
-        const newAnswers = [...answers, answer];
+        }];
+        
         setAnswers(newAnswers);
-        setSubmitted(true);
-
-        if (currentIndex < questions.length - 1) {
-            setTimeout(() => {
+        
+        // Show feedback
+        setFeedbackMessage(isCorrect ? '✅ Correct!' : '❌ Not quite. Keep learning!');
+        setShowFeedback(true);
+        
+        // Move to next question after delay
+        setTimeout(() => {
+            setShowFeedback(false);
+            
+            if (currentIndex < questions.length - 1) {
                 setCurrentIndex(currentIndex + 1);
-                setSelected(null);
-                setSubmitted(false);
-            }, 1000);
-        } else {
-            // All questions answered, submit diagnostic
-            submitDiagnostic(sessionId, newAnswers).then(result => {
-                if (result.success) {
-                    onComplete(result.data);
-                }
-            });
-        }
+            } else {
+                // All questions answered
+                onComplete({
+                    atom_id: atomId,
+                    answers: newAnswers,
+                    total_correct: newAnswers.filter(a => a.correct).length,
+                    total_questions: newAnswers.length
+                });
+            }
+        }, 1500);
     };
 
     if (!questions || questions.length === 0) {
         return (
             <div className="text-center py-12">
-                <p className="text-gray-600">No diagnostic questions available.</p>
+                <p className="text-gray-600">Loading diagnostic questions...</p>
             </div>
         );
     }
 
-    if (currentIndex >= questions.length) {
-        return (
-            <div className="text-center py-12">
-                <p className="text-lg">Analyzing your responses...</p>
-            </div>
-        );
-    }
-
-    const isLast = currentIndex === questions.length - 1;
+    const currentQuestion = questions[currentIndex];
+    const progress = ((currentIndex + 1) / questions.length) * 100;
 
     return (
-        <div className="max-w-3xl mx-auto">
-            <div className="mb-8">
-                <h2 className="text-2xl font-bold mb-2">Diagnostic Quiz</h2>
-                <p className="text-gray-600">
-                    Question {currentIndex + 1} of {questions.length}
-                </p>
-                <div className="w-full bg-gray-200 rounded-full h-2.5 mt-4">
+        <div className="max-w-3xl mx-auto p-6">
+            <div className="mb-6">
+                <div className="flex justify-between items-center mb-2">
+                    <span className="text-sm font-medium text-gray-700">
+                        Question {currentIndex + 1} of {questions.length}
+                    </span>
+                    <span className="text-sm font-medium text-blue-600">
+                        {Math.round(progress)}% Complete
+                    </span>
+                </div>
+                <div className="w-full bg-gray-200 rounded-full h-2.5">
                     <div
-                        className="bg-blue-600 h-2.5 rounded-full transition-all"
-                        style={{ width: `${((currentIndex + 1) / questions.length) * 100}%` }}
+                        className="bg-blue-600 h-2.5 rounded-full transition-all duration-300"
+                        style={{ width: `${progress}%` }}
                     ></div>
                 </div>
             </div>
 
             <div className="bg-white rounded-lg shadow-lg p-8">
-                <div className="mb-6">
-                    <span className={`inline-block px-3 py-1 rounded-full text-sm font-semibold ${
-                        currentQuestion.difficulty === 'easy' 
-                            ? 'bg-green-100 text-green-800'
-                            : 'bg-yellow-100 text-yellow-800'
+                <div className="mb-4 flex items-center justify-between">
+                    <span className={`px-3 py-1 rounded-full text-sm font-semibold ${
+                        currentQuestion.difficulty === 'easy' ? 'bg-green-100 text-green-800' :
+                        currentQuestion.difficulty === 'medium' ? 'bg-yellow-100 text-yellow-800' :
+                        'bg-red-100 text-red-800'
                     }`}>
-                        {currentQuestion.difficulty}
+                        {currentQuestion.difficulty?.charAt(0).toUpperCase() + currentQuestion.difficulty?.slice(1) || 'Medium'}
                     </span>
-                    <span className="ml-2 text-sm text-gray-500">
-                        ~{currentQuestion.estimated_time}s
+                    <span className="text-sm text-gray-500">
+                        ⏱️ {currentQuestion.estimated_time || 60}s
                     </span>
                 </div>
 
-                <h3 className="text-xl mb-6">{currentQuestion.question}</h3>
+                <p className="text-2xl mb-8">{currentQuestion.question}</p>
 
                 <div className="space-y-3">
-                    {currentQuestion.options.map((option, idx) => (
-                        <button
-                            key={idx}
-                            onClick={() => handleOptionSelect(idx)}
-                            disabled={submitted}
-                            className={`w-full text-left p-4 rounded-lg border transition ${
-                                selected === idx
-                                    ? 'border-blue-500 bg-blue-50'
-                                    : 'border-gray-200 hover:border-blue-300'
-                            } ${
-                                submitted && idx === currentQuestion.correct_index
-                                    ? 'bg-green-100 border-green-500'
-                                    : submitted && selected === idx && idx !== currentQuestion.correct_index
-                                    ? 'bg-red-100 border-red-500'
-                                    : ''
-                            }`}
-                        >
-                            <span className="font-medium mr-3">
-                                {String.fromCharCode(65 + idx)}.
-                            </span>
-                            {option}
-                        </button>
-                    ))}
+                    {currentQuestion.options?.map((option, idx) => {
+                        const isSelected = answers[currentIndex]?.selected === idx;
+                        
+                        let buttonClass = "w-full text-left p-4 rounded-lg border-2 transition ";
+                        
+                        if (showFeedback) {
+                            if (isSelected) {
+                                buttonClass += answers[currentIndex]?.correct 
+                                    ? "border-green-500 bg-green-50" 
+                                    : "border-red-500 bg-red-50";
+                            } else {
+                                buttonClass += "border-gray-200 opacity-50";
+                            }
+                        } else {
+                            buttonClass += "border-gray-200 hover:border-blue-500 hover:bg-blue-50";
+                        }
+                        
+                        return (
+                            <button
+                                key={idx}
+                                onClick={() => !showFeedback && handleAnswer(idx)}
+                                disabled={showFeedback}
+                                className={buttonClass}
+                            >
+                                <span className="font-medium mr-3">
+                                    {String.fromCharCode(65 + idx)}.
+                                </span>
+                                {option}
+                            </button>
+                        );
+                    })}
                 </div>
 
-                {submitted && (
-                    <div className={`mt-6 p-4 rounded-lg ${
-                        selected === currentQuestion.correct_index
-                            ? 'bg-green-100 text-green-800'
-                            : 'bg-red-100 text-red-800'
-                    }`}>
-                        {selected === currentQuestion.correct_index
-                            ? '✅ Correct!'
-                            : `❌ The correct answer is: ${
-                                currentQuestion.options[currentQuestion.correct_index]
-                              }`}
+                {showFeedback && (
+                    <div className="mt-6 p-4 bg-blue-50 rounded-lg text-center">
+                        <p className={`text-lg font-semibold ${
+                            feedbackMessage.includes('✅') ? 'text-green-600' : 'text-orange-600'
+                        }`}>
+                            {feedbackMessage}
+                        </p>
                     </div>
                 )}
+            </div>
 
-                {!submitted && (
-                    <button
-                        onClick={handleSubmit}
-                        disabled={selected === null}
-                        className="mt-6 w-full bg-blue-600 text-white py-3 rounded-lg font-semibold hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
-                    >
-                        Submit Answer
-                    </button>
-                )}
-
-                {submitted && !isLast && (
-                    <button
-                        onClick={() => {
-                            setCurrentIndex(currentIndex + 1);
-                            setSelected(null);
-                            setSubmitted(false);
-                        }}
-                        className="mt-6 w-full bg-gray-600 text-white py-3 rounded-lg font-semibold hover:bg-gray-700"
-                    >
-                        Next Question
-                    </button>
-                )}
-
-                {submitted && isLast && loading && (
-                    <div className="mt-6 text-center">
-                        <p className="text-gray-600">Processing results...</p>
-                    </div>
-                )}
+            <div className="mt-4 text-sm text-gray-500 text-center">
+                <p>💡 Take your time - understanding now prevents mistakes later!</p>
             </div>
         </div>
     );

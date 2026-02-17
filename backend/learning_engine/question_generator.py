@@ -1,3 +1,5 @@
+# backend/learning_engine/question_generator.py - Complete fixed version
+
 import json
 import os
 from typing import Dict, List, Optional
@@ -17,7 +19,7 @@ class QuestionGenerator:
         gemini_key = getattr(settings, 'GOOGLE_API_KEY', '')
         if gemini_key:
             genai.configure(api_key=gemini_key)
-            self.gemini_model = genai.GenerativeModel('gemini-2.5-flash')
+            self.gemini_model = genai.GenerativeModel('gemini-1.5-flash')
         else:
             self.gemini_model = None
     
@@ -33,7 +35,7 @@ class QuestionGenerator:
             List of atomic concept names
         """
         if not self.gemini_model:
-            # Fallback atoms if Gemini not available
+            print("Gemini model not available, using fallback atoms")
             return self._get_fallback_atoms(subject, concept)
         
         prompt = f"""
@@ -45,21 +47,19 @@ class QuestionGenerator:
         You must follow ALL rules strictly.
 
         STRICT RULES:
-
         1. Generate EXACTLY between 4 and 6 atoms.
         2. Each atom must be:
-        - A noun or noun phrase only.
-        - Maximum 4 words.
-        - No verbs.
-        - No full sentences.
+           - A noun or noun phrase only.
+           - Maximum 4 words.
+           - No verbs.
+           - No full sentences.
         3. All atoms must belong to the SAME abstraction level.
-        (Do NOT mix structure, mechanism, and abstraction.)
         4. Do NOT generate:
-        - Parent–child pairs
-        - General-to-specific relationships
-        - Negation pairs (pre/non, with/without, static/dynamic)
-        - Overlapping concepts
-        - Duplicates
+           - Parent–child pairs
+           - General-to-specific relationships
+           - Negation pairs (pre/non, with/without, static/dynamic)
+           - Overlapping concepts
+           - Duplicates
         5. Each atom must be independently assessable.
         6. Do NOT include the concept name itself.
         7. No explanations.
@@ -68,7 +68,6 @@ class QuestionGenerator:
         10. Output STRICT JSON only.
 
         Output format:
-
         {{
             "atoms": [
                 "Atom 1",
@@ -97,6 +96,7 @@ class QuestionGenerator:
             
             # Validate atom count
             if len(atoms) < 4 or len(atoms) > 6:
+                print(f"Invalid atom count: {len(atoms)}, using fallback")
                 return self._get_fallback_atoms(subject, concept)
             
             return atoms
@@ -106,9 +106,9 @@ class QuestionGenerator:
             return self._get_fallback_atoms(subject, concept)
     
     def generate_questions(self, subject: str, concept: str, atom: str,
-                          need_easy: int, need_medium: int) -> List[Dict]:
+                          need_easy: int, need_medium: int, knowledge_level: str = 'intermediate') -> List[Dict]:
         """
-        Generate questions for an atom using Groq
+        Generate questions for an atom based on knowledge level
         
         Args:
             subject: Subject name
@@ -116,14 +116,48 @@ class QuestionGenerator:
             atom: Atomic concept name
             need_easy: Number of easy questions needed
             need_medium: Number of medium questions needed
+            knowledge_level: Student's knowledge level (zero, beginner, intermediate, advanced)
         
         Returns:
             List of question dictionaries
         """
+        print(f"Generating questions for atom: {atom}, easy: {need_easy}, medium: {need_medium}, level: {knowledge_level}")
+        
         if not self.groq_client or (need_easy == 0 and need_medium == 0):
-            return self._get_fallback_questions(atom, need_easy, need_medium)
+            print("Groq client not available or no questions needed, using fallback")
+            return self._get_fallback_questions(atom, need_easy, need_medium, knowledge_level)
         
         total_needed = need_easy + need_medium
+        
+        # Adjust based on knowledge level
+        level_adjustments = {
+            'zero': {
+                'cognitive': ['recall'],
+                'time_factor': 1.5,
+                'complexity': 'very simple, foundational',
+                'hint_level': 'detailed'
+            },
+            'beginner': {
+                'cognitive': ['recall', 'apply'],
+                'time_factor': 1.2,
+                'complexity': 'straightforward',
+                'hint_level': 'clear'
+            },
+            'intermediate': {
+                'cognitive': ['recall', 'apply', 'analyze'],
+                'time_factor': 1.0,
+                'complexity': 'moderate',
+                'hint_level': 'moderate'
+            },
+            'advanced': {
+                'cognitive': ['apply', 'analyze'],
+                'time_factor': 0.8,
+                'complexity': 'challenging',
+                'hint_level': 'subtle'
+            }
+        }
+        
+        adj = level_adjustments.get(knowledge_level, level_adjustments['intermediate'])
         
         req_lines = []
         if need_easy:
@@ -137,63 +171,34 @@ class QuestionGenerator:
         Subject: {subject}
         Concept: {concept}
         Atomic Concept: {atom}
+        Student Level: {knowledge_level.upper()}
         
-        You MUST follow ALL rules strictly.
+        Generate EXACTLY {total_needed} questions with these characteristics:
+        - Complexity: {adj['complexity']}
+        - Cognitive levels: {', '.join(adj['cognitive'])}
+        - Hint level: {adj['hint_level']}
         
-        STRUCTURE RULES:
-        1. Generate EXACTLY {total_needed} MCQ questions.
-        2. Each question must assess ONLY the given Atomic Concept.
-        3. Each question must have EXACTLY 4 options.
-        4. EXACTLY 1 correct option per question.
-        5. Do NOT use:
-        - "All of the above"
-        - "None of the above"
-        - Multiple correct answers
-        - Tricky wording
-        6. No explanations.
-        7. No numbering.
-        8. No markdown.
-        9. Maximum 25 words per question text.
-        10. Create meaningful, clearly phrased questions using complete sentences.
-        11. Each question must be fully understandable independently.
-        12. Do NOT use vague references like:
-        - "this concept"
-        - "the above"
-        - "it"
-        - "this method"
-        13. The question must explicitly include the relevant domain term from the Atomic Concept.
-        14. Avoid ambiguous wording and incomplete fragments.
-        15. The question must make sense without any external context.
-        16. Each question must explicitly contain the name of the Atomic Concept within the question text.
-
-        DIFFICULTY REQUIREMENTS:
+        Question Distribution:
         {chr(10).join(req_lines)}
         - No hard questions
-
-        COGNITIVE DISTRIBUTION:
-        EASY (4 total):
-        - 2 recall
-        - 2 apply
-
-        MEDIUM (4 total):
-        - 2 apply
-        - 2 analyze
-
-        TIME CONSTRAINTS:
-        - recall → 20–40 seconds
-        - apply → 40–90 seconds
-        - analyze → 90–150 seconds
-
+        
+        Each question must:
+        - Have exactly 4 options
+        - Be clearly worded and self-contained
+        - Test understanding, not trickery
+        - Include the atomic concept explicitly
+        - Maximum 25 words per question text
+        
         Each question MUST include:
         - "difficulty": easy | medium
         - "cognitive_operation": recall | apply | analyze
-        - "estimated_time": integer (seconds)
+        - "estimated_time": integer (seconds) - recall: 20-40, apply: 40-90, analyze: 90-150
         - "question": string
         - "options": array of exactly 4 strings
-        - "correct_index": integer (0–3)
-
+        - "correct_index": integer (0-3)
+        
         OUTPUT STRICT JSON ONLY:
-
+        
         {{
             "questions": [
                 {{
@@ -211,7 +216,7 @@ class QuestionGenerator:
                 }}
             ]
         }}
-
+        
         If constraints cannot be satisfied, return:
         {{"questions": []}}
         """
@@ -232,11 +237,18 @@ class QuestionGenerator:
                     raw_text = raw_text[4:]
             
             result = json.loads(raw_text.strip())
-            return result.get("questions", [])
+            questions = result.get("questions", [])
+            
+            # Adjust estimated time based on knowledge level
+            for q in questions:
+                q['estimated_time'] = int(q.get('estimated_time', 60) * adj['time_factor'])
+            
+            print(f"Generated {len(questions)} questions")
+            return questions
             
         except Exception as e:
             print(f"Error generating questions: {e}")
-            return self._get_fallback_questions(atom, need_easy, need_medium)
+            return self._get_fallback_questions(atom, need_easy, need_medium, knowledge_level)
     
     def _get_fallback_atoms(self, subject: str, concept: str) -> List[str]:
         """Provide fallback atoms when AI generation fails"""
@@ -279,7 +291,7 @@ class QuestionGenerator:
             f"{concept} Limitations"
         ]
     
-    def _get_fallback_questions(self, atom: str, need_easy: int, need_medium: int) -> List[Dict]:
+    def _get_fallback_questions(self, atom: str, need_easy: int, need_medium: int, level: str = 'intermediate') -> List[Dict]:
         """Provide fallback questions when AI generation fails"""
         questions = []
         
@@ -289,7 +301,7 @@ class QuestionGenerator:
                 "difficulty": "easy",
                 "cognitive_operation": "recall",
                 "estimated_time": 30,
-                "question": f"What is the primary function of {atom}?",
+                "question": f"What is the primary purpose of {atom}?",
                 "options": [
                     f"To manage {atom} operations",
                     "To store data permanently",
@@ -305,12 +317,12 @@ class QuestionGenerator:
                 "difficulty": "medium",
                 "cognitive_operation": "apply",
                 "estimated_time": 60,
-                "question": f"In a computer system, how does {atom} affect performance?",
+                "question": f"Which scenario best demonstrates the application of {atom}?",
                 "options": [
-                    f"By optimizing {atom} access",
-                    "By increasing clock speed",
-                    "By reducing power consumption",
-                    "By adding more cores"
+                    f"When implementing {atom} in a real system",
+                    "During basic operations",
+                    "In simple calculations",
+                    "At the start of processing"
                 ],
                 "correct_index": 0
             })
@@ -328,8 +340,11 @@ class QuestionGenerator:
         Returns:
             Dictionary with atoms and questions
         """
+        print(f"Generating complete concept for {subject} - {concept}")
+        
         # Generate atoms
         atoms = self.generate_atoms(subject, concept)
+        print(f"Generated {len(atoms)} atoms: {atoms}")
         
         result = {
             "concept": concept,
@@ -339,11 +354,22 @@ class QuestionGenerator:
         
         # Generate questions for each atom
         for atom in atoms:
+            print(f"Generating questions for atom: {atom}")
             # Generate 2 easy and 2 medium questions per atom
-            questions = self.generate_questions(subject, concept, atom, 2, 2)
+            questions = self.generate_questions(
+                subject=subject,
+                concept=concept,
+                atom=atom,
+                need_easy=2,
+                need_medium=2,
+                knowledge_level='intermediate'  # Default level
+            )
+            
             result["atoms"][atom] = {
                 "name": atom,
                 "questions": questions
             }
+            
+            print(f"Generated {len(questions)} questions for {atom}")
         
         return result

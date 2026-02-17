@@ -107,76 +107,7 @@ class ConceptListView(APIView):
         serializer = ConceptSerializer(concepts, many=True)
         return Response(serializer.data)
 
-class StartLearningSessionView(APIView):
-    permission_classes = [permissions.IsAuthenticated]
-    
-    def post(self, request):
-        concept_id = request.data.get('concept_id')
-        
-        try:
-            concept = Concept.objects.get(
-                Q(id=concept_id) & (Q(created_by__isnull=True) | Q(created_by=request.user))
-            )
-            
-            # Create learning session
-            session = LearningSession.objects.create(
-                user=request.user,
-                concept=concept
-            )
-            
-            # Initialize progress for all atoms in this concept
-            atoms = TeachingAtom.objects.filter(concept=concept)
-            for atom in atoms:
-                StudentProgress.objects.get_or_create(
-                    user=request.user,
-                    atom=atom,
-                    defaults={'phase': 'diagnostic'}
-                )
-            
-            # Diagnostic: 1 easy + 1 medium random question per atom
-            import random
 
-            def pick_random_question(atom_obj, difficulty, exclude_ids=None):
-                exclude_ids = exclude_ids or []
-                qs = Question.objects.filter(atom=atom_obj, difficulty=difficulty).exclude(id__in=exclude_ids)
-                ids = list(qs.values_list('id', flat=True))
-                if not ids:
-                    return None
-                return Question.objects.get(id=random.choice(ids))
-
-            diagnostic_questions = []
-            for atom in atoms:
-                picked_ids = []
-
-                easy_q = pick_random_question(atom, 'easy')
-                if easy_q is not None:
-                    picked_ids.append(easy_q.id)
-                    q_dict = easy_q.to_dict()
-                    q_dict['atom_id'] = atom.id
-                    q_dict['atom_name'] = atom.name
-                    diagnostic_questions.append(q_dict)
-
-                medium_q = pick_random_question(atom, 'medium', exclude_ids=picked_ids)
-                if medium_q is None:
-                    # Fallback if no medium exists
-                    medium_q = pick_random_question(atom, 'easy', exclude_ids=picked_ids)
-                if medium_q is not None:
-                    q_dict = medium_q.to_dict()
-                    q_dict['atom_id'] = atom.id
-                    q_dict['atom_name'] = atom.name
-                    diagnostic_questions.append(q_dict)
-
-            random.shuffle(diagnostic_questions)
-            
-            return Response({
-                'session_id': session.id,
-                'diagnostic_questions': diagnostic_questions,
-                'total_atoms': atoms.count(),
-                'total_diagnostic_questions': len(diagnostic_questions)
-            })
-            
-        except Concept.DoesNotExist:
-            return Response({'error': 'Concept not found'}, status=404)
 
 class SubmitDiagnosticView(APIView):
     permission_classes = [permissions.IsAuthenticated]
@@ -544,6 +475,12 @@ class GetLearningProgressView(APIView):
         
         
 from learning_engine.question_generator import QuestionGenerator
+import logging
+import traceback
+
+logger = logging.getLogger(__name__)
+
+# backend/accounts/views.py - Update GenerateConceptView
 
 class GenerateConceptView(APIView):
     """Generate atoms and questions for a concept"""
@@ -552,13 +489,18 @@ class GenerateConceptView(APIView):
     def post(self, request):
         subject = request.data.get('subject')
         concept = request.data.get('concept')
+        knowledge_level = request.data.get('knowledge_level', 'intermediate')
 
+        print(f"GenerateConceptView called by user {request.user.username}")
+        print(f"Subject: {subject}, Concept: {concept}, Level: {knowledge_level}")
+        
         if isinstance(subject, str):
             subject = subject.strip()
         if isinstance(concept, str):
             concept = concept.strip()
         
         if not subject or not concept:
+            print("Missing subject or concept")
             return Response(
                 {'error': 'Please provide both subject and concept'},
                 status=status.HTTP_400_BAD_REQUEST
@@ -568,51 +510,91 @@ class GenerateConceptView(APIView):
             # Check DB first to avoid regenerating the same concept.
             from accounts.models import Concept, TeachingAtom, Question
 
+            print("Checking for existing concept in database")
+            
+            # Check for existing concept (either global or user-created)
             existing = (
                 Concept.objects.filter(
                     name=concept,
                     subject=subject,
-                    created_by__in=[request.user, None],
                 )
-                .order_by('-created_by')  # user-owned preferred over global
+                .filter(Q(created_by__isnull=True) | Q(created_by=request.user))
+                .order_by('-created_by')
                 .first()
             )
 
             if existing is not None:
+                print(f"Found existing concept with ID: {existing.id}")
                 existing_atoms = list(
                     TeachingAtom.objects.filter(concept=existing)
                     .order_by('order', 'id')
                     .values_list('name', flat=True)
                 )
                 if existing_atoms:
+                    print(f"Found {len(existing_atoms)} existing atoms")
                     return Response({
                         'success': True,
                         'concept_id': existing.id,
                         'atoms': existing_atoms,
                         'cached': True,
                     })
+                else:
+                    print("Existing concept has no atoms, will generate new ones")
 
             # Not found (or empty) -> generate now.
+            print("No existing concept found, generating new one")
+            
+            # Import here to avoid circular imports
+            from learning_engine.question_generator import QuestionGenerator
+            
             generator = QuestionGenerator()
+            
+            # Check if API keys are configured
+            if not generator.groq_client and not generator.gemini_model:
+                print("No AI clients available - missing API keys")
+                return Response({
+                    'error': 'AI services not configured. Please check API keys.',
+                    'details': 'Missing GROQ_API_KEY or GOOGLE_API_KEY in settings'
+                }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+            
+            print("Calling generate_complete_concept")
             result = generator.generate_complete_concept(subject, concept)
             
+            if not result or 'atoms' not in result:
+                print(f"generate_complete_concept returned invalid result: {result}")
+                return Response({
+                    'error': 'Failed to generate concept content',
+                    'details': 'AI generation returned empty result'
+                }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+            
+            print(f"Generated {len(result.get('atoms', {}))} atoms")
+            
             # Create or get concept (always save as user-owned for new generations)
-            concept_obj, _created = Concept.objects.get_or_create(
+            concept_obj, created = Concept.objects.get_or_create(
                 name=concept,
                 subject=subject,
                 created_by=request.user,
                 defaults={'difficulty': 'medium'}
             )
             
+            print(f"Concept {'created' if created else 'already exists'} with ID: {concept_obj.id}")
+            
             # Save atoms and questions
+            atoms_saved = 0
+            questions_saved = 0
+            
             for atom_name, atom_data in result['atoms'].items():
-                atom_obj, _ = TeachingAtom.objects.get_or_create(
+                print(f"Saving atom: {atom_name}")
+                atom_obj, atom_created = TeachingAtom.objects.get_or_create(
                     name=atom_name,
                     concept=concept_obj
                 )
                 
+                if atom_created:
+                    atoms_saved += 1
+                
                 for q_data in atom_data['questions']:
-                    Question.objects.get_or_create(
+                    question, q_created = Question.objects.get_or_create(
                         atom=atom_obj,
                         question_text=q_data['question'],
                         defaults={
@@ -623,14 +605,25 @@ class GenerateConceptView(APIView):
                             'correct_index': q_data['correct_index']
                         }
                     )
+                    if q_created:
+                        questions_saved += 1
+            
+            print(f"Saved {atoms_saved} new atoms and {questions_saved} new questions")
             
             return Response({
                 'success': True,
                 'concept_id': concept_obj.id,
-                'atoms': list(result['atoms'].keys())
+                'atoms': list(result['atoms'].keys()),
+                'stats': {
+                    'atoms_created': atoms_saved,
+                    'questions_created': questions_saved
+                }
             })
             
         except Exception as e:
+            print(f"Error in GenerateConceptView: {str(e)}")
+            import traceback
+            traceback.print_exc()
             return Response(
                 {'error': str(e)},
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR
@@ -659,3 +652,363 @@ class GetAtomsView(APIView):
                 {'error': 'Concept not found'},
                 status=status.HTTP_404_NOT_FOUND
             )
+            
+            
+# backend/accounts/views.py - Add to existing views
+
+
+
+
+class GetTeachingContentView(APIView):
+    permission_classes = [permissions.IsAuthenticated]
+    
+    def get(self, request, atom_id):
+        try:
+            atom = TeachingAtom.objects.select_related('concept').get(
+                Q(id=atom_id)
+                & (Q(concept__created_by__isnull=True) | Q(concept__created_by=request.user))
+            )
+            
+            # Get the current session to know knowledge level
+            session = LearningSession.objects.filter(
+                user=request.user,
+                concept=atom.concept
+            ).order_by('-start_time').first()
+            
+            knowledge_level = session.knowledge_level if session else 'intermediate'
+            
+            # Generate teaching content if needed
+            if not atom.explanation:
+                engine = AdaptiveLearningEngine()
+                content = engine.generate_teaching_content(
+                    atom.name, 
+                    atom.concept.subject, 
+                    atom.concept.name,
+                    knowledge_level
+                )
+                
+                atom.explanation = content.get('explanation', '')
+                atom.analogy = content.get('analogy', '')
+                atom.examples = [
+                    content.get('example', ''),
+                    content.get('practical_application', ''),
+                    content.get('misconception', '')
+                ]
+                atom.save()
+            
+            return Response({
+                'id': atom.id,
+                'name': atom.name,
+                'explanation': atom.explanation,
+                'analogy': atom.analogy,
+                'examples': atom.examples,
+                'knowledge_level': knowledge_level,
+                'progress_hint': self._get_progress_hint(atom, request.user)
+            })
+            
+        except TeachingAtom.DoesNotExist:
+            return Response({'error': 'Atom not found'}, status=404)
+    
+    def _get_progress_hint(self, atom, user):
+        """Get personalized progress hint"""
+        try:
+            progress = StudentProgress.objects.get(user=user, atom=atom)
+            if progress.streak > 0:
+                return f"You're on a {progress.streak}-question streak! Keep going!"
+            elif progress.hint_usage > 2:
+                return "Don't worry if you need hints - that's how we learn!"
+            else:
+                return None
+        except:
+            return None
+        
+        
+
+
+class StartLearningSessionView(APIView):
+    permission_classes = [permissions.IsAuthenticated]
+    
+    def post(self, request):
+        concept_id = request.data.get('concept_id')
+        knowledge_level = request.data.get('knowledge_level', 'intermediate')
+        
+        try:
+            concept = Concept.objects.get(
+                Q(id=concept_id) & (Q(created_by__isnull=True) | Q(created_by=request.user))
+            )
+            
+            # Check for existing incomplete session
+            existing_session = LearningSession.objects.filter(
+                user=request.user,
+                concept=concept,
+                end_time__isnull=True
+            ).first()
+            
+            if existing_session:
+                # Resume existing session
+                session = existing_session
+            else:
+                # Create new learning session with knowledge level
+                session = LearningSession.objects.create(
+                    user=request.user,
+                    concept=concept,
+                    knowledge_level=knowledge_level
+                )
+            
+            # Get all atoms for this concept
+            atoms = TeachingAtom.objects.filter(concept=concept).order_by('order', 'id')
+            
+            # Get or create progress for each atom
+            atoms_list = []
+            for atom in atoms:
+                progress, created = StudentProgress.objects.get_or_create(
+                    user=request.user,
+                    atom=atom,
+                    defaults={
+                        'phase': 'teaching',  # Start with teaching phase
+                        'mastery_score': 0.3
+                    }
+                )
+                
+                atoms_list.append({
+                    'id': atom.id,
+                    'name': atom.name,
+                    'phase': progress.phase,
+                    'mastery_score': progress.mastery_score
+                })
+            
+            # Determine starting atom (first incomplete one)
+            current_atom = None
+            for atom_data in atoms_list:
+                if atom_data['phase'] != 'complete':
+                    current_atom = atom_data
+                    break
+            
+            return Response({
+                'success': True,
+                'session_id': session.id,
+                'knowledge_level': knowledge_level,
+                'atoms': atoms_list,
+                'current_atom': current_atom,
+                'total_atoms': len(atoms_list),
+                'message': f"Let's start learning {concept.name}! We'll teach you first, then check your understanding."
+            })
+            
+        except Concept.DoesNotExist:
+            return Response({'error': 'Concept not found'}, status=404)
+
+
+class MarkAtomTaughtView(APIView):
+    """Mark that user has viewed/learned the teaching content"""
+    permission_classes = [permissions.IsAuthenticated]
+    
+    def post(self, request):
+        atom_id = request.data.get('atom_id')
+        time_spent = request.data.get('time_spent', 0)
+        
+        try:
+            atom = TeachingAtom.objects.get(id=atom_id)
+            progress = StudentProgress.objects.get(user=request.user, atom=atom)
+            
+            # If in teaching phase, move to diagnostic
+            if progress.phase == 'teaching':
+                progress.phase = 'diagnostic'
+                progress.save()
+            
+            # Update session with time spent
+            session = LearningSession.objects.filter(
+                user=request.user,
+                concept=atom.concept,
+                end_time__isnull=True
+            ).first()
+            
+            if session:
+                session.session_data['time_spent_teaching'] = session.session_data.get('time_spent_teaching', 0) + time_spent
+                session.save()
+            
+            return Response({
+                'success': True,
+                'phase': progress.phase,
+                'message': 'Ready for diagnostic questions!'
+            })
+            
+        except (TeachingAtom.DoesNotExist, StudentProgress.DoesNotExist):
+            return Response({'error': 'Progress not found'}, status=404)
+
+
+class GetDiagnosticQuestionsView(APIView):
+    """Get diagnostic questions for an atom after teaching"""
+    permission_classes = [permissions.IsAuthenticated]
+    
+    def get(self, request, atom_id):
+        try:
+            atom = TeachingAtom.objects.get(id=atom_id)
+            progress = StudentProgress.objects.get(user=request.user, atom=atom)
+            
+            # Ensure we're in diagnostic phase
+            if progress.phase != 'diagnostic':
+                return Response({
+                    'error': 'Not in diagnostic phase',
+                    'current_phase': progress.phase
+                }, status=400)
+            
+            # Get questions based on knowledge level
+            session = LearningSession.objects.filter(
+                user=request.user,
+                concept=atom.concept,
+                end_time__isnull=True
+            ).first()
+            
+            knowledge_level = session.knowledge_level if session else 'intermediate'
+            
+            # Determine number of questions based on knowledge level
+            question_counts = {
+                'zero': {'easy': 2, 'medium': 1},
+                'beginner': {'easy': 2, 'medium': 1},
+                'intermediate': {'easy': 1, 'medium': 2},
+                'advanced': {'easy': 1, 'medium': 2}
+            }
+            
+            counts = question_counts.get(knowledge_level, question_counts['intermediate'])
+            
+            # Get random questions
+            import random
+            
+            easy_questions = list(Question.objects.filter(atom=atom, difficulty='easy'))
+            medium_questions = list(Question.objects.filter(atom=atom, difficulty='medium'))
+            
+            selected_questions = []
+            
+            # Select easy questions
+            if counts['easy'] > 0 and easy_questions:
+                selected = random.sample(easy_questions, min(counts['easy'], len(easy_questions)))
+                selected_questions.extend(selected)
+            
+            # Select medium questions
+            if counts['medium'] > 0 and medium_questions:
+                selected = random.sample(medium_questions, min(counts['medium'], len(medium_questions)))
+                selected_questions.extend(selected)
+            
+            # If not enough questions, duplicate some
+            while len(selected_questions) < (counts['easy'] + counts['medium']):
+                if easy_questions:
+                    selected_questions.append(random.choice(easy_questions))
+                elif medium_questions:
+                    selected_questions.append(random.choice(medium_questions))
+            
+            random.shuffle(selected_questions)
+            
+            # Format questions (remove correct_index for client)
+            questions_data = []
+            for q in selected_questions:
+                q_dict = q.to_dict()
+                # Store correct_index for backend validation but don't send to frontend
+                q_dict['correct_index'] = q.correct_index  # We'll need this for validation
+                questions_data.append(q_dict)
+            
+            return Response({
+                'success': True,
+                'atom_id': atom.id,
+                'atom_name': atom.name,
+                'questions': questions_data,
+                'total_questions': len(questions_data),
+                'knowledge_level': knowledge_level
+            })
+            
+        except TeachingAtom.DoesNotExist:
+            return Response({'error': 'Atom not found'}, status=404)
+        except StudentProgress.DoesNotExist:
+            return Response({'error': 'Progress not found'}, status=404)
+
+
+class SubmitDiagnosticAnswerView(APIView):
+    """Submit answer for diagnostic question"""
+    permission_classes = [permissions.IsAuthenticated]
+    
+    def post(self, request):
+        question_id = request.data.get('question_id')
+        selected = request.data.get('selected')
+        time_taken = request.data.get('time_taken', 30)
+        
+        try:
+            question = Question.objects.select_related('atom').get(id=question_id)
+            correct = (selected == question.correct_index)
+            
+            # Get progress
+            progress, _ = StudentProgress.objects.get_or_create(
+                user=request.user,
+                atom=question.atom
+            )
+            
+            # Update error history
+            error_history = progress.error_history or []
+            if not correct:
+                error_history.append({
+                    'question_id': question_id,
+                    'time_taken': time_taken,
+                    'difficulty': question.difficulty
+                })
+                progress.error_history = error_history[-5:]
+            
+            progress.times_practiced += 1
+            progress.save()
+            
+            return Response({
+                'success': True,
+                'correct': correct,
+                'mastery_score': progress.mastery_score
+            })
+            
+        except Question.DoesNotExist:
+            return Response({'error': 'Question not found'}, status=404)
+
+
+class CompleteDiagnosticView(APIView):
+    """Complete diagnostic for an atom and determine next steps"""
+    permission_classes = [permissions.IsAuthenticated]
+    
+    def post(self, request):
+        atom_id = request.data.get('atom_id')
+        answers = request.data.get('answers', [])
+        
+        try:
+            atom = TeachingAtom.objects.get(id=atom_id)
+            progress = StudentProgress.objects.get(user=request.user, atom=atom)
+            
+            # Calculate results
+            correct_count = sum(1 for a in answers if a.get('correct', False))
+            total_count = len(answers)
+            accuracy = correct_count / total_count if total_count > 0 else 0
+            
+            # Update mastery score based on performance
+            from learning_engine.knowledge_tracing import bkt_update
+            
+            # Update mastery for each question
+            for answer in answers:
+                new_mastery = bkt_update(
+                    progress.mastery_score,
+                    answer.get('correct', False)
+                )
+                progress.mastery_score = new_mastery
+            
+            # Determine next phase
+            if accuracy >= 0.7 and progress.mastery_score >= 0.6:
+                progress.phase = 'complete'
+                progress.retention_verified = True
+                message = "Great job! You've mastered this concept!"
+            else:
+                progress.phase = 'reinforcement'
+                message = "Let's do some practice to strengthen your understanding."
+            
+            progress.save()
+            
+            return Response({
+                'success': True,
+                'accuracy': accuracy,
+                'mastery_score': progress.mastery_score,
+                'next_phase': progress.phase,
+                'message': message
+            })
+            
+        except (TeachingAtom.DoesNotExist, StudentProgress.DoesNotExist):
+            return Response({'error': 'Progress not found'}, status=404)

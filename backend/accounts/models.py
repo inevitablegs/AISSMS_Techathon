@@ -111,6 +111,15 @@ class StudentProgress(models.Model):
     class Meta:
         unique_together = ['user', 'atom']
 
+
+    
+class KnowledgeLevel(models.TextChoices):
+    ZERO = 'zero', 'Zero Knowledge'
+    BEGINNER = 'beginner', 'Beginner'
+    INTERMEDIATE = 'intermediate', 'Intermediate'
+    ADVANCED = 'advanced', 'Advanced'
+
+
 class LearningSession(models.Model):
     """Track learning sessions"""
     user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='learning_sessions')
@@ -121,3 +130,13 @@ class LearningSession(models.Model):
     correct_answers = models.IntegerField(default=0)
     hints_used = models.IntegerField(default=0)
     session_data = models.JSONField(default=dict)
+    knowledge_level = models.CharField(
+        max_length=20,
+        choices=KnowledgeLevel.choices,
+        default=KnowledgeLevel.ZERO
+    )
+    user_feedback = models.JSONField(default=dict)  
+    
+
+
+
