@@ -20,6 +20,8 @@ const StartAnyConceptSession = () => {
 
     const [step, setStep] = useState('form'); // form, diagnostic, teaching, practice, mastery, progress
     const [currentAtomId, setCurrentAtomId] = useState(null);
+    const [atomSequence, setAtomSequence] = useState([]);
+    const [atomIndex, setAtomIndex] = useState(0);
 
     const handleStart = async (e) => {
         e.preventDefault();
@@ -61,17 +63,23 @@ const StartAnyConceptSession = () => {
     };
 
     const handleDiagnosticComplete = (results) => {
-        const nextAtom = results?.next_atom;
-        if (nextAtom) {
-            setCurrentAtomId(nextAtom);
-            setStep('teaching');
+        const seq = Array.isArray(results?.atom_sequence) ? results.atom_sequence : [];
+        const fallback = results?.next_atom ? [results.next_atom] : [];
+        const finalSeq = seq.length ? seq : fallback;
+
+        if (!finalSeq.length) {
+            setCurrentAtomId(null);
+            setAtomSequence([]);
+            setAtomIndex(0);
+            setStep('progress');
+            loadLearningProgress();
             return;
         }
 
-        // No weak atoms identified; show progress instead of requesting teaching/null.
-        setCurrentAtomId(null);
-        setStep('progress');
-        loadLearningProgress();
+        setAtomSequence(finalSeq);
+        setAtomIndex(0);
+        setCurrentAtomId(finalSeq[0]);
+        setStep('teaching');
     };
 
     const handleTeachingComplete = (atomId) => {
@@ -87,7 +95,20 @@ const StartAnyConceptSession = () => {
         }
     };
 
-    const handleMasteryComplete = () => {
+    const handleMasteryComplete = (passed) => {
+        if (!passed) {
+            setStep('practice');
+            return;
+        }
+
+        const nextIndex = atomIndex + 1;
+        if (nextIndex < atomSequence.length) {
+            setAtomIndex(nextIndex);
+            setCurrentAtomId(atomSequence[nextIndex]);
+            setStep('teaching');
+            return;
+        }
+
         setStep('progress');
         loadLearningProgress();
     };

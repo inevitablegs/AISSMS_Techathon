@@ -133,25 +133,46 @@ class StartLearningSessionView(APIView):
                     defaults={'phase': 'diagnostic'}
                 )
             
-            # Get diagnostic questions
+            # Diagnostic: 1 easy + 1 medium random question per atom
+            import random
+
+            def pick_random_question(atom_obj, difficulty, exclude_ids=None):
+                exclude_ids = exclude_ids or []
+                qs = Question.objects.filter(atom=atom_obj, difficulty=difficulty).exclude(id__in=exclude_ids)
+                ids = list(qs.values_list('id', flat=True))
+                if not ids:
+                    return None
+                return Question.objects.get(id=random.choice(ids))
+
             diagnostic_questions = []
             for atom in atoms:
-                questions = Question.objects.filter(atom=atom, difficulty='easy')[:2]
-                for q in questions:
-                    q_dict = q.to_dict()
+                picked_ids = []
+
+                easy_q = pick_random_question(atom, 'easy')
+                if easy_q is not None:
+                    picked_ids.append(easy_q.id)
+                    q_dict = easy_q.to_dict()
                     q_dict['atom_id'] = atom.id
                     q_dict['atom_name'] = atom.name
                     diagnostic_questions.append(q_dict)
-            
-            # Shuffle and limit
-            import random
+
+                medium_q = pick_random_question(atom, 'medium', exclude_ids=picked_ids)
+                if medium_q is None:
+                    # Fallback if no medium exists
+                    medium_q = pick_random_question(atom, 'easy', exclude_ids=picked_ids)
+                if medium_q is not None:
+                    q_dict = medium_q.to_dict()
+                    q_dict['atom_id'] = atom.id
+                    q_dict['atom_name'] = atom.name
+                    diagnostic_questions.append(q_dict)
+
             random.shuffle(diagnostic_questions)
-            diagnostic_questions = diagnostic_questions[:4]  # Max 4 diagnostic questions
             
             return Response({
                 'session_id': session.id,
                 'diagnostic_questions': diagnostic_questions,
-                'total_atoms': atoms.count()
+                'total_atoms': atoms.count(),
+                'total_diagnostic_questions': len(diagnostic_questions)
             })
             
         except Concept.DoesNotExist:
@@ -219,21 +240,30 @@ class SubmitDiagnosticView(APIView):
             
             # Identify weak atoms
             accuracy = results['correct'] / results['total'] if results['total'] > 0 else 0
-            
-            for atom_id, stats in results['by_atom'].items():
-                if stats['total'] > 0 and stats['correct'] / stats['total'] < 0.5:
-                    results['weak_atoms'].append(atom_id)
-                    
-                    # Update phase for weak atoms
-                    try:
-                        progress = StudentProgress.objects.get(
-                            user=request.user,
-                            atom_id=atom_id
-                        )
-                        progress.phase = 'teaching'
-                        progress.save()
-                    except StudentProgress.DoesNotExist:
-                        pass
+
+            # Build weak->strong sequence across ALL atoms in this concept
+            concept_atom_ids = list(
+                TeachingAtom.objects.filter(concept=session.concept).values_list('id', flat=True)
+            )
+
+            atom_accuracy = {}
+            for atom_id in concept_atom_ids:
+                stats = results['by_atom'].get(atom_id, {'correct': 0, 'total': 0})
+                if stats['total'] > 0:
+                    atom_accuracy[atom_id] = stats['correct'] / stats['total']
+                else:
+                    atom_accuracy[atom_id] = 0
+
+            weak_threshold = 0.5
+            results['weak_atoms'] = [aid for aid in concept_atom_ids if atom_accuracy.get(aid, 0) < weak_threshold]
+
+            atom_sequence = sorted(
+                concept_atom_ids,
+                key=lambda aid: (atom_accuracy.get(aid, 0), aid)
+            )
+
+            # Move all atoms into teaching phase (we'll traverse weak->strong)
+            StudentProgress.objects.filter(user=request.user, atom_id__in=concept_atom_ids).update(phase='teaching')
             
             # Update session stats
             session.questions_answered = results['total']
@@ -253,7 +283,9 @@ class SubmitDiagnosticView(APIView):
                 'accuracy': accuracy,
                 'weak_atoms': results['weak_atoms'],
                 'pacing': pacing,
-                'next_atom': results['weak_atoms'][0] if results['weak_atoms'] else None
+                'next_atom': atom_sequence[0] if atom_sequence else None,
+                'atom_sequence': atom_sequence,
+                'atom_accuracy': atom_accuracy
             })
             
         except LearningSession.DoesNotExist:
@@ -520,6 +552,11 @@ class GenerateConceptView(APIView):
     def post(self, request):
         subject = request.data.get('subject')
         concept = request.data.get('concept')
+
+        if isinstance(subject, str):
+            subject = subject.strip()
+        if isinstance(concept, str):
+            concept = concept.strip()
         
         if not subject or not concept:
             return Response(
@@ -528,14 +565,39 @@ class GenerateConceptView(APIView):
             )
         
         try:
+            # Check DB first to avoid regenerating the same concept.
+            from accounts.models import Concept, TeachingAtom, Question
+
+            existing = (
+                Concept.objects.filter(
+                    name=concept,
+                    subject=subject,
+                    created_by__in=[request.user, None],
+                )
+                .order_by('-created_by')  # user-owned preferred over global
+                .first()
+            )
+
+            if existing is not None:
+                existing_atoms = list(
+                    TeachingAtom.objects.filter(concept=existing)
+                    .order_by('order', 'id')
+                    .values_list('name', flat=True)
+                )
+                if existing_atoms:
+                    return Response({
+                        'success': True,
+                        'concept_id': existing.id,
+                        'atoms': existing_atoms,
+                        'cached': True,
+                    })
+
+            # Not found (or empty) -> generate now.
             generator = QuestionGenerator()
             result = generator.generate_complete_concept(subject, concept)
             
-            # Save to database
-            from accounts.models import Concept, TeachingAtom, Question
-            
-            # Create or get concept
-            concept_obj, created = Concept.objects.get_or_create(
+            # Create or get concept (always save as user-owned for new generations)
+            concept_obj, _created = Concept.objects.get_or_create(
                 name=concept,
                 subject=subject,
                 created_by=request.user,

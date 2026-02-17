@@ -23,6 +23,10 @@ const MasteryCheck = ({ atomId, onComplete }) => {
     }, [atomId, getPracticeQuestions]);
 
     useEffect(() => {
+        setQuestions([]);
+        setCurrentIndex(0);
+        setAnswers([]);
+        setShowResults(false);
         loadMasteryQuestions();
     }, [loadMasteryQuestions]);
 
