@@ -429,14 +429,25 @@ class GenerateQuestionsFromTeachingView(APIView):
         return config
     
     def _adjust_time_for_pacing(self, base_time, pacing):
-        """Adjust allowed time based on pacing"""
+        """
+        Adjust estimated time based on pacing decision
+        """
+        # Extract pacing value if it's a dictionary
+        if isinstance(pacing, dict):
+            pacing_value = pacing.get('pacing', 'stay')
+        else:
+            pacing_value = pacing
+        
         multipliers = {
-            'sharp_slowdown': 1.5,  # More time
-            'slow_down': 1.2,        # Extra time
-            'stay': 1.0,              # Normal time
-            'speed_up': 0.8           # Less time (challenge)
+            'sharp_slowdown': 2.0,  # 2x time for struggling students
+            'slow_down': 1.5,        # 1.5x time
+            'stay': 1.0,             # normal time
+            'speed_up': 0.7,          # 30% less time for quick learners
+            'advance': 0.5,           # 50% less time
+            'reinforce': 1.8,          # extra time for reinforcement
         }
-        return int(base_time * multipliers.get(pacing, 1.0))
+        
+        return int(base_time * multipliers.get(pacing_value, 1.0))
 
 
 class SubmitAtomAnswerView(APIView):
