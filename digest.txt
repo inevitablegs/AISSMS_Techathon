@@ -18,6 +18,7 @@ Directory structure:
     │   │       ├── 0001_initial.py
     │   │       ├── 0002_concept_created_by.py
     │   │       ├── 0003_learningsession_knowledge_level_and_more.py
+    │   │       ├── 0004_add_error_history_default.py
     │   │       └── __init__.py
     │   ├── core/
     │   │   ├── __init__.py
@@ -30,6 +31,7 @@ Directory structure:
     │       ├── adaptive_flow.py
     │       ├── knowledge_tracing.py
     │       ├── models.py
+    │       ├── pacing_engine.py
     │       ├── question_generator.py
     │       └── utils.py
     └── frontend/
@@ -55,6 +57,7 @@ Directory structure:
             │   └── Learning/
             │       ├── AtomComplete.jsx
             │       ├── AtomList.jsx
+            │       ├── AtomReview.jsx
             │       ├── LearningProgress.jsx
             │       ├── LearningRoute.jsx
             │       ├── QuestionsFromTeaching.jsx
@@ -529,17 +532,13 @@ from .views import (
     # Auth views
     RegisterView, LoginView, DashboardView,
     
-    # Core learning views (keep these)
-    ConceptListView, GetTeachingContentView, GetPracticeQuestionsView,
-    SubmitPracticeAnswerView, GetHintView, GetLearningProgressView,
+    # Concept management
+    ConceptListView, GenerateConceptView,
     
-    # Concept generation
-    GenerateConceptView, GetAtomsView,
-    
-    # NEW TEACHING-FIRST FLOW VIEWS (keep these)
-    StartTeachingFirstSessionView, GetAtomListView, 
-    GenerateQuestionsFromTeachingView, SubmitAtomQuestionAnswerView, 
-    CompleteAtomView
+    # Teaching-first flow views
+    StartTeachingSessionView, GetTeachingContentView,
+    GenerateQuestionsFromTeachingView, SubmitAtomAnswerView,
+    CompleteAtomView, GetLearningProgressView
 )
 
 urlpatterns = [
@@ -548,31 +547,26 @@ urlpatterns = [
     path('api/login/', LoginView.as_view(), name='login'),
     path('api/dashboard/', DashboardView.as_view(), name='dashboard'),
     
-    # Core learning endpoints
+    # Concept management
     path('api/concepts/', ConceptListView.as_view(), name='concepts'),
-    path('api/teaching/<int:atom_id>/', GetTeachingContentView.as_view(), name='teaching_content'),
-    path('api/practice/<int:atom_id>/', GetPracticeQuestionsView.as_view(), name='practice_questions'),
-    path('api/submit-answer/', SubmitPracticeAnswerView.as_view(), name='submit_answer'),
-    path('api/get-hint/', GetHintView.as_view(), name='get_hint'),
-    path('api/progress/', GetLearningProgressView.as_view(), name='learning_progress'),
-    
-    # Concept generation
     path('api/generate-concept/', GenerateConceptView.as_view(), name='generate_concept'),
-    path('api/concepts/<int:concept_id>/atoms/', GetAtomsView.as_view(), name='get_atoms'),
     
-    # TEACHING-FIRST FLOW ENDPOINTS
-    path('api/start-teaching-session/', StartTeachingFirstSessionView.as_view(), name='start_teaching_session'),
-    path('api/concepts/<int:concept_id>/atoms-list/', GetAtomListView.as_view(), name='atoms_list'),
+    # Teaching-first flow endpoints
+    path('api/start-teaching-session/', StartTeachingSessionView.as_view(), name='start_teaching_session'),
+    path('api/teaching-content/', GetTeachingContentView.as_view(), name='teaching_content'),
     path('api/generate-questions-from-teaching/', GenerateQuestionsFromTeachingView.as_view(), name='generate_questions_from_teaching'),
-    path('api/submit-atom-answer/', SubmitAtomQuestionAnswerView.as_view(), name='submit_atom_answer'),
+    path('api/submit-atom-answer/', SubmitAtomAnswerView.as_view(), name='submit_atom_answer'),
     path('api/complete-atom/', CompleteAtomView.as_view(), name='complete_atom'),
+    
+    # Progress
+    path('api/progress/', GetLearningProgressView.as_view(), name='learning_progress'),
 ]
 
 
 ================================================
 FILE: backend/accounts/views.py
 ================================================
-Error reading file with 'cp1252': 'charmap' codec can't decode byte 0x8d in position 43192: character maps to <undefined>
+Error reading file with 'cp1252': 'charmap' codec can't decode byte 0x8f in position 41483: character maps to <undefined>
 
 
 ================================================
@@ -755,6 +749,26 @@ class Migration(migrations.Migration):
         ),
     ]
 
+
+
+================================================
+FILE: backend/accounts/migrations/0004_add_error_history_default.py
+================================================
+# In accounts/migrations/0004_add_error_history_default.py
+from django.db import migrations, models
+
+class Migration(migrations.Migration):
+    dependencies = [
+        ('accounts', '0003_learningsession_knowledge_level_and_more'),
+    ]
+
+    operations = [
+        migrations.AlterField(
+            model_name='studentprogress',
+            name='error_history',
+            field=models.JSONField(default=list),
+        ),
+    ]
 
 
 ================================================
@@ -1099,7 +1113,7 @@ __all__ = [
 ================================================
 FILE: backend/learning_engine/adaptive_flow.py
 ================================================
-# backend/learning_engine/adaptive_flow.py - Enhanced version
+# backend/learning_engine/adaptive_flow.py - Enhanced with pacing engine
 
 import json
 import random
@@ -1107,23 +1121,238 @@ from typing import Dict, List, Optional, Tuple, Any
 from django.conf import settings
 from groq import Groq
 from .models import TeachingAtomState, LearningPhase
+from .knowledge_tracing import calculate_updated_mastery, classify_error_type
+from .pacing_engine import PacingEngine, PacingContext, PacingDecision, NextAction
 
 class AdaptiveLearningEngine:
-    """Enhanced adaptive learning engine with knowledge levels"""
+    """Enhanced adaptive learning engine with real-time mastery and strict pacing"""
     
     def __init__(self):
         self.groq_client = None
         groq_key = getattr(settings, 'GROQ_API_KEY', '')
         if groq_key:
             self.groq_client = Groq(api_key=groq_key)
+        
+        self.pacing_engine = PacingEngine()
+    
+    def process_answer(self, 
+                      atom_state: TeachingAtomState,
+                      theta: float,
+                      question: Dict[str, Any],
+                      selected_answer: int,
+                      time_taken: float,
+                      knowledge_level: str,
+                      questions_history: List[Dict]) -> Dict[str, Any]:
+        """
+        Process a single answer with real-time mastery update and pacing decision
+        
+        Args:
+            atom_state: Current atom state
+            theta: Current ability estimate
+            question: Question that was answered
+            selected_answer: User's answer index
+            time_taken: Time taken in seconds
+            knowledge_level: Self-reported knowledge level
+            questions_history: List of previous questions/answers
+        
+        Returns:
+            Dict with updated state and next actions
+        """
+        # Determine correctness
+        correct = (selected_answer == question.get('correct_index', -1))
+        
+        # Classify error type if wrong
+        error_type = None
+        if not correct:
+            error_type = classify_error_type(
+                question, selected_answer, time_taken, atom_state.name
+            )
+        
+        # REAL-TIME MASTERY UPDATE (after EVERY answer)
+        new_mastery, new_theta, metrics = calculate_updated_mastery(
+            current_mastery=atom_state.mastery_score,
+            current_theta=theta,
+            question=question,
+            correct=correct,
+            time_taken=time_taken,
+            error_type=error_type
+        )
+        
+        # Update atom state
+        atom_state.mastery_score = new_mastery
+        
+        if correct:
+            atom_state.streak = atom_state.streak + 1 if atom_state.streak > 0 else 1
+        else:
+            atom_state.streak = atom_state.streak - 1 if atom_state.streak < 0 else -1
+        
+        if error_type:
+            atom_state.error_history.append(error_type)
+        
+        # Calculate recent metrics for pacing
+        recent_questions = questions_history[-5:] if questions_history else []
+        recent_correct = sum(1 for q in recent_questions if q.get('correct', False))
+        recent_accuracy = recent_correct / len(recent_questions) if recent_questions else (1.0 if correct else 0.0)
+        
+        # Get recent error types
+        recent_errors = [e for e in atom_state.error_history[-5:] if e]
+        
+        # Create pacing context
+        pacing_context = PacingContext(
+            accuracy=recent_accuracy,
+            mastery_score=new_mastery,
+            streak=atom_state.streak,
+            error_types=recent_errors,
+            theta=new_theta,
+            questions_answered=len(questions_history) + 1,
+            knowledge_level=knowledge_level,
+            phase=atom_state.phase.value if hasattr(atom_state.phase, 'value') else atom_state.phase
+        )
+        
+        # Get pacing decision
+        pacing_decision, next_action, reasoning = self.pacing_engine.decide_pacing(pacing_context)
+        
+        # Determine next difficulty based on ability and pacing
+        next_difficulty = self.pacing_engine.get_next_difficulty(
+            new_theta, pacing_decision, knowledge_level
+        )
+        
+        # Check if atom is complete
+        atom_complete = self._check_atom_complete(atom_state, pacing_context)
+        
+        # Prepare result
+        result = {
+            'correct': correct,
+            'error_type': error_type,
+            'updated_mastery': new_mastery,
+            'updated_theta': new_theta,
+            'metrics': metrics,
+            'pacing_decision': pacing_decision.value if hasattr(pacing_decision, 'value') else pacing_decision,
+            'next_action': next_action.value if hasattr(next_action, 'value') else next_action,
+            'next_difficulty': next_difficulty,
+            'reasoning': reasoning,
+            'atom_complete': atom_complete,
+            'streak': atom_state.streak
+        }
+        
+        # Add specific recommendations
+        if next_action == NextAction.RETEACH:
+            result['recommendation'] = 'review_teaching'
+            result['message'] = "Let's review the teaching material again."
+        elif next_action == NextAction.ADVANCE_NEXT_ATOM:
+            result['recommendation'] = 'advance'
+            result['message'] = "Great job! Ready for the next concept."
+        elif pacing_decision == PacingDecision.SHARP_SLOWDOWN:
+            result['recommendation'] = 'easier_questions'
+            result['message'] = "Let's try some easier questions to build confidence."
+        elif pacing_decision == PacingDecision.SPEED_UP:
+            result['recommendation'] = 'challenge'
+            result['message'] = "You're doing great! Ready for a challenge?"
+        
+        return result
+    
+    def _check_atom_complete(self, atom_state: TeachingAtomState, 
+                            context: PacingContext) -> bool:
+        """
+        Check if atom should be marked complete based on mastery, not question count
+        """
+        # Mastery threshold (can be adjusted)
+        MASTERY_THRESHOLD = 0.7
+        
+        # Need minimum practice
+        if context.questions_answered < 4:
+            return False
+        
+        # Check mastery
+        if atom_state.mastery_score < MASTERY_THRESHOLD:
+            return False
+        
+        # Check recent performance
+        if context.accuracy < 0.75:
+            return False
+        
+        # Check streak
+        if context.streak < 2:
+            return False
+        
+        # Check for conceptual errors
+        if any(e in ['conceptual', 'structural'] for e in context.error_types[-3:] if context.error_types):
+            return False
+        
+        # All conditions met
+        return True
+    
+    def select_next_questions(self, 
+                             atom_state: TeachingAtomState,
+                             theta: float,
+                             pacing_decision: PacingDecision,
+                             knowledge_level: str,
+                             available_questions: Dict[str, List[Dict]]) -> List[Dict]:
+        """
+        Select next questions based on ability, not fixed counts
+        """
+        selected = []
+        
+        # Determine target difficulty based on theta
+        if theta < -0.3:
+            target_difficulty = 'easy'
+        elif theta < 0.6:
+            target_difficulty = 'medium'
+        else:
+            target_difficulty = 'hard'
+        
+        # Adjust based on pacing
+        if pacing_decision == PacingDecision.SHARP_SLOWDOWN:
+            # Focus on easy questions
+            target_difficulty = 'easy'
+            count = 3
+        elif pacing_decision == PacingDecision.SLOW_DOWN:
+            # Mix of easy and medium
+            easy_count = 2
+            medium_count = 1
+        elif pacing_decision == PacingDecision.STAY:
+            # Mix based on ability
+            if target_difficulty == 'easy':
+                easy_count, medium_count, hard_count = 2, 1, 0
+            elif target_difficulty == 'medium':
+                easy_count, medium_count, hard_count = 1, 2, 0
+            else:  # hard
+                easy_count, medium_count, hard_count = 0, 2, 1
+        else:  # SPEED_UP
+            # Challenge with harder questions
+            if target_difficulty == 'easy':
+                easy_count, medium_count, hard_count = 1, 2, 0
+            elif target_difficulty == 'medium':
+                easy_count, medium_count, hard_count = 0, 2, 1
+            else:  # hard
+                easy_count, medium_count, hard_count = 0, 1, 2
+        
+        # Select questions (up to available)
+        for difficulty, count in [('easy', easy_count), ('medium', medium_count), ('hard', hard_count)]:
+            if count > 0 and difficulty in available_questions:
+                pool = available_questions[difficulty]
+                # Select without replacement
+                to_select = min(count, len(pool))
+                if to_select > 0:
+                    selected.extend(random.sample(pool, to_select))
+        
+        return selected
     
     def generate_teaching_content(self, atom_name: str, subject: str, 
-                                  concept: str, knowledge_level: str) -> Dict[str, str]:
+                                  concept: str, knowledge_level: str,
+                                  error_history: List[str] = None) -> Dict[str, str]:
         """
-        Generate teaching content for an atom based on knowledge level
+        Generate personalized teaching content based on knowledge level and error history
         """
+        # If reteaching due to errors, focus on problem areas
+        if error_history and len(error_history) > 0:
+            recent_errors = error_history[-3:]
+            error_focus = self._get_error_focus(recent_errors)
+        else:
+            error_focus = None
+        
         if not self.groq_client:
-            return self._get_fallback_content(atom_name, concept, knowledge_level)
+            return self._get_fallback_content(atom_name, concept, knowledge_level, error_focus)
         
         level_descriptions = {
             'zero': "Complete beginner - needs fundamental concepts explained from scratch",
@@ -1132,6 +1361,15 @@ class AdaptiveLearningEngine:
             'advanced': "Strong understanding - needs advanced concepts and edge cases"
         }
         
+        error_context = ""
+        if error_focus:
+            error_context = f"""
+            The student has struggled with these types of errors recently:
+            {', '.join(error_focus)}
+            
+            Please address these specific difficulties in your explanation.
+            """
+        
         prompt = f"""
         You are creating a personalized teaching module for a single atomic concept.
         
@@ -1139,6 +1377,8 @@ class AdaptiveLearningEngine:
         Concept: {concept}
         Atomic Concept: {atom_name}
         Student Knowledge Level: {level_descriptions.get(knowledge_level, 'intermediate')}
+        
+        {error_context}
         
         Generate:
         1. A clear explanation tailored to their knowledge level (2-4 sentences)
@@ -1152,6 +1392,7 @@ class AdaptiveLearningEngine:
         - No jargon without explanation
         - Make it memorable and relevant
         - If advanced, include edge cases or limitations
+        - If reteaching, explain in a different way than before
         
         Return STRICT JSON:
         {{
@@ -1180,13 +1421,29 @@ class AdaptiveLearningEngine:
             return json.loads(raw_text.strip())
         except Exception as e:
             print(f"Warning: Could not generate teaching content: {e}")
-            return self._get_fallback_content(atom_name, concept, knowledge_level)
+            return self._get_fallback_content(atom_name, concept, knowledge_level, error_focus)
     
-    def _get_fallback_content(self, atom_name: str, concept: str, level: str) -> Dict:
-        """Fallback content based on knowledge level"""
+    def _get_error_focus(self, error_types: List[str]) -> List[str]:
+        """Convert error types to focus areas for teaching"""
+        focus_map = {
+            'conceptual': 'fundamental concepts',
+            'structural': 'relationships between ideas',
+            'procedural': 'step-by-step processes',
+            'factual': 'key facts and definitions',
+            'guessing': 'building confidence with basics'
+        }
+        return [focus_map.get(e, e) for e in error_types if e in focus_map]
+    
+    def _get_fallback_content(self, atom_name: str, concept: str, level: str, 
+                             error_focus: List[str] = None) -> Dict:
+        """Enhanced fallback content"""
+        focus_text = ""
+        if error_focus:
+            focus_text = f" focusing on {', '.join(error_focus)}"
+        
         if level == 'advanced':
             return {
-                "explanation": f"{atom_name} represents an advanced aspect of {concept} with complex interactions and edge cases.",
+                "explanation": f"{atom_name} represents an advanced aspect of {concept} with complex interactions and edge cases{focus_text}.",
                 "example": f"Advanced example: In production systems, {atom_name} manifests through...",
                 "analogy": f"Think of {atom_name} like a sophisticated system where multiple components interact.",
                 "misconception": f"Even experts sometimes confuse {atom_name} with similar advanced concepts.",
@@ -1194,7 +1451,7 @@ class AdaptiveLearningEngine:
             }
         elif level == 'intermediate':
             return {
-                "explanation": f"{atom_name} is a key component of {concept} that builds on foundational knowledge.",
+                "explanation": f"{atom_name} is a key component of {concept} that builds on foundational knowledge{focus_text}.",
                 "example": f"Example: When working with {concept}, {atom_name} helps you...",
                 "analogy": f"Think of {atom_name} like a well-organized tool in your toolkit.",
                 "misconception": f"Don't confuse {atom_name} with its related concepts.",
@@ -1202,107 +1459,12 @@ class AdaptiveLearningEngine:
             }
         else:  # zero or beginner
             return {
-                "explanation": f"{atom_name} is a fundamental building block of {concept}. It's like learning a basic rule.",
+                "explanation": f"{atom_name} is a fundamental building block of {concept}. It's like learning a basic rule{focus_text}.",
                 "example": f"Simple example: Just like learning the alphabet before writing words, {atom_name} comes first.",
                 "analogy": f"Think of {atom_name} like learning to crawl before you walk.",
                 "misconception": f"Beginners often think {atom_name} is harder than it really is.",
                 "practical_application": f"Understanding {atom_name} opens the door to mastering {concept}."
             }
-    
-    def determine_pacing(self, diagnostic_results: Dict, knowledge_level: str) -> str:
-        """
-        Determine learning pace based on diagnostic results and initial knowledge level
-        """
-        accuracy = diagnostic_results.get('accuracy', 0)
-        
-        # Adjust thresholds based on knowledge level
-        if knowledge_level == 'advanced':
-            if accuracy < 0.6:
-                return 'slow_down'
-            elif accuracy < 0.8:
-                return 'stay'
-            else:
-                return 'speed_up'
-        elif knowledge_level == 'intermediate':
-            if accuracy < 0.5:
-                return 'slow_down'
-            elif accuracy < 0.75:
-                return 'stay'
-            else:
-                return 'speed_up'
-        else:  # zero or beginner
-            if accuracy < 0.4:
-                return 'sharp_slowdown'
-            elif accuracy < 0.7:
-                return 'slow_down'
-            else:
-                return 'speed_up'
-    
-    def get_contextual_analogy(self, atom_name: str, concept: str) -> Dict:
-        """
-        Get contextual analogy to reduce abstraction fatigue
-        """
-        analogies = {
-            "address space": {
-                "analogy": "Think of address space like house numbers on a street. Each house needs a unique number.",
-                "scenario": "16-bit addresses = streets numbered 0000 to FFFF - 65,536 possible houses!"
-            },
-            "memory hierarchy": {
-                "analogy": "Cache = kitchen counter (fast). RAM = refrigerator (slower, bigger). Storage = grocery store (slowest).",
-                "scenario": "When cooking, keep frequently used spices on the counter."
-            },
-            "cache": {
-                "analogy": "CPU = Player, Cache = Bat in hand, RAM = Kit bag",
-                "scenario": "Keep your favorite bat in hand for quick access."
-            },
-            "rom": {
-                "analogy": "ROM = cookbook printed in ink - recipes don't change, always there.",
-                "scenario": "BIOS = restaurant's signature recipes stored permanently."
-            },
-            "memory mapping": {
-                "analogy": "Memory mapping = assigning shelves to departments. Manager (CPU) just uses shelf numbers.",
-                "scenario": "Shelf 0000-7FFF = cookbook department (ROM), 8000-FFFF = ingredients (RAM)."
-            }
-        }
-        
-        # Try to find a matching analogy
-        atom_lower = atom_name.lower()
-        for key, value in analogies.items():
-            if key in atom_lower or key in concept.lower():
-                return value
-        
-        # Default
-        return {
-            "analogy": f"Think of {atom_name} like organizing your desk. Things you use often are within reach.",
-            "scenario": f"The more you practice, the more natural this becomes."
-        }
-    
-    def check_mastery_threshold(self, atom_state: TeachingAtomState,
-                               questions_answered: List[Dict]) -> Tuple[bool, float]:
-        """
-        Check if atom has reached mastery threshold
-        """
-        if not questions_answered:
-            return False, atom_state.mastery_score
-        
-        # Calculate recent accuracy
-        recent_questions = questions_answered[-3:] if len(questions_answered) > 3 else questions_answered
-        recent_correct = sum(1 for q in recent_questions if q.get('correct', False))
-        recent_accuracy = recent_correct / len(recent_questions) if recent_questions else 0
-        
-        # Check conditions
-        mastery_conditions = [
-            atom_state.mastery_score >= 0.7,
-            recent_accuracy >= 0.8,
-            atom_state.streak >= 2
-        ]
-        
-        mastery_achieved = all(mastery_conditions)
-        
-        if mastery_achieved:
-            atom_state.phase = LearningPhase.MASTERY_CHECK
-        
-        return mastery_achieved, atom_state.mastery_score
 
 
 ================================================
@@ -1540,6 +1702,235 @@ def update_theta(theta, correct, b=0.0, a=1.0, lr=0.4):
     return theta
 
 
+
+# backend/learning_engine/knowledge_tracing.py - Enhanced version
+
+import math
+import numpy as np
+from typing import Dict, Any, Optional, Tuple
+
+def calculate_updated_mastery(
+    current_mastery: float,
+    current_theta: float,
+    question: Dict[str, Any],
+    correct: bool,
+    time_taken: float,
+    error_type: Optional[str]
+) -> Tuple[float, float, Dict[str, float]]:
+    """
+    Real-time mastery estimation after every answer
+    
+    Args:
+        current_mastery: Current mastery score (0-1)
+        current_theta: Current ability parameter
+        question: Question dictionary with difficulty, estimated_time
+        correct: Whether answer was correct
+        time_taken: Time taken in seconds
+        error_type: Classified error type or None if correct
+    
+    Returns:
+        Tuple of (new_mastery, new_theta, metrics)
+    """
+    # Extract question parameters
+    difficulty = question.get('difficulty', 'medium')
+    estimated_time = question.get('estimated_time', 60)
+    cognitive = question.get('cognitive_operation', 'recall')
+    
+    # Map difficulty to item parameter b (IRT difficulty)
+    difficulty_map = {
+        'easy': -1.0,
+        'medium': 0.0,
+        'hard': 1.0
+    }
+    b = difficulty_map.get(difficulty, 0.0)
+    
+    # Map cognitive to discrimination a (IRT discrimination)
+    cognitive_map = {
+        'recall': 0.8,
+        'apply': 1.2,
+        'analyze': 1.5
+    }
+    a = cognitive_map.get(cognitive, 1.0)
+    
+    # Calculate time ratio (normalized)
+    time_ratio = time_taken / estimated_time if estimated_time > 0 else 1.0
+    
+    # 1. Update IRT theta (ability)
+    new_theta = update_theta_weighted(
+        current_theta, correct, b, a, 
+        time_ratio, error_type
+    )
+    
+    # 2. Update mastery based on multiple factors
+    mastery_update = calculate_mastery_update(
+        current_mastery, correct, time_ratio, 
+        error_type, difficulty
+    )
+    
+    new_mastery = min(1.0, max(0.0, current_mastery + mastery_update))
+    
+    # 3. Calculate performance metrics
+    metrics = {
+        'theta_change': new_theta - current_theta,
+        'mastery_change': mastery_update,
+        'confidence': calculate_confidence(correct, time_ratio, error_type),
+        'learning_rate': mastery_update / 0.1,  # Normalized learning rate
+        'performance_quality': calculate_performance_quality(correct, time_ratio, error_type)
+    }
+    
+    return new_mastery, new_theta, metrics
+
+
+def update_theta_weighted(
+    theta: float,
+    correct: bool,
+    b: float,
+    a: float,
+    time_ratio: float,
+    error_type: Optional[str],
+    base_lr: float = 0.4
+) -> float:
+    """
+    Update theta with time and error-type weighting
+    """
+    # IRT probability
+    prob_correct = 1 / (1 + math.exp(-a * (theta - b)))
+    
+    # Actual outcome (continuous for weighted updates)
+    actual = 1.0 if correct else 0.0
+    
+    # Calculate confidence weight based on time
+    if correct:
+        # Fast correct = high confidence
+        confidence_weight = min(1.5, 1.0 / max(0.3, time_ratio))
+    else:
+        # Slow wrong = low confidence, fast wrong = guessing
+        if time_ratio < 0.5:  # Guessing
+            confidence_weight = 0.3
+        elif time_ratio > 1.5:  # Struggling
+            confidence_weight = 0.7
+        else:
+            confidence_weight = 0.5
+    
+    # Adjust learning rate based on error type
+    error_multipliers = {
+        'guessing': 0.3,      # Less update from guesses
+        'attentional': 0.6,    # Moderate update
+        'factual': 0.8,        # Stronger update
+        'procedural': 0.9,     # Strong update
+        'conceptual': 1.2,     # Very strong update (conceptual errors matter)
+        'structural': 1.1,      # Strong update
+        None: 1.0               # Normal for correct
+    }
+    
+    error_mult = error_multipliers.get(error_type, 1.0)
+    
+    # Apply weighted update
+    adjusted_lr = base_lr * confidence_weight * error_mult
+    theta_update = adjusted_lr * (actual - prob_correct)
+    
+    return theta + theta_update
+
+
+def calculate_mastery_update(
+    current_mastery: float,
+    correct: bool,
+    time_ratio: float,
+    error_type: Optional[str],
+    difficulty: str
+) -> float:
+    """
+    Calculate mastery update with nuanced factors
+    """
+    # Base update amount
+    base_update = 0.05
+    
+    # Difficulty multiplier
+    difficulty_multipliers = {
+        'easy': 0.7,    # Less impact from easy questions
+        'medium': 1.0,
+        'hard': 1.3     # More impact from hard questions
+    }
+    diff_mult = difficulty_multipliers.get(difficulty, 1.0)
+    
+    if correct:
+        # Time factor for correct answers
+        if time_ratio < 0.7:  # Fast correct
+            time_factor = 1.3
+        elif time_ratio < 1.0:  # Normal
+            time_factor = 1.0
+        else:  # Slow but correct
+            time_factor = 0.7
+        
+        # Mastery increases less as it approaches 1.0
+        ceiling_factor = (1.0 - current_mastery) * 2
+        
+        update = base_update * diff_mult * time_factor * ceiling_factor
+        
+    else:  # Incorrect
+        # Different impacts based on error type
+        error_impacts = {
+            'guessing': -0.02,      # Small penalty - just guessing
+            'attentional': -0.03,    # Small penalty - careless
+            'factual': -0.06,        # Moderate - missing facts
+            'procedural': -0.08,     # Significant - don't know process
+            'conceptual': -0.12,     # Severe - fundamental misunderstanding
+            'structural': -0.10      # Severe - can't see relationships
+        }
+        
+        update = error_impacts.get(error_type, -0.05)
+        
+        # Additional time factor for wrong answers
+        if time_ratio > 1.5:  # Very slow wrong = struggling
+            update *= 1.3
+        elif time_ratio < 0.5:  # Fast wrong = guessing
+            update *= 0.7
+    
+    return update
+
+
+def calculate_confidence(correct: bool, time_ratio: float, error_type: Optional[str]) -> float:
+    """
+    Calculate confidence in the response (0-1)
+    """
+    if correct:
+        # Higher confidence for fast correct answers
+        confidence = min(1.0, 1.2 - time_ratio * 0.3)
+    else:
+        # Lower confidence for wrong answers, especially fast wrong
+        if error_type == 'guessing':
+            confidence = 0.1
+        elif error_type == 'attentional':
+            confidence = 0.3
+        elif time_ratio < 0.5:
+            confidence = 0.2
+        elif time_ratio > 1.5:
+            confidence = 0.5  # At least tried
+        else:
+            confidence = 0.4
+    
+    return max(0.1, min(1.0, confidence))
+
+
+def calculate_performance_quality(correct: bool, time_ratio: float, error_type: Optional[str]) -> float:
+    """
+    Calculate overall performance quality (-1 to 1)
+    """
+    if correct:
+        quality = 1.0 - abs(1.0 - time_ratio) * 0.5
+    else:
+        if error_type == 'guessing':
+            quality = -0.8
+        elif error_type == 'attentional':
+            quality = -0.3
+        elif error_type == 'conceptual':
+            quality = -0.6
+        else:
+            quality = -0.4
+    
+    return max(-1.0, min(1.0, quality))
+
+
 ================================================
 FILE: backend/learning_engine/models.py
 ================================================
@@ -1602,6 +1993,279 @@ class TeachingAtomState:
 
 
 ================================================
+FILE: backend/learning_engine/pacing_engine.py
+================================================
+# backend/learning_engine/pacing_engine.py - NEW FILE
+
+from typing import Dict, List, Optional, Tuple
+from enum import Enum
+from dataclasses import dataclass
+
+
+class PacingDecision(str, Enum):
+    SPEED_UP = "speed_up"
+    STAY = "stay"
+    SLOW_DOWN = "slow_down"
+    SHARP_SLOWDOWN = "sharp_slowdown"
+
+
+class NextAction(str, Enum):
+    CONTINUE_PRACTICE = "continue_practice"
+    RETEACH = "reteach"
+    ADVANCE_NEXT_ATOM = "advance_next_atom"
+    MASTERY_CHECK = "mastery_check"
+    COMPLETE_ATOM = "complete_atom"
+
+
+@dataclass
+class PacingContext:
+    """Context for pacing decisions"""
+    accuracy: float  # Recent accuracy (0-1)
+    mastery_score: float  # Current mastery (0-1)
+    streak: int  # Current correct streak
+    error_types: List[str]  # Recent error types
+    theta: float  # Ability parameter
+    questions_answered: int  # Total questions in this atom
+    knowledge_level: str  # Initial self-reported level
+    phase: str  # Current learning phase
+
+
+class PacingEngine:
+    """
+    Strict pacing decision engine with formal rules
+    """
+    
+    def __init__(self):
+        # Thresholds by knowledge level
+        self.accuracy_thresholds = {
+            'zero': {'speed_up': 0.8, 'stay': 0.6, 'slow_down': 0.4, 'sharp_slowdown': 0.25},
+            'beginner': {'speed_up': 0.8, 'stay': 0.6, 'slow_down': 0.45, 'sharp_slowdown': 0.3},
+            'intermediate': {'speed_up': 0.85, 'stay': 0.7, 'slow_down': 0.55, 'sharp_slowdown': 0.4},
+            'advanced': {'speed_up': 0.9, 'stay': 0.8, 'slow_down': 0.65, 'sharp_slowdown': 0.5}
+        }
+        
+        self.mastery_thresholds = {
+            'zero': {'speed_up': 0.7, 'stay': 0.5, 'slow_down': 0.35, 'sharp_slowdown': 0.2},
+            'beginner': {'speed_up': 0.75, 'stay': 0.55, 'slow_down': 0.4, 'sharp_slowdown': 0.25},
+            'intermediate': {'speed_up': 0.8, 'stay': 0.6, 'slow_down': 0.45, 'sharp_slowdown': 0.3},
+            'advanced': {'speed_up': 0.85, 'stay': 0.7, 'slow_down': 0.55, 'sharp_slowdown': 0.4}
+        }
+        
+        # Error type weights for pacing
+        self.error_weights = {
+            'guessing': 1.2,      # Makes slowdown more likely
+            'attentional': 0.8,    # Less impact
+            'factual': 1.0,
+            'procedural': 1.3,
+            'conceptual': 1.8,     # Strongest impact
+            'structural': 1.5
+        }
+    
+    def decide_pacing(self, context: PacingContext) -> Tuple[PacingDecision, NextAction, Dict]:
+        """
+        Make strict pacing decision based on formal rules
+        
+        Returns:
+            Tuple of (pacing_decision, next_action, reasoning)
+        """
+        # Extract context
+        level = context.knowledge_level
+        accuracy = context.accuracy
+        mastery = context.mastery_score
+        streak = context.streak
+        error_types = context.error_types
+        phase = context.phase
+        q_count = context.questions_answered
+        
+        # Get thresholds for this knowledge level
+        acc_thresh = self.accuracy_thresholds.get(level, self.accuracy_thresholds['intermediate'])
+        mas_thresh = self.mastery_thresholds.get(level, self.mastery_thresholds['intermediate'])
+        
+        # Initialize reasoning
+        reasoning = {
+            'accuracy': accuracy,
+            'mastery': mastery,
+            'streak': streak,
+            'primary_factors': [],
+            'error_analysis': {}
+        }
+        
+        # Analyze recent errors
+        if error_types:
+            error_counts = {}
+            for err in error_types[-5:]:  # Last 5 errors
+                error_counts[err] = error_counts.get(err, 0) + 1
+            
+            reasoning['error_analysis'] = error_counts
+            
+            # Check for severe error patterns
+            conceptual_errors = error_counts.get('conceptual', 0)
+            structural_errors = error_counts.get('structural', 0)
+            repeated_errors = len(error_types) >= 3 and len(set(error_types[-3:])) <= 2
+        
+        # STEP 1: Check for critical conditions
+        critical_conditions = []
+        
+        # Conceptual errors in last 3 questions
+        if any(e in ['conceptual', 'structural'] for e in error_types[-3:] if error_types):
+            critical_conditions.append('conceptual_error')
+        
+        # Very low accuracy
+        if accuracy < acc_thresh['sharp_slowdown']:
+            critical_conditions.append('very_low_accuracy')
+        
+        # Very low mastery
+        if mastery < mas_thresh['sharp_slowdown']:
+            critical_conditions.append('very_low_mastery')
+        
+        # Negative streak (multiple wrong)
+        if streak < -2:  # 2 or more wrong in a row
+            critical_conditions.append('negative_streak')
+        
+        # If any critical condition, sharp slowdown
+        if critical_conditions:
+            reasoning['primary_factors'] = critical_conditions
+            reasoning['severity'] = 'critical'
+            
+            # Determine next action
+            if phase in ['diagnostic', 'teaching'] and mastery < 0.3:
+                next_action = NextAction.RETEACH
+            elif phase == 'practice':
+                next_action = NextAction.RETEACH
+            else:
+                next_action = NextAction.CONTINUE_PRACTICE
+            
+            return PacingDecision.SHARP_SLOWDOWN, next_action, reasoning
+        
+        # STEP 2: Check moderate conditions
+        moderate_conditions = []
+        
+        if accuracy < acc_thresh['slow_down']:
+            moderate_conditions.append('low_accuracy')
+        
+        if mastery < mas_thresh['slow_down']:
+            moderate_conditions.append('low_mastery')
+        
+        if streak < 0:  # Currently on wrong answer
+            moderate_conditions.append('negative_streak_start')
+        
+        # Procedural errors indicate need for practice
+        if error_types and error_types[-1] in ['procedural', 'factual']:
+            moderate_conditions.append('procedural_error')
+        
+        if moderate_conditions:
+            reasoning['primary_factors'] = moderate_conditions
+            reasoning['severity'] = 'moderate'
+            return PacingDecision.SLOW_DOWN, NextAction.CONTINUE_PRACTICE, reasoning
+        
+        # STEP 3: Check speed-up conditions
+        speed_conditions = []
+        
+        if accuracy >= acc_thresh['speed_up']:
+            speed_conditions.append('high_accuracy')
+        
+        if mastery >= mas_thresh['speed_up']:
+            speed_conditions.append('high_mastery')
+        
+        if streak >= 3:  # Strong streak
+            speed_conditions.append('strong_streak')
+        
+        # For speed-up, need at least 2 conditions
+        if len(speed_conditions) >= 2:
+            reasoning['primary_factors'] = speed_conditions
+            reasoning['severity'] = 'positive'
+            
+            # Check if ready to advance
+            if mastery >= 0.7 and accuracy >= 0.8 and streak >= 2:
+                # Ready to move to next phase or atom
+                if phase == 'diagnostic':
+                    next_action = NextAction.ADVANCE_NEXT_ATOM
+                elif phase == 'teaching':
+                    next_action = NextAction.ADVANCE_NEXT_ATOM
+                elif phase == 'practice' and mastery >= 0.8:
+                    next_action = NextAction.MASTERY_CHECK
+                else:
+                    next_action = NextAction.CONTINUE_PRACTICE
+            else:
+                next_action = NextAction.CONTINUE_PRACTICE
+            
+            return PacingDecision.SPEED_UP, next_action, reasoning
+        
+        # STEP 4: Default - stay
+        reasoning['primary_factors'] = ['normal_performance']
+        reasoning['severity'] = 'normal'
+        return PacingDecision.STAY, NextAction.CONTINUE_PRACTICE, reasoning
+    
+    def get_next_difficulty(self, theta: float, current_pacing: PacingDecision, 
+                           knowledge_level: str) -> str:
+        """
+        Select next difficulty based on ability and pacing
+        """
+        # Map theta to base difficulty
+        if theta < -0.5:
+            base_difficulty = 'easy'
+        elif theta < 0.5:
+            base_difficulty = 'medium'
+        else:
+            base_difficulty = 'hard'
+        
+        # Adjust based on pacing
+        pacing_adjustments = {
+            PacingDecision.SPEED_UP: {'easy': 'medium', 'medium': 'hard', 'hard': 'hard'},
+            PacingDecision.STAY: {'easy': 'easy', 'medium': 'medium', 'hard': 'medium'},
+            PacingDecision.SLOW_DOWN: {'easy': 'easy', 'medium': 'easy', 'hard': 'medium'},
+            PacingDecision.SHARP_SLOWDOWN: {'easy': 'easy', 'medium': 'easy', 'hard': 'easy'}
+        }
+        
+        adjustment = pacing_adjustments.get(current_pacing, {})
+        next_difficulty = adjustment.get(base_difficulty, base_difficulty)
+        
+        # Adjust for knowledge level
+        if knowledge_level == 'zero' and next_difficulty == 'hard':
+            next_difficulty = 'medium'
+        elif knowledge_level == 'advanced' and next_difficulty == 'easy':
+            next_difficulty = 'medium'
+        
+        return next_difficulty
+    
+    def should_reteach(self, context: PacingContext) -> bool:
+        """
+        Determine if reteaching is needed
+        """
+        error_types = context.error_types[-3:] if context.error_types else []
+        
+        # Conditions for reteaching
+        conditions = [
+            # Conceptual errors in last 3 questions
+            any(e in ['conceptual', 'structural'] for e in error_types),
+            # Very low mastery
+            context.mastery_score < 0.3,
+            # Multiple wrong in a row with low mastery
+            context.streak < -2 and context.mastery_score < 0.5,
+            # Low accuracy with conceptual errors
+            context.accuracy < 0.4 and 'conceptual' in error_types
+        ]
+        
+        return any(conditions)
+    
+    def should_advance(self, context: PacingContext) -> bool:
+        """
+        Determine if student should advance to next atom
+        """
+        conditions = [
+            context.mastery_score >= 0.7,
+            context.accuracy >= 0.8,
+            context.streak >= 2,
+            context.questions_answered >= 4,  # Minimum practice
+            # No conceptual errors recently
+            'conceptual' not in (context.error_types[-3:] if context.error_types else [])
+        ]
+        
+        # Need at least 3 conditions including mastery and accuracy
+        return sum(conditions) >= 3 and conditions[0] and conditions[1]
+
+
+================================================
 FILE: backend/learning_engine/question_generator.py
 ================================================
 # backend/learning_engine/question_generator.py - Complete fixed version
@@ -1625,7 +2289,7 @@ class QuestionGenerator:
         gemini_key = getattr(settings, 'GOOGLE_API_KEY', '')
         if gemini_key:
             genai.configure(api_key=gemini_key)
-            self.gemini_model = genai.GenerativeModel('gemini-1.5-flash')
+            self.gemini_model = genai.GenerativeModel('gemini-2.5-flash')
         else:
             self.gemini_model = None
     
@@ -1711,29 +2375,31 @@ class QuestionGenerator:
             print(f"Error generating atoms: {e}")
             return self._get_fallback_atoms(subject, concept)
     
+    # backend/learning_engine/question_generator.py - Updated method
+
     def generate_questions(self, subject: str, concept: str, atom: str,
-                          need_easy: int, need_medium: int, knowledge_level: str = 'intermediate') -> List[Dict]:
+                        target_difficulty: str, count: int, 
+                        knowledge_level: str = 'intermediate',
+                        error_focus: List[str] = None) -> List[Dict]:
         """
-        Generate questions for an atom based on knowledge level
+        Generate questions for an atom with dynamic difficulty
         
         Args:
             subject: Subject name
             concept: Concept name
             atom: Atomic concept name
-            need_easy: Number of easy questions needed
-            need_medium: Number of medium questions needed
-            knowledge_level: Student's knowledge level (zero, beginner, intermediate, advanced)
+            target_difficulty: Specific difficulty to generate ('easy', 'medium', 'hard')
+            count: Number of questions needed
+            knowledge_level: Student's knowledge level
+            error_focus: Optional list of error types to address
         
         Returns:
             List of question dictionaries
         """
-        print(f"Generating questions for atom: {atom}, easy: {need_easy}, medium: {need_medium}, level: {knowledge_level}")
+        print(f"Generating {count} {target_difficulty} questions for atom: {atom}")
         
-        if not self.groq_client or (need_easy == 0 and need_medium == 0):
-            print("Groq client not available or no questions needed, using fallback")
-            return self._get_fallback_questions(atom, need_easy, need_medium, knowledge_level)
-        
-        total_needed = need_easy + need_medium
+        if not self.groq_client or count == 0:
+            return self._get_fallback_questions(atom, target_difficulty, count, knowledge_level)
         
         # Adjust based on knowledge level
         level_adjustments = {
@@ -1765,11 +2431,23 @@ class QuestionGenerator:
         
         adj = level_adjustments.get(knowledge_level, level_adjustments['intermediate'])
         
-        req_lines = []
-        if need_easy:
-            req_lines.append(f"- {need_easy} easy question(s)")
-        if need_medium:
-            req_lines.append(f"- {need_medium} medium question(s)")
+        # Determine cognitive operations for this difficulty
+        if target_difficulty == 'easy':
+            allowed_cognitive = ['recall']
+        elif target_difficulty == 'medium':
+            allowed_cognitive = ['recall', 'apply']
+        else:  # hard
+            allowed_cognitive = ['apply', 'analyze']
+        
+        # Add error focus if provided
+        error_context = ""
+        if error_focus:
+            error_context = f"""
+            Focus on addressing these common errors:
+            {', '.join(error_focus)}
+            
+            Create questions that help the student overcome these specific difficulties.
+            """
         
         prompt = f"""
         You are generating multiple-choice assessment questions.
@@ -1778,15 +2456,14 @@ class QuestionGenerator:
         Concept: {concept}
         Atomic Concept: {atom}
         Student Level: {knowledge_level.upper()}
+        Target Difficulty: {target_difficulty.upper()}
         
-        Generate EXACTLY {total_needed} questions with these characteristics:
+        Generate EXACTLY {count} {target_difficulty} question(s) with these characteristics:
         - Complexity: {adj['complexity']}
-        - Cognitive levels: {', '.join(adj['cognitive'])}
+        - Cognitive levels: {', '.join(allowed_cognitive)}
         - Hint level: {adj['hint_level']}
         
-        Question Distribution:
-        {chr(10).join(req_lines)}
-        - No hard questions
+        {error_context}
         
         Each question must:
         - Have exactly 4 options
@@ -1794,10 +2471,14 @@ class QuestionGenerator:
         - Test understanding, not trickery
         - Include the atomic concept explicitly
         - Maximum 25 words per question text
+        - For {target_difficulty} questions, the difficulty should be appropriate:
+            * Easy: Direct recall, simple application
+            * Medium: Requires understanding, some analysis
+            * Hard: Complex application, synthesis of ideas
         
         Each question MUST include:
-        - "difficulty": easy | medium
-        - "cognitive_operation": recall | apply | analyze
+        - "difficulty": "{target_difficulty}"
+        - "cognitive_operation": one of {allowed_cognitive}
         - "estimated_time": integer (seconds) - recall: 20-40, apply: 40-90, analyze: 90-150
         - "question": string
         - "options": array of exactly 4 strings
@@ -1808,7 +2489,7 @@ class QuestionGenerator:
         {{
             "questions": [
                 {{
-                    "difficulty": "easy",
+                    "difficulty": "{target_difficulty}",
                     "cognitive_operation": "recall",
                     "estimated_time": 30,
                     "question": "Question text here?",
@@ -1836,7 +2517,6 @@ class QuestionGenerator:
             )
             
             raw_text = response.choices[0].message.content
-            # Extract JSON
             if "```" in raw_text:
                 raw_text = raw_text.split("```")[1]
                 if raw_text.startswith("json"):
@@ -1849,12 +2529,12 @@ class QuestionGenerator:
             for q in questions:
                 q['estimated_time'] = int(q.get('estimated_time', 60) * adj['time_factor'])
             
-            print(f"Generated {len(questions)} questions")
+            print(f"Generated {len(questions)} {target_difficulty} questions")
             return questions
             
         except Exception as e:
             print(f"Error generating questions: {e}")
-            return self._get_fallback_questions(atom, need_easy, need_medium, knowledge_level)
+            return self._get_fallback_questions(atom, target_difficulty, count, knowledge_level)
     
     def _get_fallback_atoms(self, subject: str, concept: str) -> List[str]:
         """Provide fallback atoms when AI generation fails"""
@@ -2490,12 +3170,6 @@ const axiosInstance = axios.create({
 axiosInstance.interceptors.request.use(
     (config) => {
         const token = localStorage.getItem('access_token');
-        console.log("Axios Request:", {
-            url: config.url,
-            method: config.method,
-            hasToken: !!token,
-            token: token ? `${token.substring(0, 20)}...` : 'none'
-        });
         
         if (token) {
             config.headers.Authorization = `Bearer ${token}`;
@@ -2507,17 +3181,11 @@ axiosInstance.interceptors.request.use(
     }
 );
 
-// Add response interceptor to handle 401 errors
+// Handle 401 errors and token refresh
 axiosInstance.interceptors.response.use(
     (response) => response,
     async (error) => {
         const originalRequest = error.config;
-        
-        console.log("Axios Response Error:", {
-            status: error.response?.status,
-            url: originalRequest?.url,
-            message: error.response?.data?.error || error.message
-        });
         
         // If error is 401 and we haven't tried to refresh token yet
         if (error.response?.status === 401 && !originalRequest._retry) {
@@ -2537,8 +3205,7 @@ axiosInstance.interceptors.response.use(
                     }
                 }
             } catch (refreshError) {
-                console.error("Token refresh failed:", refreshError);
-                // Clear tokens and redirect to login
+                // Refresh failed - clear tokens and redirect to login
                 localStorage.removeItem('access_token');
                 localStorage.removeItem('refresh_token');
                 window.location.href = '/login';
@@ -2624,7 +3291,6 @@ import { useAuth } from '../context/AuthContext';
 import axios from '../axiosConfig';
 
 const Dashboard = () => {
-    const [dashboardData, setDashboardData] = useState(null);
     const [concepts, setConcepts] = useState([]);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState('');
@@ -2633,20 +3299,6 @@ const Dashboard = () => {
     
     const { user, logout } = useAuth();
     const navigate = useNavigate();
-
-    const fetchDashboardData = useCallback(async () => {
-        try {
-            const response = await axios.get('/auth/api/dashboard/');
-            setDashboardData(response.data);
-        } catch (err) {
-            setError('Failed to fetch dashboard data');
-            
-            if (err.response?.status === 401) {
-                logout();
-                navigate('/login');
-            }
-        }
-    }, [logout, navigate]);
 
     const fetchConcepts = useCallback(async () => {
         try {
@@ -2658,15 +3310,20 @@ const Dashboard = () => {
             setSubjects(uniqueSubjects);
         } catch (err) {
             console.error('Failed to fetch concepts:', err);
+            setError('Failed to load concepts');
+            
+            if (err.response?.status === 401) {
+                logout();
+                navigate('/login');
+            }
         } finally {
             setLoading(false);
         }
-    }, []);
+    }, [logout, navigate]);
 
     useEffect(() => {
-        fetchDashboardData();
         fetchConcepts();
-    }, [fetchDashboardData, fetchConcepts]);
+    }, [fetchConcepts]);
 
     const handleLogout = () => {
         logout();
@@ -2674,7 +3331,6 @@ const Dashboard = () => {
     };
 
     const handleStartLearning = (conceptId) => {
-        // Navigate to the teaching-first flow with concept ID
         navigate(`/learn/${conceptId}`);
     };
 
@@ -2698,27 +3354,20 @@ const Dashboard = () => {
         );
     }
 
-    if (error) {
-        return (
-            <div className="min-h-screen flex items-center justify-center">
-                <div className="text-xl text-red-600">{error}</div>
-            </div>
-        );
-    }
-
     return (
         <div className="min-h-screen bg-gray-100">
+            {/* Navigation */}
             <nav className="bg-white shadow-lg">
                 <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
                     <div className="flex justify-between h-16">
                         <div className="flex items-center">
                             <h1 className="text-xl font-semibold text-gray-800">
-                                Student Dashboard
+                                Adaptive Learning System
                             </h1>
                         </div>
                         <div className="flex items-center space-x-4">
                             <span className="text-gray-700">
-                                Welcome, {user?.first_name}!
+                                Welcome, {user?.first_name || user?.username}!
                             </span>
                             <button
                                 onClick={handleLogout}
@@ -2733,62 +3382,12 @@ const Dashboard = () => {
 
             <main className="max-w-7xl mx-auto py-6 sm:px-6 lg:px-8">
                 <div className="px-4 py-6 sm:px-0">
-                    {/* Welcome Message */}
-                    <div className="bg-white rounded-lg shadow-lg p-6 mb-6">
-                        <h2 className="text-2xl font-bold mb-2">
-                            {dashboardData?.message || `Welcome back, ${user?.first_name}!`}
-                        </h2>
-                        <p className="text-gray-600">
-                            Continue your learning journey with our adaptive teaching system.
-                        </p>
-                    </div>
-
-                    {/* Stats Cards */}
-                    <div className="grid grid-cols-1 gap-5 sm:grid-cols-2 lg:grid-cols-4 mb-6">
-                        <div className="bg-white overflow-hidden shadow rounded-lg">
-                            <div className="px-4 py-5 sm:p-6">
-                                <dt className="text-sm font-medium text-gray-500 truncate">
-                                    Total Courses
-                                </dt>
-                                <dd className="mt-1 text-3xl font-semibold text-gray-900">
-                                    {concepts.length}
-                                </dd>
-                            </div>
+                    {/* Error Message */}
+                    {error && (
+                        <div className="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded mb-6">
+                            {error}
                         </div>
-
-                        <div className="bg-white overflow-hidden shadow rounded-lg">
-                            <div className="px-4 py-5 sm:p-6">
-                                <dt className="text-sm font-medium text-gray-500 truncate">
-                                    Subjects
-                                </dt>
-                                <dd className="mt-1 text-3xl font-semibold text-gray-900">
-                                    {subjects.length}
-                                </dd>
-                            </div>
-                        </div>
-
-                        <div className="bg-white overflow-hidden shadow rounded-lg">
-                            <div className="px-4 py-5 sm:p-6">
-                                <dt className="text-sm font-medium text-gray-500 truncate">
-                                    Learning Streak
-                                </dt>
-                                <dd className="mt-1 text-3xl font-semibold text-gray-900">
-                                    {dashboardData?.dashboard_data?.learning_streak || 0} ðŸ”¥
-                                </dd>
-                            </div>
-                        </div>
-
-                        <div className="bg-white overflow-hidden shadow rounded-lg">
-                            <div className="px-4 py-5 sm:p-6">
-                                <dt className="text-sm font-medium text-gray-500 truncate">
-                                    Time Spent
-                                </dt>
-                                <dd className="mt-1 text-3xl font-semibold text-gray-900">
-                                    {dashboardData?.dashboard_data?.total_time_spent || 0}m
-                                </dd>
-                            </div>
-                        </div>
-                    </div>
+                    )}
 
                     {/* Quick Actions */}
                     <div className="bg-white shadow overflow-hidden sm:rounded-lg mb-6">
@@ -2831,25 +3430,27 @@ const Dashboard = () => {
                                     Available Concepts
                                 </h3>
                                 <p className="mt-1 text-sm text-gray-500">
-                                    Select a concept to start learning with our teaching-first approach
+                                    Select a concept to start learning
                                 </p>
                             </div>
                             
                             {/* Subject Filter */}
-                            <div className="w-64">
-                                <select
-                                    value={selectedSubject}
-                                    onChange={(e) => setSelectedSubject(e.target.value)}
-                                    className="mt-1 block w-full pl-3 pr-10 py-2 text-base border-gray-300 focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm rounded-md"
-                                >
-                                    <option value="">All Subjects</option>
-                                    {subjects.map(subject => (
-                                        <option key={subject} value={subject}>
-                                            {subject}
-                                        </option>
-                                    ))}
-                                </select>
-                            </div>
+                            {subjects.length > 0 && (
+                                <div className="w-64">
+                                    <select
+                                        value={selectedSubject}
+                                        onChange={(e) => setSelectedSubject(e.target.value)}
+                                        className="mt-1 block w-full pl-3 pr-10 py-2 text-base border-gray-300 focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm rounded-md"
+                                    >
+                                        <option value="">All Subjects</option>
+                                        {subjects.map(subject => (
+                                            <option key={subject} value={subject}>
+                                                {subject}
+                                            </option>
+                                        ))}
+                                    </select>
+                                </div>
+                            )}
                         </div>
                         
                         <div className="border-t border-gray-200">
@@ -2857,7 +3458,7 @@ const Dashboard = () => {
                                 <div className="text-center py-12">
                                     <p className="text-gray-500">No concepts available.</p>
                                     <p className="text-sm text-gray-400 mt-2">
-                                        Try generating a new concept or check back later.
+                                        Click "Start New Session" to create your first concept!
                                     </p>
                                 </div>
                             ) : (
@@ -2872,7 +3473,9 @@ const Dashboard = () => {
                                                     <div className="mt-2 flex items-center text-sm text-gray-500">
                                                         <span className="truncate">{concept.subject}</span>
                                                         <span className="mx-2">â€¢</span>
-                                                        <span className="capitalize">Difficulty: {concept.difficulty}</span>
+                                                        <span className="capitalize">
+                                                            Difficulty: {concept.difficulty}
+                                                        </span>
                                                         {concept.description && (
                                                             <>
                                                                 <span className="mx-2">â€¢</span>
@@ -2897,51 +3500,6 @@ const Dashboard = () => {
                         </div>
                     </div>
 
-                    {/* User Information */}
-                    <div className="mt-6 bg-white shadow overflow-hidden sm:rounded-lg">
-                        <div className="px-4 py-5 sm:px-6">
-                            <h3 className="text-lg leading-6 font-medium text-gray-900">
-                                Your Information
-                            </h3>
-                        </div>
-                        <div className="border-t border-gray-200 px-4 py-5 sm:px-6">
-                            <dl className="grid grid-cols-1 gap-x-4 gap-y-8 sm:grid-cols-2">
-                                <div className="sm:col-span-1">
-                                    <dt className="text-sm font-medium text-gray-500">
-                                        Username
-                                    </dt>
-                                    <dd className="mt-1 text-sm text-gray-900">
-                                        {user?.username}
-                                    </dd>
-                                </div>
-                                <div className="sm:col-span-1">
-                                    <dt className="text-sm font-medium text-gray-500">
-                                        Email
-                                    </dt>
-                                    <dd className="mt-1 text-sm text-gray-900">
-                                        {user?.email}
-                                    </dd>
-                                </div>
-                                <div className="sm:col-span-1">
-                                    <dt className="text-sm font-medium text-gray-500">
-                                        Full Name
-                                    </dt>
-                                    <dd className="mt-1 text-sm text-gray-900">
-                                        {user?.first_name} {user?.last_name}
-                                    </dd>
-                                </div>
-                                <div className="sm:col-span-1">
-                                    <dt className="text-sm font-medium text-gray-500">
-                                        Member Since
-                                    </dt>
-                                    <dd className="mt-1 text-sm text-gray-900">
-                                        {new Date().toLocaleDateString()} {/* You might want to get this from user data */}
-                                    </dd>
-                                </div>
-                            </dl>
-                        </div>
-                    </div>
-
                     {/* Learning Tips */}
                     <div className="mt-6 bg-blue-50 border-l-4 border-blue-400 p-4 rounded">
                         <div className="flex">
@@ -2952,8 +3510,8 @@ const Dashboard = () => {
                             </div>
                             <div className="ml-3">
                                 <p className="text-sm text-blue-700">
-                                    <strong>Learning Tip:</strong> Our teaching-first approach shows you concepts first, 
-                                    then generates questions based on what you learned. Take your time with each concept!
+                                    <strong>How it works:</strong> For each concept, you'll learn one atomic piece at a time, 
+                                    then take a short quiz. The system adapts to your pace and mastery level.
                                 </p>
                             </div>
                         </div>
@@ -3306,7 +3864,89 @@ export default Register;
 ================================================
 FILE: frontend/src/components/Learning/AtomComplete.jsx
 ================================================
-Error reading file with 'cp1252': 'charmap' codec can't decode byte 0x8f in position 6682: character maps to <undefined>
+// frontend/src/components/Learning/AtomComplete.jsx
+
+import React from 'react';
+import { useLearning } from '../../context/LearningContext';
+
+const AtomComplete = ({ atom, onContinue }) => {
+    const { atomMastery, currentTheta, answers } = useLearning();
+
+    // Calculate stats
+    const totalQuestions = answers.length;
+    const correctCount = answers.filter(a => a.correct).length;
+    const accuracy = totalQuestions > 0 ? (correctCount / totalQuestions) * 100 : 0;
+    const avgTime = answers.length > 0 
+        ? Math.round(answers.reduce((sum, a) => sum + a.time_taken, 0) / answers.length) 
+        : 0;
+
+    return (
+        <div className="bg-white rounded-lg shadow-lg p-8 text-center">
+            {/* Success Icon */}
+            <div className="mb-6">
+                <div className="inline-flex items-center justify-center w-24 h-24 bg-green-100 rounded-full">
+                    <span className="text-5xl">ðŸŽ‰</span>
+                </div>
+            </div>
+
+            <h2 className="text-3xl font-bold text-gray-800 mb-2">Atom Complete!</h2>
+            <p className="text-xl text-green-600 mb-8">You've mastered: {atom?.name}</p>
+
+            {/* Stats Grid */}
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
+                <div className="bg-blue-50 p-4 rounded-lg">
+                    <div className="text-2xl font-bold text-blue-600">
+                        {Math.round(atomMastery * 100)}%
+                    </div>
+                    <div className="text-sm text-gray-600">Final Mastery</div>
+                </div>
+                
+                <div className="bg-purple-50 p-4 rounded-lg">
+                    <div className="text-2xl font-bold text-purple-600">
+                        {accuracy.toFixed(0)}%
+                    </div>
+                    <div className="text-sm text-gray-600">Accuracy</div>
+                </div>
+                
+                <div className="bg-green-50 p-4 rounded-lg">
+                    <div className="text-2xl font-bold text-green-600">
+                        {correctCount}/{totalQuestions}
+                    </div>
+                    <div className="text-sm text-gray-600">Correct</div>
+                </div>
+                
+                <div className="bg-orange-50 p-4 rounded-lg">
+                    <div className="text-2xl font-bold text-orange-600">
+                        {avgTime}s
+                    </div>
+                    <div className="text-sm text-gray-600">Avg Time</div>
+                </div>
+            </div>
+
+            {/* Theta Change */}
+            <div className="mb-8 p-4 bg-gray-50 rounded-lg">
+                <div className="text-sm text-gray-600">Ability (Î¸) Progress</div>
+                <div className="text-2xl font-bold text-gray-800">
+                    {currentTheta.toFixed(2)}
+                </div>
+            </div>
+
+            {/* Continue Button */}
+            <button
+                onClick={onContinue}
+                className="px-8 py-3 bg-green-600 text-white rounded-lg font-semibold hover:bg-green-700 transition"
+            >
+                Continue to Next Atom â†’
+            </button>
+
+            <p className="mt-4 text-sm text-gray-500">
+                You're making great progress! Keep going.
+            </p>
+        </div>
+    );
+};
+
+export default AtomComplete;
 
 
 ================================================
@@ -3320,7 +3960,6 @@ const AtomList = ({ atoms, onStartAtom, conceptName, completedCount }) => {
             'complete': '✅',
             'teaching': '📚',
             'diagnostic': '📝',
-            'reinforcement': '🔄',
             'not_started': '⭕'
         };
         return icons[phase] || '📌';
@@ -3331,7 +3970,6 @@ const AtomList = ({ atoms, onStartAtom, conceptName, completedCount }) => {
             'complete': 'text-green-600',
             'teaching': 'text-blue-600',
             'diagnostic': 'text-purple-600',
-            'reinforcement': 'text-orange-600',
             'not_started': 'text-gray-400'
         };
         return colors[phase] || 'text-gray-600';
@@ -3345,7 +3983,7 @@ const AtomList = ({ atoms, onStartAtom, conceptName, completedCount }) => {
             </p>
 
             <div className="space-y-3 mb-8">
-                {atoms.map((atom, index) => (
+                {atoms.map((atom) => (
                     <div
                         key={atom.id}
                         className={`flex items-center justify-between p-4 rounded-lg border ${
@@ -3366,6 +4004,11 @@ const AtomList = ({ atoms, onStartAtom, conceptName, completedCount }) => {
                                     {atom.phase === 'diagnostic' && '📝 Questions ready'}
                                     {atom.phase === 'not_started' && '⏳ Not started'}
                                 </p>
+                                {atom.mastery_score > 0 && (
+                                    <p className="text-xs text-gray-500 mt-1">
+                                        Mastery: {Math.round(atom.mastery_score * 100)}%
+                                    </p>
+                                )}
                             </div>
                         </div>
                         
@@ -3379,10 +4022,6 @@ const AtomList = ({ atoms, onStartAtom, conceptName, completedCount }) => {
                         )}
                         
                         {atom.phase === 'teaching' && (
-                            <span className="text-blue-600 font-medium">In Progress</span>
-                        )}
-                        
-                        {atom.phase === 'diagnostic' && (
                             <button
                                 onClick={() => onStartAtom(atom)}
                                 className="px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700"
@@ -3405,6 +4044,106 @@ export default AtomList;
 
 
 ================================================
+FILE: frontend/src/components/Learning/AtomReview.jsx
+================================================
+import React, { useState } from 'react';
+
+const AtomReview = ({ atom, metrics, onComplete, onSkip }) => {
+    const [reviewMode, setReviewMode] = useState('summary');
+
+    return (
+        <div className="bg-white rounded-lg shadow-lg p-6">
+            <h2 className="text-2xl font-bold mb-4">Review Required: {atom.name}</h2>
+            
+            {/* Performance Summary */}
+            <div className="bg-red-50 border border-red-200 rounded-lg p-4 mb-6">
+                <h3 className="font-semibold text-red-800 mb-2">Performance Analysis</h3>
+                <div className="grid grid-cols-2 gap-4 text-sm">
+                    <div>
+                        <p className="text-gray-600">Accuracy</p>
+                        <p className="text-xl font-bold text-red-600">
+                            {Math.round(metrics.accuracy * 100)}%
+                        </p>
+                    </div>
+                    <div>
+                        <p className="text-gray-600">Mastery</p>
+                        <p className="text-xl font-bold text-orange-600">
+                            {Math.round(metrics.final_mastery * 100)}%
+                        </p>
+                    </div>
+                    <div>
+                        <p className="text-gray-600">Time Ratio</p>
+                        <p className="text-xl font-bold text-blue-600">
+                            {metrics.time_ratio.toFixed(2)}x
+                        </p>
+                    </div>
+                    <div>
+                        <p className="text-gray-600">Î¸ Change</p>
+                        <p className={`text-xl font-bold ${metrics.theta_change > 0 ? 'text-green-600' : 'text-red-600'}`}>
+                            {metrics.theta_change > 0 ? '+' : ''}{metrics.theta_change.toFixed(2)}
+                        </p>
+                    </div>
+                </div>
+            </div>
+
+            {/* Error Analysis */}
+            {metrics.error_count > 0 && (
+                <div className="mb-6">
+                    <h3 className="font-semibold mb-2">Error Types:</h3>
+                    <div className="space-y-2">
+                        {metrics.conceptual_errors > 0 && (
+                            <div className="bg-purple-50 p-2 rounded">
+                                <span className="font-medium">Conceptual:</span> {metrics.conceptual_errors} errors
+                            </div>
+                        )}
+                        {metrics.procedural_errors > 0 && (
+                            <div className="bg-blue-50 p-2 rounded">
+                                <span className="font-medium">Procedural:</span> {metrics.procedural_errors} errors
+                            </div>
+                        )}
+                        {metrics.factual_errors > 0 && (
+                            <div className="bg-green-50 p-2 rounded">
+                                <span className="font-medium">Factual:</span> {metrics.factual_errors} errors
+                            </div>
+                        )}
+                        {metrics.guessing_errors > 0 && (
+                            <div className="bg-yellow-50 p-2 rounded">
+                                <span className="font-medium">Guessing:</span> {metrics.guessing_errors} errors
+                            </div>
+                        )}
+                    </div>
+                </div>
+            )}
+
+            {/* Review Options */}
+            <div className="space-y-3">
+                <button
+                    onClick={() => setReviewMode('teaching')}
+                    className="w-full bg-blue-600 text-white py-3 rounded-lg hover:bg-blue-700"
+                >
+                    Review Teaching Material
+                </button>
+                <button
+                    onClick={() => setReviewMode('practice')}
+                    className="w-full bg-green-600 text-white py-3 rounded-lg hover:bg-green-700"
+                >
+                    Practice with New Questions
+                </button>
+                <button
+                    onClick={onSkip}
+                    className="w-full bg-gray-200 text-gray-800 py-3 rounded-lg hover:bg-gray-300"
+                >
+                    Skip Review (Not Recommended)
+                </button>
+            </div>
+        </div>
+    );
+};
+
+export default AtomReview;
+
+
+================================================
 FILE: frontend/src/components/Learning/LearningProgress.jsx
 ================================================
 import React, { useEffect } from 'react';
@@ -3419,24 +4158,20 @@ const LearningProgress = ({ onContinue }) => {
 
     const getPhaseIcon = (phase) => {
         const icons = {
-            complete: '✅',
-            mastery_check: '🔄',
-            practice: '📝',
-            teaching: '📚',
-            reinforcement: '⚠️',
-            diagnostic: '⏳'
+            'complete': '✅',
+            'teaching': '📚',
+            'diagnostic': '📝',
+            'not_started': '⭕'
         };
         return icons[phase] || '📌';
     };
 
     const getPhaseColor = (phase) => {
         const colors = {
-            complete: 'text-green-600',
-            mastery_check: 'text-blue-600',
-            practice: 'text-purple-600',
-            teaching: 'text-orange-600',
-            reinforcement: 'text-red-600',
-            diagnostic: 'text-gray-600'
+            'complete': 'text-green-600',
+            'teaching': 'text-blue-600',
+            'diagnostic': 'text-purple-600',
+            'not_started': 'text-gray-400'
         };
         return colors[phase] || 'text-gray-600';
     };
@@ -3461,64 +4196,43 @@ const LearningProgress = ({ onContinue }) => {
         <div className="max-w-4xl mx-auto">
             <h2 className="text-3xl font-bold mb-8">Your Learning Progress</h2>
 
+            {/* Stats Cards */}
             <div className="bg-white rounded-lg shadow-lg p-8 mb-8">
-                <div className="grid grid-cols-2 gap-8 mb-8">
-                    <div className="text-center">
-                        <p className="text-gray-600 mb-2">Overall Mastery</p>
-                        <div className="relative pt-1">
-                            <div className="flex mb-2 items-center justify-between">
-                                <div>
-                                    <span className="text-xs font-semibold inline-block py-1 px-2 uppercase rounded-full text-green-600 bg-green-200">
-                                        Progress
-                                    </span>
-                                </div>
-                                <div className="text-right">
-                                    <span className="text-xs font-semibold inline-block text-green-600">
-                                        {Math.round(learningProgress.overall_mastery * 100)}%
-                                    </span>
-                                </div>
-                            </div>
-                            <div className="overflow-hidden h-2 mb-4 text-xs flex rounded bg-green-200">
-                                <div
-                                    style={{ width: `${learningProgress.overall_mastery * 100}%` }}
-                                    className="shadow-none flex flex-col text-center whitespace-nowrap text-white justify-center bg-green-500"
-                                ></div>
-                            </div>
-                        </div>
-                    </div>
-                    
-                    <div className="text-center">
-                        <p className="text-gray-600 mb-2">Learning Streak</p>
-                        <p className="text-3xl font-bold text-orange-500">
-                            {learningProgress.learning_streak || 0} 🔥
-                        </p>
-                    </div>
-                </div>
-
-                <div className="grid grid-cols-3 gap-4 mb-8">
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
                     <div className="bg-blue-50 p-4 rounded-lg text-center">
                         <p className="text-2xl font-bold text-blue-600">
+                            {Math.round(learningProgress.overall_mastery * 100)}%
+                        </p>
+                        <p className="text-sm text-gray-600">Overall Mastery</p>
+                    </div>
+                    
+                    <div className="bg-green-50 p-4 rounded-lg text-center">
+                        <p className="text-2xl font-bold text-green-600">
                             {learningProgress.total_atoms || 0}
                         </p>
                         <p className="text-sm text-gray-600">Total Atoms</p>
                     </div>
                     
-                    <div className="bg-green-50 p-4 rounded-lg text-center">
-                        <p className="text-2xl font-bold text-green-600">
-                            {learningProgress.concepts?.reduce((acc, c) => acc + c.mastered_count, 0) || 0}
+                    <div className="bg-orange-50 p-4 rounded-lg text-center">
+                        <p className="text-2xl font-bold text-orange-600">
+                            {learningProgress.learning_streak || 0} 🔥
                         </p>
-                        <p className="text-sm text-gray-600">Mastered</p>
+                        <p className="text-sm text-gray-600">Learning Streak</p>
                     </div>
-                    
-                    <div className="bg-purple-50 p-4 rounded-lg text-center">
-                        <p className="text-2xl font-bold text-purple-600">
-                            {learningProgress.concepts?.length || 0}
-                        </p>
-                        <p className="text-sm text-gray-600">Concepts</p>
+                </div>
+
+                {/* Theta Score */}
+                <div className="border-t pt-6">
+                    <div className="flex justify-between items-center">
+                        <span className="text-gray-700 font-medium">Ability (θ):</span>
+                        <span className="text-lg font-semibold text-purple-600">
+                            {learningProgress.overall_theta?.toFixed(2) || '0.00'}
+                        </span>
                     </div>
                 </div>
             </div>
 
+            {/* Concepts */}
             <h3 className="text-xl font-bold mb-4">Concepts</h3>
             
             {learningProgress.concepts?.map((concept, idx) => (
@@ -3540,12 +4254,13 @@ const LearningProgress = ({ onContinue }) => {
                                         <p className="text-xs text-gray-500">
                                             Mastery: {Math.round(atom.mastery * 100)}%
                                             {atom.streak > 0 && ` • Streak: ${atom.streak}`}
-                                            {atom.hint_usage > 0 && ` • Hints: ${atom.hint_usage}`}
                                         </p>
                                     </div>
                                 </div>
                                 <span className={`text-sm font-medium ${getPhaseColor(atom.phase)}`}>
-                                    {atom.phase.replace('_', ' ')}
+                                    {atom.phase === 'complete' ? 'Mastered' : 
+                                     atom.phase === 'teaching' ? 'Learning' :
+                                     atom.phase === 'diagnostic' ? 'In Progress' : 'Not Started'}
                                 </span>
                             </div>
                         ))}
@@ -3561,10 +4276,6 @@ const LearningProgress = ({ onContinue }) => {
                     Continue Learning
                 </button>
             </div>
-
-            <div className="mt-6 text-sm text-gray-500 text-center">
-                <p>ℹ️ Keep practicing to maintain retention and build streaks!</p>
-            </div>
         </div>
     );
 };
@@ -3576,58 +4287,18 @@ export default LearningProgress;
 FILE: frontend/src/components/Learning/LearningRoute.jsx
 ================================================
 import React from 'react';
-import { useParams, useLocation, useNavigate } from 'react-router-dom';
+import { useParams, useNavigate } from 'react-router-dom';
 import { LearningProvider } from '../../context/LearningContext';
 import TeachingFirstFlow from './TeachingFirstFlow';
 
 const LearningRoute = () => {
-    const params = useParams();
-    const location = useLocation();
+    const { conceptId } = useParams();
     const navigate = useNavigate();
     
-    // Log everything
-    console.log("=== LearningRoute Debug ===");
-    console.log("Full params object:", params);
-    console.log("Location pathname:", location.pathname);
-    console.log("Location search:", location.search);
-    console.log("Location state:", location.state);
-    console.log("conceptId from params:", params.conceptId);
-    
-    // Try to get conceptId from different sources
-    let conceptId = params.conceptId;
-    
-    // If not in params, try to get from state
-    if (!conceptId && location.state?.conceptId) {
-        conceptId = location.state.conceptId;
-        console.log("Got conceptId from state:", conceptId);
-    }
-    
-    // If still no conceptId, try to extract from pathname
     if (!conceptId) {
-        const pathParts = location.pathname.split('/');
-        const lastPart = pathParts[pathParts.length - 1];
-        if (lastPart && lastPart !== 'learn' && !isNaN(parseInt(lastPart))) {
-            conceptId = lastPart;
-            console.log("Extracted conceptId from pathname:", conceptId);
-        }
-    }
-    
-    console.log("Final conceptId:", conceptId);
-    
-    if (conceptId) {
         return (
-            <LearningProvider>
-                <TeachingFirstFlow conceptId={parseInt(conceptId)} />
-            </LearningProvider>
-        );
-    }
-
-    return (
-        <LearningProvider>
             <div className="text-center py-12">
-                <p className="text-red-600">No concept selected. Please go back and try again.</p>
-                <p className="text-gray-500 mt-2">URL: {location.pathname}</p>
-                <p className="text-gray-500">Params: {JSON.stringify(params)}</p>
+                <p className="text-red-600">No concept selected.</p>
                 <button 
                     onClick={() => navigate('/dashboard')}
                     className="mt-4 px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700"
@@ -3635,6 +4306,12 @@ const LearningRoute = () => {
                     Go to Dashboard
                 </button>
             </div>
+        );
+    }
+
+    return (
+        <LearningProvider>
+            <TeachingFirstFlow conceptId={parseInt(conceptId)} />
         </LearningProvider>
     );
 };
@@ -3645,13 +4322,203 @@ export default LearningRoute;
 ================================================
 FILE: frontend/src/components/Learning/QuestionsFromTeaching.jsx
 ================================================
-Error reading file with 'cp1252': 'charmap' codec can't decode byte 0x9d in position 1995: character maps to <undefined>
+Error reading file with 'cp1252': 'charmap' codec can't decode byte 0x9d in position 2580: character maps to <undefined>
 
 
 ================================================
 FILE: frontend/src/components/Learning/StartAnyConceptSession.jsx
 ================================================
-Error reading file with 'cp1252': 'charmap' codec can't decode byte 0x90 in position 11320: character maps to <undefined>
+import React, { useState } from 'react';
+import { useNavigate } from 'react-router-dom';
+import { useLearning } from '../../context/LearningContext';
+
+const StartAnyConceptSession = () => {
+    const [formData, setFormData] = useState({
+        subject: '',
+        concept: '',
+        knowledge_level: 'intermediate'
+    });
+    const [loading, setLoading] = useState(false);
+    const [error, setError] = useState('');
+    const [generatedAtoms, setGeneratedAtoms] = useState(null);
+    
+    const navigate = useNavigate();
+    const { generateConcept } = useLearning();
+
+    const handleChange = (e) => {
+        setFormData({
+            ...formData,
+            [e.target.name]: e.target.value
+        });
+    };
+
+    const handleSubmit = async (e) => {
+        e.preventDefault();
+        setError('');
+        setLoading(true);
+
+        const result = await generateConcept(
+            formData.subject,
+            formData.concept,
+            formData.knowledge_level
+        );
+
+        if (result.success) {
+            setGeneratedAtoms(result.data);
+        } else {
+            setError(result.error || 'Failed to generate concept');
+        }
+
+        setLoading(false);
+    };
+
+    const handleStartLearning = () => {
+        if (generatedAtoms) {
+            navigate(`/learn/${generatedAtoms.concept_id}`);
+        }
+    };
+
+    const knowledgeLevels = [
+        { value: 'zero', label: 'Zero Knowledge (Complete Beginner)' },
+        { value: 'beginner', label: 'Beginner (Some basic understanding)' },
+        { value: 'intermediate', label: 'Intermediate (Comfortable with basics)' },
+        { value: 'advanced', label: 'Advanced (Strong understanding)' }
+    ];
+
+    return (
+        <div className="min-h-screen bg-gray-50 py-12">
+            <div className="max-w-2xl mx-auto px-4">
+                <div className="bg-white rounded-lg shadow-lg p-8">
+                    <h1 className="text-2xl font-bold text-gray-800 mb-6">
+                        Start New Learning Session
+                    </h1>
+
+                    {!generatedAtoms ? (
+                        <form onSubmit={handleSubmit} className="space-y-6">
+                            {/* Subject */}
+                            <div>
+                                <label className="block text-sm font-medium text-gray-700 mb-2">
+                                    Subject *
+                                </label>
+                                <input
+                                    type="text"
+                                    name="subject"
+                                    value={formData.subject}
+                                    onChange={handleChange}
+                                    required
+                                    placeholder="e.g., Microprocessor, Mathematics, Physics"
+                                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                                />
+                            </div>
+
+                            {/* Concept */}
+                            <div>
+                                <label className="block text-sm font-medium text-gray-700 mb-2">
+                                    Concept *
+                                </label>
+                                <input
+                                    type="text"
+                                    name="concept"
+                                    value={formData.concept}
+                                    onChange={handleChange}
+                                    required
+                                    placeholder="e.g., Memory Organization, Calculus, Quantum Mechanics"
+                                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                                />
+                            </div>
+
+                            {/* Knowledge Level */}
+                            <div>
+                                <label className="block text-sm font-medium text-gray-700 mb-2">
+                                    Your Knowledge Level *
+                                </label>
+                                <select
+                                    name="knowledge_level"
+                                    value={formData.knowledge_level}
+                                    onChange={handleChange}
+                                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                                >
+                                    {knowledgeLevels.map(level => (
+                                        <option key={level.value} value={level.value}>
+                                            {level.label}
+                                        </option>
+                                    ))}
+                                </select>
+                            </div>
+
+                            {error && (
+                                <div className="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded">
+                                    {error}
+                                </div>
+                            )}
+
+                            <button
+                                type="submit"
+                                disabled={loading}
+                                className="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 px-4 rounded-lg transition disabled:opacity-50 disabled:cursor-not-allowed"
+                            >
+                                {loading ? 'Generating atoms...' : 'Generate Learning Path'}
+                            </button>
+
+                            <button
+                                type="button"
+                                onClick={() => navigate('/dashboard')}
+                                className="w-full bg-gray-200 hover:bg-gray-300 text-gray-800 font-bold py-3 px-4 rounded-lg transition"
+                            >
+                                Back to Dashboard
+                            </button>
+                        </form>
+                    ) : (
+                        <div className="space-y-6">
+                            {/* Success message */}
+                            <div className="bg-green-50 border border-green-200 rounded-lg p-6">
+                                <h3 className="text-lg font-semibold text-green-800 mb-2">
+                                    âœ“ Learning Path Generated!
+                                </h3>
+                                <p className="text-green-700">
+                                    We've created {generatedAtoms.atoms.length} atomic concepts for "{generatedAtoms.concept_name}".
+                                </p>
+                            </div>
+
+                            {/* Atoms list */}
+                            <div>
+                                <h4 className="font-medium text-gray-700 mb-3">Atomic Concepts:</h4>
+                                <div className="space-y-2">
+                                    {generatedAtoms.atoms.map((atom, index) => (
+                                        <div 
+                                            key={atom.id}
+                                            className="flex items-center p-3 bg-gray-50 rounded-lg"
+                                        >
+                                            <span className="w-8 h-8 bg-blue-100 text-blue-800 rounded-full flex items-center justify-center font-bold mr-3">
+                                                {index + 1}
+                                            </span>
+                                            <span className="text-gray-800">{atom.name}</span>
+                                        </div>
+                                    ))}
+                                </div>
+                            </div>
+
+                            {/* Start learning button */}
+                            <button
+                                onClick={handleStartLearning}
+                                className="w-full bg-green-600 hover:bg-green-700 text-white font-bold py-3 px-4 rounded-lg transition"
+                            >
+                                Start Learning Now
+                            </button>
+
+                            {/* Note */}
+                            <p className="text-sm text-gray-500 text-center">
+                                You'll learn each concept one by one, with teaching followed by assessment.
+                            </p>
+                        </div>
+                    )}
+                </div>
+            </div>
+        </div>
+    );
+};
+
+export default StartAnyConceptSession;
 
 
 ================================================
@@ -3672,17 +4539,16 @@ const StartAnyConceptSessionRoute = () => {
 export default StartAnyConceptSessionRoute;
 
 
-
 ================================================
 FILE: frontend/src/components/Learning/TeachingFirstFlow.jsx
 ================================================
-Error reading file with 'cp1252': 'charmap' codec can't decode byte 0x90 in position 8808: character maps to <undefined>
+Error reading file with 'cp1252': 'charmap' codec can't decode byte 0x8f in position 8956: character maps to <undefined>
 
 
 ================================================
 FILE: frontend/src/components/Learning/TeachingModule.jsx
 ================================================
-Error reading file with 'cp1252': 'charmap' codec can't decode byte 0x8f in position 3115: character maps to <undefined>
+Error reading file with 'cp1252': 'charmap' codec can't decode byte 0x90 in position 3033: character maps to <undefined>
 
 
 ================================================
@@ -3703,7 +4569,6 @@ export const AuthProvider = ({ children }) => {
     useEffect(() => {
         const token = localStorage.getItem('access_token');
         if (token) {
-            // Verify token by fetching user data
             fetchUser();
         } else {
             setLoading(false);
@@ -3791,114 +4656,104 @@ export const useAuth = () => {
 ================================================
 FILE: frontend/src/context/LearningContext.jsx
 ================================================
-import React, { createContext, useCallback, useMemo, useState, useContext } from 'react';
+// frontend/src/context/LearningContext.jsx - Enhanced version
+
+import React, { createContext, useCallback, useMemo, useState, useContext, useRef } from 'react';
 import axios from '../axiosConfig';
 
 const LearningContext = createContext(null);
 
 export const LearningProvider = ({ children }) => {
     const [currentSession, setCurrentSession] = useState(null);
-    const [diagnosticResults, setDiagnosticResults] = useState(null);
     const [currentAtom, setCurrentAtom] = useState(null);
     const [learningProgress, setLearningProgress] = useState(null);
     const [loading, setLoading] = useState(false);
     const [knowledgeLevel, setKnowledgeLevel] = useState('intermediate');
-    const [learningPace, setLearningPace] = useState('normal');
-    const [masteryData, setMasteryData] = useState({});
+    
+    // Real-time tracking
+    const [currentQuestions, setCurrentQuestions] = useState([]);
+    const [currentQuestionIndex, setCurrentQuestionIndex] = useState(0);
+    const [answers, setAnswers] = useState([]);
+    const [atomMastery, setAtomMastery] = useState(0.3);
+    const [currentTheta, setCurrentTheta] = useState(0.0);
+    const [pacingDecision, setPacingDecision] = useState('stay');
+    const [nextAction, setNextAction] = useState('continue_practice');
+    const [showTeaching, setShowTeaching] = useState(false);
+    const [teachingContent, setTeachingContent] = useState(null);
+    const [metrics, setMetrics] = useState({});
+    
+    // Timers
+    const questionStartTime = useRef(null);
+    const [timeSpent, setTimeSpent] = useState(0);
 
-    const normalizePositiveInt = (value) => {
-        const num = typeof value === 'string' ? Number(value) : value;
-        if (!Number.isInteger(num) || num <= 0) return null;
-        return num;
-    };
-
-    // NEW TEACHING-FIRST FLOW METHODS
-
+    // Generate atoms for a concept (no questions)
     const generateConcept = useCallback(async (subject, concept, knowledgeLevel = 'intermediate') => {
-    setLoading(true);
-    try {
-        const response = await axios.post('/auth/api/generate-concept/', {
-            subject: subject,
-            concept: concept,
-            knowledge_level: knowledgeLevel
-        });
-        return { success: true, data: response.data };
-    } catch (error) {
-        return {
-            success: false,
-            error: error.response?.data?.error || 'Failed to generate concept'
-        };
-    } finally {
-        setLoading(false);
-    }
-}, []);
-
-    // In LearningContext.jsx, add logging to each API call
-const startTeachingSession = useCallback(async (conceptId, level = 'intermediate') => {
-    setLoading(true);
-    setKnowledgeLevel(level);
-    try {
-        console.log("Making API call to start-teaching-session with:", { conceptId, level });
-        
-        // Check token before making request
-        const token = localStorage.getItem('access_token');
-        console.log("Token present:", !!token);
-        
-        const response = await axios.post('/auth/api/start-teaching-session/', {
-            concept_id: conceptId,
-            knowledge_level: level
-        });
-        
-        console.log("API Response - startTeachingSession:", response.data);
-        setCurrentSession(response.data);
-        return { success: true, data: response.data };
-    } catch (error) {
-        console.error("API Error - startTeachingSession:", {
-            status: error.response?.status,
-            data: error.response?.data,
-            message: error.message
-        });
-        
-        // If 401, token might be expired
-        if (error.response?.status === 401) {
-            // Clear tokens and redirect will happen via interceptor
-            console.log("Received 401 - token may be expired");
-        }
-        
-        return {
-            success: false,
-            error: error.response?.data?.error || 'Failed to start session'
-        };
-    } finally {
-        setLoading(false);
-    }
-}, []);
-
-    const getAtomList = useCallback(async (conceptId) => {
+        setLoading(true);
         try {
-            const response = await axios.get(`/auth/api/concepts/${conceptId}/atoms-list/`);
+            const response = await axios.post('/auth/api/generate-concept/', {
+                subject: subject,
+                concept: concept,
+                knowledge_level: knowledgeLevel
+            });
             return { success: true, data: response.data };
         } catch (error) {
             return {
                 success: false,
-                error: error.response?.data?.error || 'Failed to get atoms'
+                error: error.response?.data?.error || 'Failed to generate concept'
             };
+        } finally {
+            setLoading(false);
         }
     }, []);
 
-    const getTeachingContent = useCallback(async (atomId) => {
-        const normalizedAtomId = normalizePositiveInt(atomId);
-        if (normalizedAtomId === null) {
-            return { success: false, error: 'Invalid atom id. Please restart the session step.' };
-        }
-
+    // Start teaching session for a concept
+    const startTeachingSession = useCallback(async (conceptId, level = 'intermediate') => {
         setLoading(true);
+        setKnowledgeLevel(level);
+        setAnswers([]);
+        setAtomMastery(0.3);
+        setPacingDecision('stay');
+        
         try {
-            const response = await axios.get(`/auth/api/teaching/${normalizedAtomId}/`);
+            const response = await axios.post('/auth/api/start-teaching-session/', {
+                concept_id: conceptId,
+                knowledge_level: level
+            });
+            
+            setCurrentSession(response.data);
+            
+            // If there's a current atom, set it
+            if (response.data.current_atom) {
+                setCurrentAtom(response.data.current_atom);
+            }
+            
+            return { success: true, data: response.data };
+        } catch (error) {
+            return {
+                success: false,
+                error: error.response?.data?.error || 'Failed to start session'
+            };
+        } finally {
+            setLoading(false);
+        }
+    }, []);
+
+    // Get teaching content for an atom
+    const getTeachingContent = useCallback(async ({ session_id, atom_id }) => {
+        setLoading(true);
+        setShowTeaching(true);
+        try {
+            const response = await axios.post('/auth/api/teaching-content/', {
+                session_id: session_id,
+                atom_id: atom_id
+            });
+            
+            setTeachingContent(response.data);
             setCurrentAtom({
-                id: normalizedAtomId,
+                id: atom_id,
                 ...response.data
             });
+            
             return { success: true, data: response.data };
         } catch (error) {
             return {
@@ -3910,13 +4765,21 @@ const startTeachingSession = useCallback(async (conceptId, level = 'intermediate
         }
     }, []);
 
-    const generateQuestionsFromTeaching = useCallback(async (sessionId, atomId) => {
+    // Generate questions based on teaching content
+    const generateQuestionsFromTeaching = useCallback(async ({ session_id, atom_id }) => {
         setLoading(true);
         try {
             const response = await axios.post('/auth/api/generate-questions-from-teaching/', {
-                session_id: sessionId,
-                atom_id: atomId
+                session_id: session_id,
+                atom_id: atom_id
             });
+            
+            setCurrentQuestions(response.data.questions || []);
+            setCurrentQuestionIndex(0);
+            
+            // Start timer for first question
+            questionStartTime.current = Date.now();
+            
             return { success: true, data: response.data };
         } catch (error) {
             return {
@@ -3928,16 +4791,76 @@ const startTeachingSession = useCallback(async (conceptId, level = 'intermediate
         }
     }, []);
 
-    const submitAtomAnswer = useCallback(async (sessionId, atomId, questionIndex, selected, timeTaken) => {
+    // Submit answer for an atom question with REAL-TIME updates
+    const submitAtomAnswer = useCallback(async ({ 
+        session_id, 
+        atom_id, 
+        question_index, 
+        selected,
+        forceTimeTaken = null
+    }) => {
+        // Calculate time taken if not provided
+        let time_taken = forceTimeTaken;
+        if (time_taken === null && questionStartTime.current) {
+            time_taken = Math.round((Date.now() - questionStartTime.current) / 1000);
+        } else if (time_taken === null) {
+            time_taken = 30; // Default fallback
+        }
+        
         try {
             const response = await axios.post('/auth/api/submit-atom-answer/', {
-                session_id: sessionId,
-                atom_id: atomId,
-                question_index: questionIndex,
+                session_id: session_id,
+                atom_id: atom_id,
+                question_index: question_index,
                 selected: selected,
-                time_taken: timeTaken
+                time_taken: time_taken
             });
-            return { success: true, data: response.data };
+            
+            const data = response.data;
+            
+            // REAL-TIME UI UPDATES based on response
+            setAtomMastery(data.updated_mastery);
+            setCurrentTheta(data.updated_theta);
+            setPacingDecision(data.pacing_decision);
+            setNextAction(data.next_action);
+            setMetrics(data.metrics || {});
+            
+            // Store answer
+            const newAnswer = {
+                question_index,
+                selected,
+                correct: data.correct,
+                error_type: data.error_type,
+                time_taken,
+                mastery_after: data.updated_mastery,
+                pacing_decision: data.pacing_decision
+            };
+            
+            setAnswers(prev => [...prev, newAnswer]);
+            
+            // Check if atom is complete
+            if (data.atom_complete) {
+                // Move to next atom or show completion
+                if (data.next_atom) {
+                    setCurrentAtom(prev => ({
+                        ...prev,
+                        next_atom: data.next_atom
+                    }));
+                }
+            }
+            
+            // Update session data with pacing info
+            setCurrentSession(prev => {
+                if (!prev) return prev;
+                return {
+                    ...prev,
+                    last_pacing: data.pacing_decision,
+                    current_mastery: data.updated_mastery,
+                    current_theta: data.updated_theta
+                };
+            });
+            
+            return { success: true, data };
         } catch (error) {
             return {
                 success: false,
@@ -3946,78 +4869,47 @@ const startTeachingSession = useCallback(async (conceptId, level = 'intermediate
         }
     }, []);
 
-    // In LearningContext.jsx
-const completeAtom = useCallback(async (sessionId, atomId, continueLearning) => {
-    try {
-        console.log("Calling completeAtom with:", { sessionId, atomId, continueLearning });
-        
-        const response = await axios.post('/auth/api/complete-atom/', {
-            session_id: sessionId,
-            atom_id: atomId,
-            continue_learning: continueLearning
-        });
-        
-        console.log("completeAtom response:", response.data);
-        return { success: true, data: response.data };
-    } catch (error) {
-        console.error("completeAtom error:", error.response?.data || error.message);
-        return {
-            success: false,
-            error: error.response?.data?.error || 'Failed to complete atom'
-        };
-    }
-}, []);
-
-    // Practice methods (keep these for reinforcement)
-    const getPracticeQuestions = useCallback(async (atomId, difficulty = 'easy', count = 3) => {
-        setLoading(true);
-        try {
-            const response = await axios.get(
-                `/auth/api/practice/${atomId}/?difficulty=${difficulty}&count=${count}`
-            );
-            return { success: true, data: response.data };
-        } catch (error) {
-            return {
-                success: false,
-                error: error.response?.data?.error || 'Failed to get practice questions'
-            };
-        } finally {
-            setLoading(false);
+    // Start next question with timer
+    const nextQuestion = useCallback(() => {
+        if (currentQuestionIndex < currentQuestions.length - 1) {
+            setCurrentQuestionIndex(prev => prev + 1);
+            questionStartTime.current = Date.now();
         }
-    }, []);
+    }, [currentQuestionIndex, currentQuestions.length]);
 
-    const submitPracticeAnswer = useCallback(async (questionId, selected, timeTaken, hintUsed = false) => {
+    // Complete atom and determine next action
+    const completeAtom = useCallback(async ({ session_id, atom_id, continue_learning }) => {
         try {
-            const response = await axios.post('/auth/api/submit-answer/', {
-                question_id: questionId,
-                selected: selected,
-                time_taken: timeTaken,
-                hint_used: hintUsed
+            const response = await axios.post('/auth/api/complete-atom/', {
+                session_id: session_id,
+                atom_id: atom_id,
+                continue_learning: continue_learning
             });
-            return { success: true, data: response.data };
+            
+            const data = response.data;
+            
+            // Handle next steps based on pacing
+            if (data.next_action === 'next_atom' && data.next_atom) {
+                setCurrentAtom(data.next_atom);
+                setShowTeaching(true); // Show teaching for next atom
+                setCurrentQuestions([]);
+                setAnswers([]);
+            } else if (data.concept_complete) {
+                // All atoms complete
+                setCurrentAtom(null);
+                setCurrentSession(null);
+            }
+            
+            return { success: true, data };
         } catch (error) {
             return {
                 success: false,
-                error: error.response?.data?.error || 'Failed to submit answer'
+                error: error.response?.data?.error || 'Failed to complete atom'
             };
         }
     }, []);
 
-    const getHint = useCallback(async (questionId, errorCount = 0) => {
-        try {
-            const response = await axios.post('/auth/api/get-hint/', {
-                question_id: questionId,
-                error_count: errorCount
-            });
-            return { success: true, data: response.data };
-        } catch (error) {
-            return {
-                success: false,
-                error: error.response?.data?.error || 'Failed to get hint'
-            };
-        }
-    }, []);
-
+    // Load learning progress
     const loadLearningProgress = useCallback(async () => {
         setLoading(true);
         try {
@@ -4034,70 +4926,78 @@ const completeAtom = useCallback(async (sessionId, atomId, continueLearning) => 
         }
     }, []);
 
-    const getMasteryRecommendation = useCallback((atomId) => {
-        const data = masteryData[atomId];
-        if (!data) return { action: 'proceed', confidence: 'high' };
-        
-        if (data.status === 'needs_attention' && data.attempts > 2) {
-            return { action: 'review', confidence: 'low' };
-        }
-        
-        return { action: 'proceed', confidence: 'medium' };
-    }, [masteryData]);
+    // Reset for new atom
+    const resetForNewAtom = useCallback(() => {
+        setCurrentQuestions([]);
+        setCurrentQuestionIndex(0);
+        setAnswers([]);
+        setShowTeaching(true);
+        setPacingDecision('stay');
+        questionStartTime.current = null;
+    }, []);
 
     const value = useMemo(() => ({
         // State
         currentSession,
-        diagnosticResults,
         currentAtom,
         learningProgress,
         loading,
         knowledgeLevel,
-        learningPace,
-        masteryData,
+        
+        // Real-time tracking
+        currentQuestions,
+        currentQuestionIndex,
+        answers,
+        atomMastery,
+        currentTheta,
+        pacingDecision,
+        nextAction,
+        showTeaching,
+        teachingContent,
+        metrics,
+        timeSpent,
         
         // Setters
         setKnowledgeLevel,
+        setShowTeaching,
         
-        // Teaching-first flow methods
+        // Core methods
         generateConcept,
         startTeachingSession,
-        getAtomList,
         getTeachingContent,
         generateQuestionsFromTeaching,
         submitAtomAnswer,
         completeAtom,
-        
-        // Practice methods
-        getPracticeQuestions,
-        submitPracticeAnswer,
-        getHint,
         loadLearningProgress,
-        getMasteryRecommendation
+        nextQuestion,
+        resetForNewAtom
+        
     }), [
-        // State dependencies
         currentSession,
-        diagnosticResults,
         currentAtom,
         learningProgress,
         loading,
         knowledgeLevel,
-        learningPace,
-        masteryData,
-        
-        // Method dependencies
-        generateConcept,    
+        currentQuestions,
+        currentQuestionIndex,
+        answers,
+        atomMastery,
+        currentTheta,
+        pacingDecision,
+        nextAction,
+        showTeaching,
+        teachingContent,
+        metrics,
+        timeSpent,
+        generateConcept,
         startTeachingSession,
-        getAtomList,
         getTeachingContent,
         generateQuestionsFromTeaching,
         submitAtomAnswer,
         completeAtom,
-        getPracticeQuestions,
-        submitPracticeAnswer,
-        getHint,
         loadLearningProgress,
-        getMasteryRecommendation
+        nextQuestion,
+        resetForNewAtom
     ]);
 
     return (

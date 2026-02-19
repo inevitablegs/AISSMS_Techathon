@@ -24,6 +24,12 @@ from learning_engine.knowledge_tracing import (
     update_mastery_from_behavior, classify_error_type
 )
 
+
+from learning_engine.pacing_engine import PacingEngine, PacingContext
+from learning_engine.adaptive_flow import AdaptiveLearningEngine
+from learning_engine.pacing_engine import PacingEngine, PacingContext
+from learning_engine.models import TeachingAtomState
+
 logger = logging.getLogger(__name__)
 
 # ==================== AUTH VIEWS ====================
@@ -150,62 +156,106 @@ class StartTeachingSessionView(APIView):
     permission_classes = [IsAuthenticated]
     
     def post(self, request):
+        user = request.user
         concept_id = request.data.get('concept_id')
         knowledge_level = request.data.get('knowledge_level', 'intermediate')
-        
+
+        if not concept_id:
+            return Response({'error': 'concept_id is required'}, status=400)
+
         try:
             concept = Concept.objects.get(id=concept_id)
         except Concept.DoesNotExist:
             return Response({'error': 'Concept not found'}, status=404)
-        
-        # Create learning session
-        session = LearningSession.objects.create(
-            user=request.user,
-            concept=concept,
-            knowledge_level=knowledge_level,
-            session_data={
-                'current_atom_index': 0,
-                'completed_atoms': [],
-                'current_phase': 'teaching',
-                'pacing_history': [],
-                'performance_history': []
-            }
-        )
-        
-        # Get or create atom progress records
-        atoms = TeachingAtom.objects.filter(concept=concept).order_by('order')
-        atom_list = []
-        
-        for atom in atoms:
-            progress, _ = StudentProgress.objects.get_or_create(
-                user=request.user,
-                atom=atom,
-                defaults={'phase': 'teaching'}
+
+        # Check if there's an existing incomplete session
+        existing_session = LearningSession.objects.filter(
+            user=user, 
+            concept=concept, 
+            end_time__isnull=True
+        ).first()
+
+        if existing_session:
+            # Resume existing session
+            session = existing_session
+        else:
+            # Create new session
+            session = LearningSession.objects.create(
+                user=user,
+                concept=concept,
+                knowledge_level=knowledge_level
             )
-            atom_list.append({
-                'id': atom.id,
-                'name': atom.name,
-                'phase': progress.phase,
-                'mastery_score': progress.mastery_score,
-                'order': atom.order
-            })
+
+        # Get or create progress records for this concept's atoms
+        atoms = TeachingAtom.objects.filter(concept=concept).order_by('order')
         
+        atom_states = []
+        for atom in atoms:
+            progress, created = StudentProgress.objects.get_or_create(
+                user=user,
+                atom=atom,
+                defaults={
+                    'mastery_score': 0.3,
+                    'phase': 'diagnostic',
+                    'error_history': []
+                }
+            )
+            
+            atom_states.append(TeachingAtomState(
+                id=atom.id,
+                name=atom.name,
+                mastery_score=progress.mastery_score,
+                phase=progress.phase,
+                streak=progress.streak,
+                hint_usage=progress.hint_usage,
+                error_history=progress.error_history or [],
+                retention_verified=progress.retention_verified
+            ))
+
+        # Find current atom (first incomplete one)
+        current_atom = None
+        for atom_state in atom_states:
+            if atom_state.phase != 'complete':
+                current_atom = atom_state
+                break
+
+        if not current_atom and atom_states:
+            # All atoms complete - concept is mastered
+            current_atom = atom_states[-1]  # Return last atom
+
         # Determine initial pacing based on knowledge level
-        engine = AdaptiveLearningEngine()
-        initial_pacing = engine.determine_pacing(
-            diagnostic_results={'accuracy': 0.5},  # Default
-            knowledge_level=knowledge_level
+        pacing_engine = PacingEngine()
+        pacing_context = PacingContext(
+            accuracy=0.5,  # Default accuracy
+            mastery_score=current_atom.mastery_score if current_atom else 0.3,
+            streak=current_atom.streak if current_atom else 0,
+            error_types=current_atom.error_history[-5:] if current_atom and current_atom.error_history else [],
+            theta=0.0,  # Initial theta
+            questions_answered=0,
+            knowledge_level=knowledge_level,
+            phase=current_atom.phase.value if current_atom and hasattr(current_atom.phase, 'value') else 'diagnostic'
         )
-        
+
+        initial_pacing, next_action, reasoning = pacing_engine.decide_pacing(pacing_context)
+
+        # Get user's learning profile
+        try:
+            profile = LearningProfile.objects.get(user=user)
+        except LearningProfile.DoesNotExist:
+            profile = LearningProfile.objects.create(user=user)
+
         return Response({
             'session_id': session.id,
             'concept_id': concept.id,
             'concept_name': concept.name,
-            'atoms': atom_list,
-            'knowledge_level': knowledge_level,
-            'current_atom_index': 0,
+            'subject': concept.subject,
+            'atoms': [state.to_dict() for state in atom_states],
+            'current_atom': current_atom.to_dict() if current_atom else None,
             'initial_pacing': initial_pacing,
-            'pacing_recommendation': self._get_pacing_message(initial_pacing)
+            'next_action': next_action,
+            'reasoning': reasoning,
+            'overall_theta': profile.overall_theta,
+            'knowledge_level': knowledge_level
         })
     
     def _get_pacing_message(self, pacing):
@@ -349,16 +399,22 @@ class GenerateQuestionsFromTeachingView(APIView):
             # Determine question distribution based on knowledge level and pacing
             level_config = self._get_question_distribution(session.knowledge_level, current_pacing)
             
-            # Generate questions
-            generated = generator.generate_questions(
-                subject=atom.concept.subject,
-                concept=atom.concept.name,
-                atom=atom.name,
-                need_easy=level_config['easy'],
-                need_medium=level_config['medium'],
-                # need_hard=level_config.get('hard', 0),
-                knowledge_level=session.knowledge_level
-            )
+            # Generate questions by difficulty (API expects target_difficulty + count)
+            generated = []
+            for difficulty_key in ('easy', 'medium', 'hard'):
+                count = int(level_config.get(difficulty_key, 0) or 0)
+                if count <= 0:
+                    continue
+
+                batch = generator.generate_questions(
+                    subject=atom.concept.subject,
+                    concept=atom.concept.name,
+                    atom=atom.name,
+                    target_difficulty=difficulty_key,
+                    count=count,
+                    knowledge_level=session.knowledge_level
+                )
+                generated.extend(batch)
             
             # Save questions to database
             for q_data in generated:
@@ -379,14 +435,26 @@ class GenerateQuestionsFromTeachingView(APIView):
         
         # Prepare response
         questions_data = []
+        full_questions = []
         for q in questions:
             q_dict = q.to_dict()
             # Remove correct index for client
             q_dict.pop('correct_index', None)
             questions_data.append(q_dict)
+
+            # Store full question for grading in session (includes correct_index)
+            full_questions.append({
+                'difficulty': q.difficulty,
+                'cognitive_operation': q.cognitive_operation,
+                'estimated_time': q.estimated_time,
+                'question': q.question_text,
+                'options': q.options,
+                'correct_index': q.correct_index,
+            })
         
         # Update session
         session_data['current_phase'] = 'questions'
+        session_data['questions'] = full_questions
         session.session_data = session_data
         session.save()
         
@@ -435,16 +503,18 @@ class GenerateQuestionsFromTeachingView(APIView):
         # Extract pacing value if it's a dictionary
         if isinstance(pacing, dict):
             pacing_value = pacing.get('pacing', 'stay')
-        else:
+        elif isinstance(pacing, str):
             pacing_value = pacing
+        else:
+            pacing_value = 'stay'
         
         multipliers = {
-            'sharp_slowdown': 2.0,  # 2x time for struggling students
-            'slow_down': 1.5,        # 1.5x time
-            'stay': 1.0,             # normal time
-            'speed_up': 0.7,          # 30% less time for quick learners
-            'advance': 0.5,           # 50% less time
-            'reinforce': 1.8,          # extra time for reinforcement
+            'sharp_slowdown': 2.0,
+            'slow_down': 1.5,
+            'stay': 1.0,
+            'speed_up': 0.7,
+            'advance': 0.5,
+            'reinforce': 1.8,
         }
         
         return int(base_time * multipliers.get(pacing_value, 1.0))
@@ -454,139 +524,200 @@ class SubmitAtomAnswerView(APIView):
     """Step 5: Submit answer and update mastery with pacing"""
     permission_classes = [IsAuthenticated]
     
-    def post(self, request):
-        session_id = request.data.get('session_id')
-        atom_id = request.data.get('atom_id')
-        question_index = request.data.get('question_index')
-        selected = request.data.get('selected')
-        time_taken = request.data.get('time_taken', 30)
-        
-        try:
-            session = LearningSession.objects.get(id=session_id, user=request.user)
-            atom = TeachingAtom.objects.get(id=atom_id)
-            questions = list(Question.objects.filter(atom=atom).order_by('id'))
-            
-            if question_index >= len(questions):
-                return Response({'error': 'Invalid question index'}, status=400)
-            
-            question = questions[question_index]
-        except (LearningSession.DoesNotExist, TeachingAtom.DoesNotExist):
-            return Response({'error': 'Session or atom not found'}, status=404)
-        
-        # Get progress
-        progress, _ = StudentProgress.objects.get_or_create(
-            user=request.user,
-            atom=atom
-        )
-        
-        # Check if correct
-        is_correct = (selected == question.correct_index)
-        
-        # Classify behavior (considers time)
-        behavior = classify_behavior(
-            correct=is_correct,
-            time_taken=time_taken,
-            estimated_time=question.estimated_time
-        )
-        
-        # Classify error type if incorrect
-        error_type = None
-        if not is_correct:
-            error_type = classify_error_type(
-                question={'question': question.question_text, 'difficulty': question.difficulty},
-                answer=selected,
-                time_taken=time_taken,
-                atom_name=atom.name
-            )
-            if error_type:
-                progress.error_history.append(error_type)
-        
-        # Update mastery score using BKT
-        old_mastery = progress.mastery_score
-        
-        # Adjust BKT parameters based on pacing
-        session_data = session.session_data
-        pacing_history = session_data.get('pacing_history', [])
-        current_pacing = pacing_history[-1] if pacing_history else 'stay'
-        
-        bkt_params = self._get_bkt_params_for_pacing(current_pacing)
-        
-        progress.mastery_score = bkt_update(
-            p_know=progress.mastery_score,
-            correct=is_correct,
-            p_slip=bkt_params['slip'],
-            p_guess=bkt_params['guess'],
-            p_learn=bkt_params['learn']
-        )
-        
-        # Update streak
-        if is_correct:
-            progress.streak += 1
-        else:
-            progress.streak = 0
-        
-        progress.times_practiced += 1
-        progress.save()
-        
-        # Update user's overall theta
-        profile = request.user.learning_profile
-        profile.overall_theta = update_theta(
-            theta=profile.overall_theta,
-            correct=is_correct,
-            b=0.5 if question.difficulty == 'medium' else (0 if question.difficulty == 'easy' else 1.0),
-            a=1.0
-        )
-        profile.save()
-        
-        # Update session stats
-        session.questions_answered += 1
-        if is_correct:
-            session.correct_answers += 1
-        
-        # Store performance in session data
-        performance = session_data.get('performance_history', [])
-        performance.append({
-            'atom_id': atom.id,
-            'question_index': question_index,
-            'correct': is_correct,
-            'time_taken': time_taken,
-            'behavior': behavior,
-            'mastery_after': progress.mastery_score
-        })
-        session_data['performance_history'] = performance[-10:]  # Keep last 10
-        session.session_data = session_data
-        session.save()
-        
-        # Check if this was the last question
-        is_last = (question_index == len(questions) - 1)
-        
-        return Response({
-            'correct': is_correct,
-            'correct_index': question.correct_index if not is_correct else None,
-            'new_mastery': progress.mastery_score,
-            'old_mastery': old_mastery,
-            'improvement': progress.mastery_score - old_mastery,
-            'streak': progress.streak,
-            'behavior': behavior,
-            'error_type': error_type,
-            'is_last': is_last,
-            'current_pacing': current_pacing
-        })
-    
     def _get_bkt_params_for_pacing(self, pacing):
         """Adjust BKT parameters based on pacing"""
+        # Extract pacing value if it's a dictionary
+        if isinstance(pacing, dict):
+            pacing_value = pacing.get('pacing', 'stay')
+        elif isinstance(pacing, str):
+            pacing_value = pacing
+        else:
+            pacing_value = 'stay'
+        
         params = {
             'sharp_slowdown': {'slip': 0.15, 'guess': 0.25, 'learn': 0.10},  # More cautious
             'slow_down': {'slip': 0.12, 'guess': 0.22, 'learn': 0.12},       # Slightly cautious
             'stay': {'slip': 0.10, 'guess': 0.20, 'learn': 0.15},             # Default
             'speed_up': {'slip': 0.08, 'guess': 0.18, 'learn': 0.18}          # Faster learning
         }
-        return params.get(pacing, params['stay'])
+        return params.get(pacing_value, params['stay'])
+    
+    def post(self, request):
+        try:
+            data = request.data
+            session_id = data.get('session_id')
+            atom_id = data.get('atom_id')
+            question_index = data.get('question_index')
+            selected = data.get('selected')
+            time_taken = data.get('time_taken', 30)
+            
+            # Get session and progress
+            from accounts.models import LearningSession, StudentProgress, TeachingAtom
+            
+            session = LearningSession.objects.get(id=session_id, user=request.user)
+            atom = TeachingAtom.objects.get(id=atom_id)
+            progress, _ = StudentProgress.objects.get_or_create(
+                user=request.user,
+                atom=atom,
+                defaults={'mastery_score': 0.3, 'phase': 'diagnostic'}
+            )
+            
+            # Get question from session data
+            questions = session.session_data.get('questions', [])
+            try:
+                question_index = int(question_index)
+            except (TypeError, ValueError):
+                return Response({'error': 'Invalid question index'}, status=400)
 
+            if question_index < 0 or question_index >= len(questions):
+                return Response({'error': 'Invalid question index'}, status=400)
+            
+            question = questions[question_index]
+            
+            # Create atom state
+            atom_state = TeachingAtomState(
+                id=atom.id,
+                name=atom.name,
+                mastery_score=float(progress.mastery_score),
+                phase=progress.phase,
+                streak=progress.streak,
+                hint_usage=progress.hint_usage,
+                error_history=progress.error_history or []
+            )
+            
+            # Get theta from learning profile
+            theta = float(request.user.learning_profile.overall_theta)
+            
+            # Get questions history
+            history = session.session_data.get('answers', [])
+            
+            # Process with enhanced engine
+            engine = AdaptiveLearningEngine()
+            result = engine.process_answer(
+                atom_state=atom_state,
+                theta=theta,
+                question=question,
+                selected_answer=selected,
+                time_taken=time_taken,
+                knowledge_level=session.knowledge_level,
+                questions_history=history
+            )
+            
+            # Save updated values
+            mastery_before = float(progress.mastery_score)
+            progress.mastery_score = result['updated_mastery']
+            progress.phase = atom_state.phase.value if hasattr(atom_state.phase, 'value') else atom_state.phase
+            progress.streak = result['streak']
+            progress.error_history = atom_state.error_history
+            progress.save()
+            
+            # Update learning profile theta
+            profile = request.user.learning_profile
+            profile.overall_theta = result['updated_theta']
+            profile.save()
+            
+            # Update session data
+            if 'answers' not in session.session_data:
+                session.session_data['answers'] = []
+            
+            session.session_data['answers'].append({
+                'question_index': question_index,
+                'correct': result['correct'],
+                'error_type': result['error_type'],
+                'time_taken': time_taken,
+                'mastery_after': result['updated_mastery'],
+                'pacing_decision': result['pacing_decision']
+            })
+
+            # Keep a richer performance history for CompleteAtomView
+            if 'performance_history' not in session.session_data:
+                session.session_data['performance_history'] = []
+
+            session.session_data['performance_history'].append({
+                'atom_id': atom.id,
+                'question_index': question_index,
+                'correct': result['correct'],
+                'time_taken': time_taken,
+                'mastery_before': mastery_before,
+                'mastery_after': result['updated_mastery'],
+                'error_type': result['error_type']
+            })
+            
+            session.questions_answered += 1
+            if result['correct']:
+                session.correct_answers += 1
+            
+            session.save()
+            
+            # Determine next steps based on pacing
+            response_data = {
+                'correct': result['correct'],
+                'error_type': result['error_type'],
+                'updated_mastery': result['updated_mastery'],
+                'updated_theta': result['updated_theta'],
+                'pacing_decision': result['pacing_decision'],
+                'next_action': result['next_action'],
+                'next_difficulty': result['next_difficulty'],
+                'message': result.get('message', ''),
+                'atom_complete': result['atom_complete'],
+                'metrics': result['metrics']
+            }
+            
+            # If atom complete, get next atom info
+            if result['atom_complete']:
+                # Mark atom complete
+                progress.phase = 'complete'
+                progress.save()
+                
+                # Get next incomplete atom
+                next_atom = TeachingAtom.objects.filter(
+                    concept=atom.concept,
+                    studentprogress__user=request.user,
+                    studentprogress__phase__in=['diagnostic', 'teaching', 'practice']
+                ).exclude(
+                    id=atom.id
+                ).order_by('order').first()
+                
+                if next_atom:
+                    response_data['next_atom'] = {
+                        'id': next_atom.id,
+                        'name': next_atom.name
+                    }
+                    response_data['next_action'] = 'next_atom'
+                else:
+                    # All atoms complete
+                    response_data['concept_complete'] = True
+            
+            return Response(response_data)
+            
+        except Exception as e:
+            print(f"Error submitting answer: {e}")
+            import traceback
+            traceback.print_exc()
+            return Response({'error': str(e)}, status=500)
+        
 
 class CompleteAtomView(APIView):
     """Step 6: Complete atom - CALCULATE EVERYTHING and DECIDE next action"""
     permission_classes = [IsAuthenticated]
+    
+    def _get_bkt_params_for_pacing(self, pacing):
+        """Adjust BKT parameters based on pacing"""
+        # Extract pacing value if it's a dictionary
+        if isinstance(pacing, dict):
+            pacing_value = pacing.get('pacing', 'stay')
+        elif isinstance(pacing, str):
+            pacing_value = pacing
+        else:
+            pacing_value = 'stay'
+        
+        params = {
+            'sharp_slowdown': {'slip': 0.15, 'guess': 0.25, 'learn': 0.10},
+            'slow_down': {'slip': 0.12, 'guess': 0.22, 'learn': 0.12},
+            'stay': {'slip': 0.10, 'guess': 0.20, 'learn': 0.15},
+            'speed_up': {'slip': 0.08, 'guess': 0.18, 'learn': 0.18}
+        }
+        return params.get(pacing_value, params['stay'])
     
     def post(self, request):
         session_id = request.data.get('session_id')

@@ -1,257 +1,321 @@
+// frontend/src/components/Learning/QuestionsFromTeaching.jsx - Enhanced version
+
 import React, { useState, useEffect } from 'react';
+import { useLearning } from '../../context/LearningContext';
 
 const QuestionsFromTeaching = ({ 
     questions, 
-    atomName, 
+    atomName,
     sessionId,
     atomId,
-    onAnswerSubmit, 
     onComplete,
-    loading,
-    pacing 
+    onBackToTeaching
 }) => {
     const [currentIndex, setCurrentIndex] = useState(0);
     const [selectedOption, setSelectedOption] = useState(null);
-    const [answerSubmitted, setAnswerSubmitted] = useState(false);
-    const [result, setResult] = useState(null);
+    const [isSubmitted, setIsSubmitted] = useState(false);
+    const [feedback, setFeedback] = useState(null);
     const [startTime, setStartTime] = useState(Date.now());
-    const [answers, setAnswers] = useState([]);
-    const [showContinue, setShowContinue] = useState(false);
-
-    useEffect(() => {
-        // Reset timer when question changes
-        setStartTime(Date.now());
-        setSelectedOption(null);
-        setAnswerSubmitted(false);
-        setResult(null);
-        setShowContinue(false);
-    }, [currentIndex]);
+    const [showPacingAlert, setShowPacingAlert] = useState(false);
+    
+    const { 
+        submitAtomAnswer, 
+        nextQuestion,
+        atomMastery, 
+        currentTheta,
+        pacingDecision,
+        nextAction,
+        metrics,
+        loading 
+    } = useLearning();
 
     const currentQuestion = questions[currentIndex];
-    const isLast = currentIndex === questions.length - 1;
 
-    // Get pacing-based styling
-    const getPacingColor = () => {
-        const colors = {
-            'sharp_slowdown': 'red',
-            'slow_down': 'orange',
-            'stay': 'blue',
-            'speed_up': 'green'
-        };
-        return colors[pacing] || 'blue';
-    };
+    // Reset timer when question changes
+    useEffect(() => {
+        setStartTime(Date.now());
+        setSelectedOption(null);
+        setIsSubmitted(false);
+        setFeedback(null);
+        setShowPacingAlert(false);
+    }, [currentIndex]);
 
-    const getPacingMessage = () => {
-        const messages = {
-            'sharp_slowdown': 'Take your time, think carefully',
-            'slow_down': 'Read each option thoroughly',
-            'stay': 'Answer at your normal pace',
-            'speed_up': 'Try to answer confidently and quickly'
-        };
-        return messages[pacing] || '';
-    };
+    // Handle pacing decision alerts
+    useEffect(() => {
+        if (pacingDecision && isSubmitted) {
+            setShowPacingAlert(true);
+            
+            // Auto-hide after 3 seconds
+            const timer = setTimeout(() => {
+                setShowPacingAlert(false);
+            }, 3000);
+            
+            return () => clearTimeout(timer);
+        }
+    }, [pacingDecision, isSubmitted]);
 
     const handleOptionSelect = (index) => {
-        if (!answerSubmitted) {
+        if (!isSubmitted) {
             setSelectedOption(index);
         }
     };
 
     const handleSubmit = async () => {
         if (selectedOption === null) return;
-
+        
         const timeTaken = Math.round((Date.now() - startTime) / 1000);
         
-        setAnswerSubmitted(true);
+        const result = await submitAtomAnswer({
+            session_id: sessionId,
+            atom_id: atomId,
+            question_index: currentIndex,
+            selected: selectedOption,
+            time_taken: timeTaken
+        });
         
-        const result = await onAnswerSubmit(
-            currentIndex,
-            selectedOption,
-            timeTaken
-        );
-
         if (result.success) {
-            setResult(result.data);
+            const data = result.data;
+            setIsSubmitted(true);
             
-            // Store answer
-            setAnswers(prev => [...prev, {
-                questionIndex: currentIndex,
-                selected: selectedOption,
-                correct: result.data.correct,
-                mastery_after: result.data.new_mastery,
-                behavior: result.data.behavior,
-                time_taken: timeTaken
-            }]);
-
-            // Auto-show continue button after short delay
-            setTimeout(() => {
-                setShowContinue(true);
-            }, 1500);
-        } else {
-            setAnswerSubmitted(false);
-            // Show error but don't ask to continue
-            console.error('Answer submission failed:', result.error);
+            // Set feedback based on result
+            setFeedback({
+                correct: data.correct,
+                error_type: data.error_type,
+                message: data.correct ? '✅ Correct!' : '❌ Not quite right',
+                mastery_change: data.metrics?.mastery_change?.toFixed(2) || '0',
+                theta_change: data.metrics?.theta_change?.toFixed(2) || '0'
+            });
         }
     };
 
-    const handleContinue = () => {
-        if (isLast) {
-            // NO ALERT! Just call onComplete and let the system decide
-            onComplete();
-        } else {
+    const handleNext = () => {
+        if (currentIndex < questions.length - 1) {
             setCurrentIndex(prev => prev + 1);
+            nextQuestion();
+        } else {
+            // All questions completed
+            onComplete();
+        }
+    };
+
+    const getPacingMessage = () => {
+        switch(pacingDecision) {
+            case 'speed_up':
+                return '⚡ You\'re doing great! Ready for a challenge!';
+            case 'slow_down':
+                return '🐢 Let\'s take it a bit slower.';
+            case 'sharp_slowdown':
+                return '⚠️ Let\'s review the basics.';
+            case 'stay':
+            default:
+                return '👍 Keep going at this pace.';
+        }
+    };
+
+    const getPacingColor = () => {
+        switch(pacingDecision) {
+            case 'speed_up': return 'bg-green-100 text-green-800 border-green-300';
+            case 'slow_down': return 'bg-yellow-100 text-yellow-800 border-yellow-300';
+            case 'sharp_slowdown': return 'bg-red-100 text-red-800 border-red-300';
+            default: return 'bg-blue-100 text-blue-800 border-blue-300';
         }
     };
 
     if (!currentQuestion) {
         return (
-            <div className="bg-white rounded-lg shadow-lg p-8 text-center">
-                <p className="text-red-600">No questions available.</p>
+            <div className="text-center py-8">
+                <p className="text-gray-600">No questions available.</p>
             </div>
         );
     }
 
-    // Calculate progress
-    const progress = ((currentIndex + 1) / questions.length) * 100;
-    const pacingColor = getPacingColor();
-
     return (
-        <div className="bg-white rounded-lg shadow-lg overflow-hidden">
-            {/* Header with pacing */}
-            <div className={`bg-gradient-to-r from-${pacingColor}-600 to-${pacingColor}-800 px-6 py-4`}>
+        <div className="bg-white rounded-lg shadow-lg p-6">
+            {/* Real-time Mastery Display */}
+            <div className="mb-6 bg-gradient-to-r from-blue-50 to-purple-50 p-4 rounded-lg border border-blue-100">
                 <div className="flex justify-between items-center">
                     <div>
-                        <h2 className="text-xl font-bold text-white">Assessment: {atomName}</h2>
-                        <p className={`text-${pacingColor}-100 text-sm mt-1`}>
-                            Question {currentIndex + 1} of {questions.length}
-                        </p>
+                        <h3 className="text-sm font-semibold text-gray-600">REAL-TIME MASTERY</h3>
+                        <div className="flex items-center space-x-4 mt-2">
+                            <div>
+                                <span className="text-2xl font-bold text-blue-600">
+                                    {Math.round(atomMastery * 100)}%
+                                </span>
+                                <span className="text-sm text-gray-500 ml-2">mastery</span>
+                            </div>
+                            <div className="w-px h-8 bg-gray-300"></div>
+                            <div>
+                                <span className="text-xl font-semibold text-purple-600">
+                                    θ = {currentTheta.toFixed(2)}
+                                </span>
+                                <span className="text-sm text-gray-500 ml-2">ability</span>
+                            </div>
+                        </div>
                     </div>
-                    <span className={`px-3 py-1 rounded-full text-xs font-medium bg-${pacingColor}-100 text-${pacingColor}-800`}>
-                        {getPacingMessage()}
+                    
+                    {/* Pacing Badge */}
+                    {pacingDecision && (
+                        <div className={`px-3 py-1 rounded-full border ${getPacingColor()}`}>
+                            <span className="text-sm font-medium">
+                                {pacingDecision.replace('_', ' ').toUpperCase()}
+                            </span>
+                        </div>
+                    )}
+                </div>
+                
+                {/* Progress Bar */}
+                <div className="mt-3">
+                    <div className="w-full bg-gray-200 rounded-full h-2.5">
+                        <div 
+                            className="bg-blue-600 h-2.5 rounded-full transition-all duration-300"
+                            style={{ width: `${atomMastery * 100}%` }}
+                        ></div>
+                    </div>
+                </div>
+            </div>
+
+            {/* Pacing Alert */}
+            {showPacingAlert && (
+                <div className={`mb-4 p-3 rounded-lg border ${getPacingColor()} animate-pulse`}>
+                    <p className="text-sm font-medium">{getPacingMessage()}</p>
+                </div>
+            )}
+
+            {/* Question Header */}
+            <div className="mb-4 flex justify-between items-center">
+                <div>
+                    <span className="text-sm text-gray-500">
+                        Question {currentIndex + 1} of {questions.length}
+                    </span>
+                    <h2 className="text-xl font-bold mt-1">{atomName}</h2>
+                </div>
+                <div className="flex space-x-2">
+                    <span className={`px-2 py-1 rounded text-xs font-semibold ${
+                        currentQuestion.difficulty === 'easy' ? 'bg-green-100 text-green-800' :
+                        currentQuestion.difficulty === 'medium' ? 'bg-yellow-100 text-yellow-800' :
+                        'bg-red-100 text-red-800'
+                    }`}>
+                        {currentQuestion.difficulty?.toUpperCase()}
+                    </span>
+                    <span className="px-2 py-1 bg-purple-100 text-purple-800 rounded text-xs font-semibold">
+                        {currentQuestion.cognitive_operation?.toUpperCase()}
                     </span>
                 </div>
             </div>
 
-            {/* Progress bar */}
-            <div className="w-full bg-gray-200 h-2">
-                <div 
-                    className={`bg-${pacingColor}-600 h-2 transition-all duration-300`}
-                    style={{ width: `${progress}%` }}
-                ></div>
+            {/* Question Text */}
+            <div className="mb-6 p-4 bg-gray-50 rounded-lg">
+                <p className="text-lg">{currentQuestion.question}</p>
             </div>
 
-            {/* Question content */}
-            <div className="p-6">
-                <div className="mb-6">
-                    <div className="flex justify-between items-center mb-4">
-                        <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-${pacingColor}-100 text-${pacingColor}-800`}>
-                            Difficulty: {currentQuestion.difficulty}
+            {/* Options */}
+            <div className="space-y-3 mb-6">
+                {currentQuestion.options?.map((option, index) => (
+                    <button
+                        key={index}
+                        onClick={() => handleOptionSelect(index)}
+                        disabled={isSubmitted}
+                        className={`w-full text-left p-4 rounded-lg border-2 transition ${
+                            selectedOption === index
+                                ? 'border-blue-500 bg-blue-50'
+                                : 'border-gray-200 hover:border-gray-300 hover:bg-gray-50'
+                        } ${
+                            isSubmitted && index === currentQuestion.correct_index
+                                ? 'border-green-500 bg-green-50'
+                                : isSubmitted && selectedOption === index && selectedOption !== currentQuestion.correct_index
+                                ? 'border-red-500 bg-red-50'
+                                : ''
+                        }`}
+                    >
+                        <span className="font-medium mr-2">
+                            {String.fromCharCode(65 + index)}.
                         </span>
-                        <span className="text-sm text-gray-500">
-                            ⏱️ {currentQuestion.estimated_time}s
-                        </span>
-                    </div>
-                    
-                    <p className="text-lg text-gray-800 font-medium">
-                        {currentQuestion.question}
-                    </p>
-                </div>
+                        {option}
+                    </button>
+                ))}
+            </div>
 
-                {/* Options */}
-                <div className="space-y-3 mb-6">
-                    {currentQuestion.options.map((option, idx) => (
-                        <button
-                            key={idx}
-                            onClick={() => handleOptionSelect(idx)}
-                            disabled={answerSubmitted}
-                            className={`w-full text-left p-4 rounded-lg border-2 transition ${
-                                selectedOption === idx
-                                    ? answerSubmitted
-                                        ? result?.correct
-                                            ? 'border-green-500 bg-green-50'
-                                            : result?.correct_index === idx
-                                            ? 'border-green-500 bg-green-50'
-                                            : 'border-red-500 bg-red-50'
-                                        : `border-${pacingColor}-500 bg-${pacingColor}-50`
-                                    : answerSubmitted && result?.correct_index === idx
-                                    ? 'border-green-500 bg-green-50'
-                                    : 'border-gray-200 hover:border-gray-300 hover:bg-gray-50'
-                            }`}
-                        >
-                            <span className="font-medium">{String.fromCharCode(65 + idx)}.</span>
-                            <span className="ml-2">{option}</span>
-                            {answerSubmitted && result?.correct_index === idx && (
-                                <span className="float-right text-green-600">✓ Correct</span>
-                            )}
-                            {answerSubmitted && selectedOption === idx && !result?.correct && (
-                                <span className="float-right text-red-600">✗ Incorrect</span>
-                            )}
-                        </button>
-                    ))}
-                </div>
-
-                {/* Answer feedback */}
-                {result && (
-                    <div className={`mb-6 p-4 rounded-lg ${
-                        result.correct ? 'bg-green-50 border border-green-200' : 'bg-orange-50 border border-orange-200'
-                    }`}>
-                        <p className={`font-medium ${
-                            result.correct ? 'text-green-800' : 'text-orange-800'
-                        }`}>
-                            {result.correct ? '✅ Correct!' : '❌ Not quite right'}
-                        </p>
-                        <div className="mt-2 text-sm">
-                            <p className="text-gray-600">
-                                Mastery: {Math.round(result.new_mastery * 100)}% 
-                                {result.improvement > 0 && (
-                                    <span className="text-green-600 ml-2">
-                                        ↑ +{Math.round(result.improvement * 100)}%
-                                    </span>
-                                )}
+            {/* Feedback Section */}
+            {feedback && (
+                <div className={`mb-4 p-4 rounded-lg ${
+                    feedback.correct ? 'bg-green-50 border border-green-200' : 'bg-red-50 border border-red-200'
+                }`}>
+                    <div className="flex justify-between items-center">
+                        <div>
+                            <p className={`font-semibold ${
+                                feedback.correct ? 'text-green-700' : 'text-red-700'
+                            }`}>
+                                {feedback.message}
                             </p>
-                            {result.streak > 0 && (
-                                <p className="text-orange-600 mt-1">🔥 Streak: {result.streak}</p>
-                            )}
-                            {result.behavior && (
-                                <p className="text-purple-600 mt-1">
-                                    Behavior: {result.behavior.replace('_', ' ')}
-                                </p>
-                            )}
-                            {result.error_type && (
-                                <p className="text-red-600 mt-1">
-                                    Error type: {result.error_type}
+                            {!feedback.correct && feedback.error_type && (
+                                <p className="text-sm text-gray-600 mt-1">
+                                    Error type: <span className="font-medium capitalize">{feedback.error_type}</span>
                                 </p>
                             )}
                         </div>
+                        <div className="text-right">
+                            <p className="text-sm text-gray-600">
+                                Mastery: <span className="font-bold text-blue-600">{feedback.mastery_change}</span>
+                            </p>
+                            <p className="text-sm text-gray-600">
+                                θ: <span className="font-bold text-purple-600">{feedback.theta_change}</span>
+                            </p>
+                        </div>
                     </div>
-                )}
+                </div>
+            )}
 
-                {/* Action buttons */}
-                {!answerSubmitted ? (
+            {/* Action Buttons */}
+            <div className="flex justify-between">
+                <button
+                    onClick={onBackToTeaching}
+                    className="px-4 py-2 bg-gray-200 text-gray-700 rounded-lg hover:bg-gray-300"
+                >
+                    ← Back to Teaching
+                </button>
+                
+                {!isSubmitted ? (
                     <button
                         onClick={handleSubmit}
                         disabled={selectedOption === null || loading}
-                        className={`w-full bg-${pacingColor}-600 hover:bg-${pacingColor}-700 text-white font-bold py-3 px-4 rounded-lg transition disabled:opacity-50 disabled:cursor-not-allowed`}
+                        className="px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
                     >
-                        Submit Answer
+                        {loading ? 'Submitting...' : 'Submit Answer'}
                     </button>
-                ) : showContinue && (
+                ) : (
                     <button
-                        onClick={handleContinue}
-                        disabled={loading}
-                        className={`w-full bg-${pacingColor}-600 hover:bg-${pacingColor}-700 text-white font-bold py-3 px-4 rounded-lg transition`}
+                        onClick={handleNext}
+                        className="px-6 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700"
                     >
-                        {isLast ? 'Complete Assessment' : 'Next Question'}
+                        {currentIndex < questions.length - 1 ? 'Next Question →' : 'Complete Atom →'}
                     </button>
                 )}
-
-                {/* Progress indicator */}
-                <div className="mt-4 text-center text-sm text-gray-500">
-                    {!isLast && answerSubmitted && showContinue && (
-                        <p>Question {currentIndex + 1} of {questions.length} completed</p>
-                    )}
-                </div>
             </div>
+
+            {/* Learning Metrics */}
+            {Object.keys(metrics).length > 0 && (
+                <div className="mt-6 pt-4 border-t border-gray-200">
+                    <h4 className="text-sm font-semibold text-gray-600 mb-2">Learning Metrics</h4>
+                    <div className="grid grid-cols-4 gap-2 text-xs">
+                        <div className="bg-gray-50 p-2 rounded">
+                            <span className="text-gray-500">Confidence:</span>
+                            <span className="ml-1 font-bold">{(metrics.confidence * 100).toFixed(0)}%</span>
+                        </div>
+                        <div className="bg-gray-50 p-2 rounded">
+                            <span className="text-gray-500">Quality:</span>
+                            <span className="ml-1 font-bold">{metrics.performance_quality?.toFixed(2)}</span>
+                        </div>
+                        <div className="bg-gray-50 p-2 rounded">
+                            <span className="text-gray-500">Learning rate:</span>
+                            <span className="ml-1 font-bold">{metrics.learning_rate?.toFixed(2)}</span>
+                        </div>
+                        <div className="bg-gray-50 p-2 rounded">
+                            <span className="text-gray-500">Next:</span>
+                            <span className="ml-1 font-bold capitalize">{nextAction?.replace('_', ' ')}</span>
+                        </div>
+                    </div>
+                </div>
+            )}
         </div>
     );
 };

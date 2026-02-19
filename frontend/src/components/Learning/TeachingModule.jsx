@@ -1,209 +1,215 @@
+// frontend/src/components/Learning/TeachingModule.jsx - Enhanced version
+
 import React, { useState, useEffect } from 'react';
 import { useLearning } from '../../context/LearningContext';
 
-const TeachingModule = ({ atom, sessionId, onFinish, loading, pacing }) => {
-    const [teachingContent, setTeachingContent] = useState(null);
-    const [contentLoading, setContentLoading] = useState(true);
-    const [error, setError] = useState('');
-    const [showAnalogy, setShowAnalogy] = useState(false);
-    const [showMisconception, setShowMisconception] = useState(false);
-    
-    const { getTeachingContent } = useLearning();
+const TeachingModule = ({ 
+    atom, 
+    teachingContent, 
+    onContinue, 
+    onBack,
+    showBackButton = true 
+}) => {
+    const [showDetails, setShowDetails] = useState({});
+    const { pacingDecision, atomMastery, currentTheta } = useLearning();
 
-    useEffect(() => {
-        const loadTeachingContent = async () => {
-            if (!atom || !sessionId) return;
-            
-            setContentLoading(true);
-            const result = await getTeachingContent({
-                session_id: sessionId,
-                atom_id: atom.id
-            });
-            
-            if (result.success) {
-                setTeachingContent(result.data.teaching_content);
-            } else {
-                setError(result.error || 'Failed to load teaching content');
-            }
-            setContentLoading(false);
-        };
-
-        loadTeachingContent();
-    }, [atom, sessionId, getTeachingContent]);
-
-    // Get pacing-based styling
-    const getPacingMessage = () => {
-        const messages = {
-            'sharp_slowdown': 'Take your time with this - focus on understanding each part',
-            'slow_down': 'Read carefully, don\'t rush',
-            'stay': 'Learn at your normal pace',
-            'speed_up': 'You can move through this quickly'
-        };
-        return messages[pacing] || 'Learn at your own pace';
-    };
-
-    const getPacingColor = () => {
-        const colors = {
-            'sharp_slowdown': 'bg-red-50 border-red-200 text-red-700',
-            'slow_down': 'bg-orange-50 border-orange-200 text-orange-700',
-            'stay': 'bg-blue-50 border-blue-200 text-blue-700',
-            'speed_up': 'bg-green-50 border-green-200 text-green-700'
-        };
-        return colors[pacing] || 'bg-gray-50 border-gray-200 text-gray-700';
-    };
-
-    if (contentLoading || loading) {
-        return (
-            <div className="bg-white rounded-lg shadow-lg p-8 text-center">
-                <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto mb-4"></div>
-                <p className="text-gray-600">Preparing your learning material...</p>
-            </div>
-        );
-    }
-
-    if (error) {
-        return (
-            <div className="bg-white rounded-lg shadow-lg p-8">
-                <div className="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded">
-                    {error}
-                </div>
-            </div>
-        );
-    }
-
+    // If no teaching content, show loading or fallback
     if (!teachingContent) {
         return (
-            <div className="bg-white rounded-lg shadow-lg p-8 text-center">
-                <p className="text-gray-600">No teaching content available.</p>
+            <div className="text-center py-12">
+                <p className="text-gray-600">Loading teaching content...</p>
             </div>
         );
     }
 
+    const {
+        explanation,
+        example,
+        analogy,
+        misconception,
+        practical_application
+    } = teachingContent;
+
+    const toggleDetail = (key) => {
+        setShowDetails(prev => ({
+            ...prev,
+            [key]: !prev[key]
+        }));
+    };
+
+    // Get adaptive message based on pacing
+    const getAdaptiveMessage = () => {
+        if (pacingDecision === 'sharp_slowdown') {
+            return "Let's really focus on the fundamentals here. Take your time.";
+        } else if (pacingDecision === 'slow_down') {
+            return "We'll go through this carefully. No rush.";
+        } else if (pacingDecision === 'speed_up') {
+            return "You're ready for this! Let's move efficiently.";
+        }
+        return "Let's learn this concept step by step.";
+    };
+
     return (
-        <div className="bg-white rounded-lg shadow-lg overflow-hidden">
-            {/* Header with pacing */}
-            <div className="bg-gradient-to-r from-blue-600 to-blue-800 px-6 py-4">
-                <div className="flex justify-between items-center">
-                    <h2 className="text-xl font-bold text-white">{atom.name}</h2>
-                    <span className={`px-3 py-1 rounded-full text-xs font-medium ${getPacingColor()}`}>
-                        {getPacingMessage()}
-                    </span>
+        <div className="bg-white rounded-lg shadow-lg p-8">
+            {/* Header with real-time mastery */}
+            <div className="flex justify-between items-start mb-6">
+                <div>
+                    <h2 className="text-2xl font-bold text-gray-800">{atom.name}</h2>
+                    <p className="text-sm text-gray-500 mt-1">{getAdaptiveMessage()}</p>
+                </div>
+                
+                {/* Mastery Indicator */}
+                <div className="bg-blue-50 px-4 py-2 rounded-lg">
+                    <div className="text-xs text-gray-500">Current Mastery</div>
+                    <div className="text-xl font-bold text-blue-600">
+                        {Math.round(atomMastery * 100)}%
+                    </div>
                 </div>
             </div>
 
-            {/* Content */}
-            <div className="p-6 space-y-6">
-                {/* Explanation */}
-                <div>
-                    <h3 className="text-lg font-semibold text-gray-800 mb-3 flex items-center">
-                        <span className="bg-blue-100 text-blue-800 p-2 rounded-full mr-2">📚</span>
-                        Explanation
-                    </h3>
-                    <p className="text-gray-700 leading-relaxed pl-10">
-                        {teachingContent.explanation}
-                    </p>
+            {/* Pacing Indicator */}
+            {pacingDecision && pacingDecision !== 'stay' && (
+                <div className={`mb-4 p-2 rounded-lg text-sm ${
+                    pacingDecision === 'speed_up' ? 'bg-green-100 text-green-800' :
+                    pacingDecision === 'slow_down' ? 'bg-yellow-100 text-yellow-800' :
+                    'bg-red-100 text-red-800'
+                }`}>
+                    <span className="font-medium">Pacing: </span>
+                    {pacingDecision === 'speed_up' && '⚡ Moving faster - you\'re ready!'}
+                    {pacingDecision === 'slow_down' && '🐢 Taking it slower - let\'s build foundation'}
+                    {pacingDecision === 'sharp_slowdown' && '⚠️ Really focusing on basics'}
+                </div>
+            )}
+
+            {/* Main Explanation */}
+            <div className="mb-6">
+                <h3 className="text-lg font-semibold mb-2 flex items-center">
+                    <span className="bg-blue-100 text-blue-800 p-1 rounded mr-2">📖</span>
+                    Explanation
+                </h3>
+                <div className="bg-blue-50 p-4 rounded-lg">
+                    <p className="text-gray-800">{explanation}</p>
+                </div>
+            </div>
+
+            {/* Collapsible Sections */}
+            <div className="space-y-3">
+                {/* Example */}
+                <div className="border rounded-lg overflow-hidden">
+                    <button
+                        onClick={() => toggleDetail('example')}
+                        className="w-full flex justify-between items-center p-4 bg-gray-50 hover:bg-gray-100"
+                    >
+                        <span className="font-medium flex items-center">
+                            <span className="text-green-600 mr-2">💡</span>
+                            Example
+                        </span>
+                        <span>{showDetails.example ? '▼' : '▶'}</span>
+                    </button>
+                    {showDetails.example && (
+                        <div className="p-4 bg-white">
+                            <p className="text-gray-700">{example}</p>
+                        </div>
+                    )}
                 </div>
 
-                {/* Example */}
-                {teachingContent.examples && teachingContent.examples.length > 0 && (
-                    <div>
-                        <h3 className="text-lg font-semibold text-gray-800 mb-3 flex items-center">
-                            <span className="bg-green-100 text-green-800 p-2 rounded-full mr-2">💡</span>
-                            Example
-                        </h3>
-                        <p className="text-gray-700 leading-relaxed pl-10 bg-green-50 p-4 rounded-lg">
-                            {teachingContent.examples[0]}
-                        </p>
-                    </div>
-                )}
+                {/* Analogy */}
+                <div className="border rounded-lg overflow-hidden">
+                    <button
+                        onClick={() => toggleDetail('analogy')}
+                        className="w-full flex justify-between items-center p-4 bg-gray-50 hover:bg-gray-100"
+                    >
+                        <span className="font-medium flex items-center">
+                            <span className="text-purple-600 mr-2">🔄</span>
+                            Analogy
+                        </span>
+                        <span>{showDetails.analogy ? '▼' : '▶'}</span>
+                    </button>
+                    {showDetails.analogy && (
+                        <div className="p-4 bg-white">
+                            <p className="text-gray-700">{analogy}</p>
+                        </div>
+                    )}
+                </div>
 
-                {/* Analogy (toggle) */}
-                {teachingContent.analogy && (
-                    <div>
+                {/* Common Misconception */}
+                {misconception && (
+                    <div className="border rounded-lg overflow-hidden">
                         <button
-                            onClick={() => setShowAnalogy(!showAnalogy)}
-                            className="flex items-center text-gray-600 hover:text-blue-600 transition-colors"
+                            onClick={() => toggleDetail('misconception')}
+                            className="w-full flex justify-between items-center p-4 bg-gray-50 hover:bg-gray-100"
                         >
-                            <span className="bg-purple-100 text-purple-800 p-2 rounded-full mr-2">
-                                🔄
+                            <span className="font-medium flex items-center">
+                                <span className="text-red-600 mr-2">⚠️</span>
+                                Common Misconception
                             </span>
-                            <span className="font-medium">
-                                {showAnalogy ? 'Hide Analogy' : 'Show Analogy'}
-                            </span>
+                            <span>{showDetails.misconception ? '▼' : '▶'}</span>
                         </button>
-                        
-                        {showAnalogy && (
-                            <div className="mt-3 pl-10 bg-purple-50 p-4 rounded-lg">
-                                <p className="text-gray-700 italic">
-                                    {teachingContent.analogy}
-                                </p>
-                            </div>
-                        )}
-                    </div>
-                )}
-
-                {/* Misconception (toggle) */}
-                {teachingContent.misconception && (
-                    <div>
-                        <button
-                            onClick={() => setShowMisconception(!showMisconception)}
-                            className="flex items-center text-gray-600 hover:text-blue-600 transition-colors"
-                        >
-                            <span className="bg-red-100 text-red-800 p-2 rounded-full mr-2">
-                                ⚠️
-                            </span>
-                            <span className="font-medium">
-                                {showMisconception ? 'Hide Common Mistake' : 'Show Common Mistake'}
-                            </span>
-                        </button>
-                        
-                        {showMisconception && (
-                            <div className="mt-3 pl-10 bg-red-50 p-4 rounded-lg border border-red-200">
-                                <p className="text-red-700">
-                                    {teachingContent.misconception}
-                                </p>
+                        {showDetails.misconception && (
+                            <div className="p-4 bg-white">
+                                <p className="text-gray-700">{misconception}</p>
                             </div>
                         )}
                     </div>
                 )}
 
                 {/* Practical Application */}
-                {teachingContent.practical_application && (
-                    <div className="bg-yellow-50 p-4 rounded-lg">
-                        <h3 className="font-semibold text-yellow-800 mb-2 flex items-center">
-                            <span className="mr-2">✨</span>
-                            Why This Matters
-                        </h3>
-                        <p className="text-yellow-700">
-                            {teachingContent.practical_application}
-                        </p>
+                {practical_application && (
+                    <div className="border rounded-lg overflow-hidden">
+                        <button
+                            onClick={() => toggleDetail('practical')}
+                            className="w-full flex justify-between items-center p-4 bg-gray-50 hover:bg-gray-100"
+                        >
+                            <span className="font-medium flex items-center">
+                                <span className="text-orange-600 mr-2">🚀</span>
+                                Why This Matters
+                            </span>
+                            <span>{showDetails.practical ? '▼' : '▶'}</span>
+                        </button>
+                        {showDetails.practical && (
+                            <div className="p-4 bg-white">
+                                <p className="text-gray-700">{practical_application}</p>
+                            </div>
+                        )}
                     </div>
                 )}
+            </div>
 
-                {/* Take Assessment Button */}
-                <div className="pt-6 border-t border-gray-200">
-                    <button
-                        onClick={onFinish}
-                        disabled={loading}
-                        className={`w-full font-bold py-3 px-4 rounded-lg transition disabled:opacity-50 disabled:cursor-not-allowed ${
-                            pacing === 'sharp_slowdown' 
-                                ? 'bg-orange-600 hover:bg-orange-700 text-white'
-                                : pacing === 'speed_up'
-                                ? 'bg-green-600 hover:bg-green-700 text-white'
-                                : 'bg-blue-600 hover:bg-blue-700 text-white'
-                        }`}
-                    >
-                        {loading ? 'Preparing assessment...' : 'I Understand - Take Assessment'}
-                    </button>
-                    
-                    {/* Pacing tip */}
-                    <p className="text-sm text-gray-500 text-center mt-3">
-                        {pacing === 'sharp_slowdown' && '💡 Take your time with the questions'}
-                        {pacing === 'slow_down' && '⏸️ Read each question carefully'}
-                        {pacing === 'stay' && '📝 Answer at your normal pace'}
-                        {pacing === 'speed_up' && '⚡ Challenge yourself to answer quickly'}
-                    </p>
+            {/* Progress indicator */}
+            <div className="mt-6">
+                <div className="flex justify-between text-sm text-gray-600 mb-1">
+                    <span>Ready for questions?</span>
+                    <span>Mastery needed: 70%</span>
                 </div>
+                <div className="w-full bg-gray-200 rounded-full h-2">
+                    <div 
+                        className="bg-blue-600 h-2 rounded-full transition-all duration-300"
+                        style={{ width: `${Math.min(100, atomMastery * 100)}%` }}
+                    ></div>
+                </div>
+            </div>
+
+            {/* Continue Button */}
+            <div className="mt-6 flex justify-between">
+                {showBackButton && (
+                    <button
+                        onClick={onBack}
+                        className="px-4 py-2 bg-gray-200 text-gray-700 rounded-lg hover:bg-gray-300"
+                    >
+                        ← Back
+                    </button>
+                )}
+                <button
+                    onClick={onContinue}
+                    className="ml-auto px-6 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700"
+                >
+                    Continue to Questions →
+                </button>
+            </div>
+
+            {/* Learning Tip */}
+            <div className="mt-4 text-xs text-gray-400 text-center">
+                <span>✨ Read carefully - questions will be based on this material</span>
             </div>
         </div>
     );

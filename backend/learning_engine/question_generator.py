@@ -105,29 +105,31 @@ class QuestionGenerator:
             print(f"Error generating atoms: {e}")
             return self._get_fallback_atoms(subject, concept)
     
+    # backend/learning_engine/question_generator.py - Updated method
+
     def generate_questions(self, subject: str, concept: str, atom: str,
-                          need_easy: int, need_medium: int, knowledge_level: str = 'intermediate') -> List[Dict]:
+                        target_difficulty: str, count: int, 
+                        knowledge_level: str = 'intermediate',
+                        error_focus: List[str] = None) -> List[Dict]:
         """
-        Generate questions for an atom based on knowledge level
+        Generate questions for an atom with dynamic difficulty
         
         Args:
             subject: Subject name
             concept: Concept name
             atom: Atomic concept name
-            need_easy: Number of easy questions needed
-            need_medium: Number of medium questions needed
-            knowledge_level: Student's knowledge level (zero, beginner, intermediate, advanced)
+            target_difficulty: Specific difficulty to generate ('easy', 'medium', 'hard')
+            count: Number of questions needed
+            knowledge_level: Student's knowledge level
+            error_focus: Optional list of error types to address
         
         Returns:
             List of question dictionaries
         """
-        print(f"Generating questions for atom: {atom}, easy: {need_easy}, medium: {need_medium}, level: {knowledge_level}")
+        print(f"Generating {count} {target_difficulty} questions for atom: {atom}")
         
-        if not self.groq_client or (need_easy == 0 and need_medium == 0):
-            print("Groq client not available or no questions needed, using fallback")
-            return self._get_fallback_questions(atom, need_easy, need_medium, knowledge_level)
-        
-        total_needed = need_easy + need_medium
+        if not self.groq_client or count == 0:
+            return self._get_fallback_questions(atom, target_difficulty, count, knowledge_level)
         
         # Adjust based on knowledge level
         level_adjustments = {
@@ -159,11 +161,23 @@ class QuestionGenerator:
         
         adj = level_adjustments.get(knowledge_level, level_adjustments['intermediate'])
         
-        req_lines = []
-        if need_easy:
-            req_lines.append(f"- {need_easy} easy question(s)")
-        if need_medium:
-            req_lines.append(f"- {need_medium} medium question(s)")
+        # Determine cognitive operations for this difficulty
+        if target_difficulty == 'easy':
+            allowed_cognitive = ['recall']
+        elif target_difficulty == 'medium':
+            allowed_cognitive = ['recall', 'apply']
+        else:  # hard
+            allowed_cognitive = ['apply', 'analyze']
+        
+        # Add error focus if provided
+        error_context = ""
+        if error_focus:
+            error_context = f"""
+            Focus on addressing these common errors:
+            {', '.join(error_focus)}
+            
+            Create questions that help the student overcome these specific difficulties.
+            """
         
         prompt = f"""
         You are generating multiple-choice assessment questions.
@@ -172,15 +186,14 @@ class QuestionGenerator:
         Concept: {concept}
         Atomic Concept: {atom}
         Student Level: {knowledge_level.upper()}
+        Target Difficulty: {target_difficulty.upper()}
         
-        Generate EXACTLY {total_needed} questions with these characteristics:
+        Generate EXACTLY {count} {target_difficulty} question(s) with these characteristics:
         - Complexity: {adj['complexity']}
-        - Cognitive levels: {', '.join(adj['cognitive'])}
+        - Cognitive levels: {', '.join(allowed_cognitive)}
         - Hint level: {adj['hint_level']}
         
-        Question Distribution:
-        {chr(10).join(req_lines)}
-        - No hard questions
+        {error_context}
         
         Each question must:
         - Have exactly 4 options
@@ -188,10 +201,14 @@ class QuestionGenerator:
         - Test understanding, not trickery
         - Include the atomic concept explicitly
         - Maximum 25 words per question text
+        - For {target_difficulty} questions, the difficulty should be appropriate:
+            * Easy: Direct recall, simple application
+            * Medium: Requires understanding, some analysis
+            * Hard: Complex application, synthesis of ideas
         
         Each question MUST include:
-        - "difficulty": easy | medium
-        - "cognitive_operation": recall | apply | analyze
+        - "difficulty": "{target_difficulty}"
+        - "cognitive_operation": one of {allowed_cognitive}
         - "estimated_time": integer (seconds) - recall: 20-40, apply: 40-90, analyze: 90-150
         - "question": string
         - "options": array of exactly 4 strings
@@ -202,7 +219,7 @@ class QuestionGenerator:
         {{
             "questions": [
                 {{
-                    "difficulty": "easy",
+                    "difficulty": "{target_difficulty}",
                     "cognitive_operation": "recall",
                     "estimated_time": 30,
                     "question": "Question text here?",
@@ -230,7 +247,6 @@ class QuestionGenerator:
             )
             
             raw_text = response.choices[0].message.content
-            # Extract JSON
             if "```" in raw_text:
                 raw_text = raw_text.split("```")[1]
                 if raw_text.startswith("json"):
@@ -243,12 +259,12 @@ class QuestionGenerator:
             for q in questions:
                 q['estimated_time'] = int(q.get('estimated_time', 60) * adj['time_factor'])
             
-            print(f"Generated {len(questions)} questions")
+            print(f"Generated {len(questions)} {target_difficulty} questions")
             return questions
             
         except Exception as e:
             print(f"Error generating questions: {e}")
-            return self._get_fallback_questions(atom, need_easy, need_medium, knowledge_level)
+            return self._get_fallback_questions(atom, target_difficulty, count, knowledge_level)
     
     def _get_fallback_atoms(self, subject: str, concept: str) -> List[str]:
         """Provide fallback atoms when AI generation fails"""
