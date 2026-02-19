@@ -534,11 +534,11 @@ useEffect(() => {
     // Loading state
     if (flowState === 'initializing' || (loading && flowState !== 'error')) {
         return (
-            <div className="min-h-screen flex items-center justify-center">
+            <div className="min-h-screen bg-theme-bg flex items-center justify-center">
                 <div className="text-center">
-                    <div className="text-xl text-gray-600 mb-4">Preparing your adaptive learning session...</div>
-                    <div className="w-16 h-16 border-4 border-blue-500 border-t-transparent rounded-full animate-spin mx-auto"></div>
-                    <p className="mt-4 text-sm text-gray-500">Analyzing concept structure</p>
+                    <div className="text-xl text-theme-text-secondary mb-4">Preparing your adaptive learning session...</div>
+                    <div className="w-16 h-16 border-4 border-primary border-t-transparent rounded-full animate-spin mx-auto"></div>
+                    <p className="mt-4 text-sm text-theme-text-muted">Analyzing concept structure</p>
                 </div>
             </div>
         );
@@ -547,21 +547,21 @@ useEffect(() => {
     // Error state
     if (flowState === 'error' && error) {
         return (
-            <div className="min-h-screen flex items-center justify-center">
-                <div className="text-center max-w-md p-8 bg-white rounded-lg shadow-lg">
+            <div className="min-h-screen bg-theme-bg flex items-center justify-center">
+                <div className="text-center max-w-md p-8 bg-surface rounded-theme-xl shadow-theme-lg border border-theme-border">
                     <div className="text-5xl mb-4">😕</div>
-                    <h2 className="text-2xl font-bold text-red-600 mb-2">Something went wrong</h2>
-                    <p className="text-gray-600 mb-6">{error}</p>
+                    <h2 className="text-2xl font-bold text-error mb-2">Something went wrong</h2>
+                    <p className="text-theme-text-secondary mb-6">{error}</p>
                     <div className="space-y-3">
                         <button 
                             onClick={handleRetry}
-                            className="w-full px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
+                            className="w-full px-4 py-2 gradient-primary text-white rounded-theme-lg hover:shadow-theme-lg transition-all"
                         >
                             Try Again
                         </button>
                         <button 
                             onClick={handleBackToDashboard}
-                            className="w-full px-4 py-2 bg-gray-200 text-gray-800 rounded-lg hover:bg-gray-300"
+                            className="w-full px-4 py-2 bg-theme-bg text-theme-text-secondary rounded-theme-lg hover:bg-theme-border transition-colors"
                         >
                             Back to Dashboard
                         </button>
@@ -574,14 +574,14 @@ useEffect(() => {
     // No session
     if (!currentSession) {
         return (
-            <div className="min-h-screen flex items-center justify-center">
-                <div className="text-center max-w-md p-8 bg-white rounded-lg shadow-lg">
+            <div className="min-h-screen bg-theme-bg flex items-center justify-center">
+                <div className="text-center max-w-md p-8 bg-surface rounded-theme-xl shadow-theme-lg border border-theme-border">
                     <div className="text-5xl mb-4">🔍</div>
-                    <h2 className="text-2xl font-bold text-gray-800 mb-2">No Active Session</h2>
-                    <p className="text-gray-600 mb-6">We couldn't find an active learning session.</p>
+                    <h2 className="text-2xl font-bold text-theme-text mb-2">No Active Session</h2>
+                    <p className="text-theme-text-secondary mb-6">We couldn't find an active learning session.</p>
                     <button 
                         onClick={handleBackToDashboard}
-                        className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
+                        className="px-4 py-2 gradient-primary text-white rounded-theme-lg hover:shadow-theme-lg transition-all"
                     >
                         Back to Dashboard
                     </button>
@@ -591,16 +591,16 @@ useEffect(() => {
     }
 
     return (
-        <div className="min-h-screen bg-gray-50 py-8">
+        <div className="min-h-screen bg-theme-bg py-8">
             <div className="max-w-4xl mx-auto px-4">
                 {/* Session Header with Real-time Stats */}
-                <div className="mb-6 bg-white rounded-lg shadow p-4">
+                <div className="mb-6 bg-surface rounded-theme-xl shadow-theme border border-theme-border p-4">
                     <div className="flex justify-between items-center">
                         <div>
-                            <h1 className="text-xl font-bold text-gray-800">
+                            <h1 className="text-xl font-bold text-theme-text">
                                 {currentSession.concept_name || 'Learning Session'}
                             </h1>
-                            <p className="text-sm text-gray-500">
+                            <p className="text-sm text-theme-text-muted">
                                 {flowState === 'teaching' && '📖 Learning new concept'}
                                 {flowState === 'questions' && '✍️ Answering questions'}
                                 {flowState === 'review' && '🔄 Reviewing material'}
@@ -614,33 +614,33 @@ useEffect(() => {
                         {/* Real-time Stats */}
                         <div className="flex space-x-4">
                             <div className="text-center">
-                                <div className="text-xs text-gray-500">Mastery</div>
-                                <div className="text-xl font-bold text-blue-600">
+                                <div className="text-xs text-theme-text-muted">Mastery</div>
+                                <div className="text-xl font-bold text-primary">
                                     {Math.round(atomMastery * 100)}%
                                 </div>
-                                <div className="w-20 h-1 bg-gray-200 rounded-full mt-1">
+                                <div className="w-20 h-1 bg-theme-border rounded-full mt-1">
                                     <div 
-                                        className="h-1 bg-blue-600 rounded-full transition-all duration-300"
+                                        className="h-1 gradient-primary rounded-full transition-all duration-300"
                                         style={{ width: `${atomMastery * 100}%` }}
                                     ></div>
                                 </div>
                             </div>
                             
                             <div className="text-center">
-                                <div className="text-xs text-gray-500">Ability (θ)</div>
-                                <div className="text-xl font-bold text-purple-600">
+                                <div className="text-xs text-theme-text-muted">Ability (θ)</div>
+                                <div className="text-xl font-bold text-violet-500">
                                     {currentTheta.toFixed(2)}
                                 </div>
                             </div>
                             
                             {pacingDecision && pacingDecision !== 'stay' && (
                                 <div className="text-center">
-                                    <div className="text-xs text-gray-500">Pace</div>
-                                    <div className={`text-sm font-bold px-2 py-1 rounded ${
-                                        pacingDecision === 'speed_up' ? 'bg-green-100 text-green-800' :
-                                        pacingDecision === 'slow_down' ? 'bg-yellow-100 text-yellow-800' :
-                                        pacingDecision === 'sharp_slowdown' ? 'bg-red-100 text-red-800' :
-                                        'bg-gray-100 text-gray-800'
+                                    <div className="text-xs text-theme-text-muted">Pace</div>
+                                    <div className={`text-sm font-bold px-2 py-1 rounded-theme ${
+                                        pacingDecision === 'speed_up' ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400' :
+                                        pacingDecision === 'slow_down' ? 'bg-amber-500/10 text-amber-600 dark:text-amber-400' :
+                                        pacingDecision === 'sharp_slowdown' ? 'bg-error/10 text-error' :
+                                        'bg-theme-bg text-theme-text'
                                     }`}>
                                         {pacingDecision === 'speed_up' && '⚡ Speed Up'}
                                         {pacingDecision === 'slow_down' && '🐢 Slow Down'}
@@ -651,8 +651,8 @@ useEffect(() => {
                             
                             {answers.length > 0 && (
                                 <div className="text-center">
-                                    <div className="text-xs text-gray-500">Questions</div>
-                                    <div className="text-lg font-bold text-gray-700">
+                                    <div className="text-xs text-theme-text-muted">Questions</div>
+                                    <div className="text-lg font-bold text-theme-text">
                                         {answers.length}
                                     </div>
                                 </div>
@@ -665,12 +665,12 @@ useEffect(() => {
                         <div>
                             <FatigueIndicator />
                             {retentionAction && (
-                                <div className="mt-1 text-xs text-orange-600 font-medium">
+                                <div className="mt-1 text-xs text-orange-500 font-medium">
                                     🔁 {typeof retentionAction === 'string' ? retentionAction : 'Retention review recommended'}
                                 </div>
                             )}
                             {hintWarning && (
-                                <div className="mt-1 text-xs text-yellow-600 font-medium">
+                                <div className="mt-1 text-xs text-amber-500 font-medium">
                                     💡 {hintWarning}
                                 </div>
                             )}
@@ -784,64 +784,64 @@ useEffect(() => {
                     
                     {/* Concept Complete */}
                     {flowState === 'concept_complete' && (
-                        <div className="bg-white rounded-lg shadow-lg p-12 text-center">
+                        <div className="bg-surface rounded-theme-xl shadow-theme-lg border border-theme-border p-12 text-center animate-scale-in">
                             <div className="text-6xl mb-4">{conceptFinalResult?.passed ? '🏆' : '📚'}</div>
-                            <h2 className="text-3xl font-bold text-gray-800 mb-2">
+                            <h2 className="text-3xl font-bold text-theme-text mb-2">
                                 {conceptFinalResult?.passed ? 'Concept Mastered!' : 'Almost There!'}
                             </h2>
-                            <p className="text-lg text-gray-600 mb-6">
+                            <p className="text-lg text-theme-text-secondary mb-6">
                                 {conceptFinalResult?.recommendation || "You've completed all atoms in this concept."}
                             </p>
                             
                             {/* Final Stats */}
                             {conceptFinalResult && (
                                 <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 max-w-xl mx-auto mb-8">
-                                    <div className="bg-blue-50 p-4 rounded-lg">
-                                        <div className="text-2xl font-bold text-blue-600">
+                                    <div className="bg-primary/10 p-4 rounded-theme-lg">
+                                        <div className="text-2xl font-bold text-primary">
                                             {Math.round((conceptFinalResult.accuracy || 0) * 100)}%
                                         </div>
-                                        <div className="text-sm text-gray-600">Challenge Score</div>
+                                        <div className="text-sm text-theme-text-muted">Challenge Score</div>
                                     </div>
-                                    <div className="bg-green-50 p-4 rounded-lg">
-                                        <div className="text-2xl font-bold text-green-600">
+                                    <div className="bg-emerald-500/10 p-4 rounded-theme-lg">
+                                        <div className="text-2xl font-bold text-emerald-500">
                                             {conceptFinalResult.correct}/{conceptFinalResult.total}
                                         </div>
-                                        <div className="text-sm text-gray-600">Correct</div>
+                                        <div className="text-sm text-theme-text-muted">Correct</div>
                                     </div>
-                                    <div className="bg-purple-50 p-4 rounded-lg">
-                                        <div className="text-2xl font-bold text-purple-600">
+                                    <div className="bg-violet-500/10 p-4 rounded-theme-lg">
+                                        <div className="text-2xl font-bold text-violet-500">
                                             {Math.round((conceptFinalResult.final_mastery || 0) * 100)}%
                                         </div>
-                                        <div className="text-sm text-gray-600">Final Mastery</div>
+                                        <div className="text-sm text-theme-text-muted">Final Mastery</div>
                                     </div>
-                                    <div className="bg-yellow-50 p-4 rounded-lg">
-                                        <div className="text-2xl font-bold text-yellow-600">
+                                    <div className="bg-amber-500/10 p-4 rounded-theme-lg">
+                                        <div className="text-2xl font-bold text-amber-500">
                                             +{conceptFinalResult.concept_xp || 0}
                                         </div>
-                                        <div className="text-sm text-gray-600">XP Earned</div>
+                                        <div className="text-sm text-theme-text-muted">XP Earned</div>
                                     </div>
                                 </div>
                             )}
 
                             {!conceptFinalResult && (
                                 <div className="grid grid-cols-3 gap-4 max-w-md mx-auto mb-8">
-                                    <div className="bg-blue-50 p-4 rounded-lg">
-                                        <div className="text-2xl font-bold text-blue-600">
+                                    <div className="bg-primary/10 p-4 rounded-theme-lg">
+                                        <div className="text-2xl font-bold text-primary">
                                             {Math.round(atomMastery * 100)}%
                                         </div>
-                                        <div className="text-sm text-gray-600">Mastery</div>
+                                        <div className="text-sm text-theme-text-muted">Mastery</div>
                                     </div>
-                                    <div className="bg-green-50 p-4 rounded-lg">
-                                        <div className="text-2xl font-bold text-green-600">
+                                    <div className="bg-emerald-500/10 p-4 rounded-theme-lg">
+                                        <div className="text-2xl font-bold text-emerald-500">
                                             {currentTheta.toFixed(2)}
                                         </div>
-                                        <div className="text-sm text-gray-600">Ability (θ)</div>
+                                        <div className="text-sm text-theme-text-muted">Ability (θ)</div>
                                     </div>
-                                    <div className="bg-purple-50 p-4 rounded-lg">
-                                        <div className="text-2xl font-bold text-purple-600">
+                                    <div className="bg-violet-500/10 p-4 rounded-theme-lg">
+                                        <div className="text-2xl font-bold text-violet-500">
                                             {answers.length}
                                         </div>
-                                        <div className="text-sm text-gray-600">Questions</div>
+                                        <div className="text-sm text-theme-text-muted">Questions</div>
                                     </div>
                                 </div>
                             )}
@@ -849,13 +849,13 @@ useEffect(() => {
                             <div className="flex justify-center space-x-4">
                                 <button
                                     onClick={handleBackToDashboard}
-                                    className="px-8 py-3 bg-green-600 text-white rounded-lg font-semibold hover:bg-green-700 transition"
+                                    className="px-8 py-3 bg-emerald-500 text-white rounded-theme-lg font-semibold hover:bg-emerald-600 transition-colors"
                                 >
                                     Return to Dashboard
                                 </button>
                                 <button
                                     onClick={() => navigate('/leaderboard')}
-                                    className="px-8 py-3 bg-yellow-500 text-white rounded-lg font-semibold hover:bg-yellow-600 transition"
+                                    className="px-8 py-3 bg-amber-500 text-white rounded-theme-lg font-semibold hover:bg-amber-600 transition-colors"
                                 >
                                     🏆 Leaderboard
                                 </button>
@@ -865,9 +865,9 @@ useEffect(() => {
                     
                     {/* Loading State for transitions */}
                     {flowState === 'loading' && (
-                        <div className="bg-white rounded-lg shadow-lg p-12 text-center">
-                            <div className="w-16 h-16 border-4 border-blue-500 border-t-transparent rounded-full animate-spin mx-auto mb-4"></div>
-                            <p className="text-gray-600">Loading next content...</p>
+                        <div className="bg-surface rounded-theme-xl shadow-theme border border-theme-border p-12 text-center">
+                            <div className="w-16 h-16 border-4 border-primary border-t-transparent rounded-full animate-spin mx-auto mb-4"></div>
+                            <p className="text-theme-text-muted">Loading next content...</p>
                         </div>
                     )}
                 </div>

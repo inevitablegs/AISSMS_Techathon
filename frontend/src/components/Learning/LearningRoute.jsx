@@ -9,14 +9,16 @@ const LearningRoute = () => {
     
     if (!conceptId) {
         return (
-            <div className="text-center py-12">
-                <p className="text-red-600">No concept selected.</p>
-                <button 
-                    onClick={() => navigate('/dashboard')}
-                    className="mt-4 px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700"
-                >
-                    Go to Dashboard
-                </button>
+            <div className="min-h-screen bg-theme-bg flex items-center justify-center">
+                <div className="text-center">
+                    <p className="text-error mb-4">No concept selected.</p>
+                    <button 
+                        onClick={() => navigate('/dashboard')}
+                        className="px-5 py-2.5 gradient-primary text-white rounded-theme font-semibold hover:opacity-90 transition-opacity"
+                    >
+                        Go to Dashboard
+                    </button>
+                </div>
             </div>
         );
     }

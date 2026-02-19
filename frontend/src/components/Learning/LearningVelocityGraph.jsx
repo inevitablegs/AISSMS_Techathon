@@ -41,20 +41,20 @@ export default function LearningVelocityGraph({ sessionId }) {
   }, [velocityData]);
 
   // Engagement color
-  const engColor = engagementScore >= 0.7 ? 'text-green-600' : engagementScore >= 0.4 ? 'text-yellow-600' : 'text-red-500';
+  const engColor = engagementScore >= 0.7 ? 'text-emerald-500' : engagementScore >= 0.4 ? 'text-amber-500' : 'text-error';
 
   if (!velocityData || velocityData.length < 2) {
     return (
-      <div className="text-xs text-gray-400 italic">
+      <div className="text-xs text-theme-text-muted italic">
         Answer a few questions to see your learning velocity…
       </div>
     );
   }
 
   return (
-    <div className="bg-white/80 rounded-xl p-3 border border-gray-100">
+    <div className="bg-surface/80 rounded-theme-lg p-3 border border-theme-border">
       <div className="flex items-center justify-between mb-1">
-        <span className="text-xs font-semibold text-gray-600">Learning Velocity</span>
+        <span className="text-xs font-semibold text-theme-text-secondary">Learning Velocity</span>
         <span className={`text-xs font-bold ${engColor}`}>
           Engagement {Math.round(engagementScore * 100)}%
         </span>
@@ -86,7 +86,7 @@ export default function LearningVelocityGraph({ sessionId }) {
         />
       </svg>
 
-      <div className="flex items-center gap-4 mt-1 text-[10px] text-gray-400">
+      <div className="flex items-center gap-4 mt-1 text-[10px] text-theme-text-muted">
         <span className="flex items-center gap-1">
           <span className="inline-block w-3 h-0.5 bg-indigo-500 rounded" /> Accuracy
         </span>

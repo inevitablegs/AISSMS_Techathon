@@ -6,18 +6,18 @@ const ProtectedRoute = ({ children }) => {
     const { user, loading } = useAuth();
     const location = useLocation();
 
-    console.log("ProtectedRoute - Auth state:", { user: !!user, loading });
-
     if (loading) {
         return (
-            <div className="min-h-screen flex items-center justify-center">
-                <div className="text-xl text-gray-600">Loading...</div>
+            <div className="min-h-screen bg-theme-bg flex items-center justify-center">
+                <div className="text-center animate-fade-in">
+                    <div className="w-12 h-12 border-4 border-primary border-t-transparent rounded-full animate-spin mx-auto mb-4" />
+                    <p className="text-theme-text-secondary font-medium">Loading...</p>
+                </div>
             </div>
         );
     }
 
     if (!user) {
-        // Save the location they were trying to go to
         return <Navigate to="/login" state={{ from: location.pathname }} replace />;
     }
 

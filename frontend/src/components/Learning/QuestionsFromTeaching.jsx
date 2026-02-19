@@ -120,17 +120,17 @@ const QuestionsFromTeaching = ({
 
     const getPacingColor = () => {
         switch(pacingDecision) {
-            case 'speed_up': return 'bg-green-100 text-green-800 border-green-300';
-            case 'slow_down': return 'bg-yellow-100 text-yellow-800 border-yellow-300';
-            case 'sharp_slowdown': return 'bg-red-100 text-red-800 border-red-300';
-            default: return 'bg-blue-100 text-blue-800 border-blue-300';
+            case 'speed_up': return 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/30';
+            case 'slow_down': return 'bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-500/30';
+            case 'sharp_slowdown': return 'bg-error/10 text-error border-error/30';
+            default: return 'bg-primary/10 text-primary border-primary/30';
         }
     };
 
     if (!currentQuestion) {
         return (
             <div className="text-center py-8">
-                <p className="text-gray-600">No questions available.</p>
+                <p className="text-theme-text-muted">No questions available.</p>
             </div>
         );
     }
@@ -138,26 +138,26 @@ const QuestionsFromTeaching = ({
     const correctIndex = feedback?.correct_index ?? currentQuestion.correct_index;
 
     return (
-        <div className="bg-white rounded-lg shadow-lg p-6">
+        <div className="bg-surface rounded-theme-xl shadow-theme border border-theme-border p-6">
             {/* Real-time Mastery Display */}
             {showMetrics && (
-            <div className="mb-6 bg-gradient-to-r from-blue-50 to-purple-50 p-4 rounded-lg border border-blue-100">
+            <div className="mb-6 bg-primary/5 p-4 rounded-theme-lg border border-primary/20">
                 <div className="flex justify-between items-center">
                     <div>
-                        <h3 className="text-sm font-semibold text-gray-600">REAL-TIME MASTERY</h3>
+                        <h3 className="text-sm font-semibold text-theme-text-muted tracking-wider">REAL-TIME MASTERY</h3>
                         <div className="flex items-center space-x-4 mt-2">
                             <div>
-                                <span className="text-2xl font-bold text-blue-600">
+                                <span className="text-2xl font-bold text-primary">
                                     {Math.round(atomMastery * 100)}%
                                 </span>
-                                <span className="text-sm text-gray-500 ml-2">mastery</span>
+                                <span className="text-sm text-theme-text-muted ml-2">mastery</span>
                             </div>
-                            <div className="w-px h-8 bg-gray-300"></div>
+                            <div className="w-px h-8 bg-theme-border"></div>
                             <div>
-                                <span className="text-xl font-semibold text-purple-600">
+                                <span className="text-xl font-semibold text-violet-500">
                                     θ = {currentTheta.toFixed(2)}
                                 </span>
-                                <span className="text-sm text-gray-500 ml-2">ability</span>
+                                <span className="text-sm text-theme-text-muted ml-2">ability</span>
                             </div>
                         </div>
                     </div>
@@ -174,9 +174,9 @@ const QuestionsFromTeaching = ({
                 
                 {/* Progress Bar */}
                 <div className="mt-3">
-                    <div className="w-full bg-gray-200 rounded-full h-2.5">
+                    <div className="w-full bg-theme-border rounded-full h-2.5">
                         <div 
-                            className="bg-blue-600 h-2.5 rounded-full transition-all duration-300"
+                            className="gradient-primary h-2.5 rounded-full transition-all duration-300"
                             style={{ width: `${atomMastery * 100}%` }}
                         ></div>
                     </div>
@@ -194,28 +194,28 @@ const QuestionsFromTeaching = ({
             {/* Question Header */}
             <div className="mb-4 flex justify-between items-center">
                 <div>
-                    <span className="text-sm text-gray-500">
+                    <span className="text-sm text-theme-text-muted">
                         Question {currentIndex + 1} of {questions.length}
                     </span>
-                    <h2 className="text-xl font-bold mt-1">{atomName}</h2>
+                    <h2 className="text-xl font-bold text-theme-text mt-1">{atomName}</h2>
                 </div>
                 <div className="flex space-x-2">
-                    <span className={`px-2 py-1 rounded text-xs font-semibold ${
-                        currentQuestion.difficulty === 'easy' ? 'bg-green-100 text-green-800' :
-                        currentQuestion.difficulty === 'medium' ? 'bg-yellow-100 text-yellow-800' :
-                        'bg-red-100 text-red-800'
+                    <span className={`px-2 py-1 rounded-theme text-xs font-semibold ${
+                        currentQuestion.difficulty === 'easy' ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400' :
+                        currentQuestion.difficulty === 'medium' ? 'bg-amber-500/10 text-amber-600 dark:text-amber-400' :
+                        'bg-error/10 text-error'
                     }`}>
                         {currentQuestion.difficulty?.toUpperCase()}
                     </span>
-                    <span className="px-2 py-1 bg-purple-100 text-purple-800 rounded text-xs font-semibold">
+                    <span className="px-2 py-1 bg-violet-500/10 text-violet-600 dark:text-violet-400 rounded-theme text-xs font-semibold">
                         {currentQuestion.cognitive_operation?.toUpperCase()}
                     </span>
                 </div>
             </div>
 
             {/* Question Text */}
-            <div className="mb-6 p-4 bg-gray-50 rounded-lg">
-                <p className="text-lg">{currentQuestion.question}</p>
+            <div className="mb-6 p-4 bg-theme-bg rounded-theme-lg">
+                <p className="text-lg text-theme-text">{currentQuestion.question}</p>
             </div>
 
             {/* Options */}
@@ -225,15 +225,15 @@ const QuestionsFromTeaching = ({
                         key={index}
                         onClick={() => handleOptionSelect(index)}
                         disabled={isSubmitted}
-                        className={`w-full text-left p-4 rounded-lg border-2 transition ${
+                        className={`w-full text-left p-4 rounded-theme-lg border-2 transition text-theme-text ${
                             selectedOption === index
-                                ? 'border-blue-500 bg-blue-50'
-                                : 'border-gray-200 hover:border-gray-300 hover:bg-gray-50'
+                                ? 'border-primary bg-primary/10'
+                                : 'border-theme-border hover:border-primary/40 hover:bg-theme-bg'
                         } ${
                             isSubmitted && index === correctIndex
-                                ? 'border-green-500 bg-green-50'
+                                ? 'border-emerald-500 bg-emerald-500/10'
                                 : isSubmitted && selectedOption === index && selectedOption !== correctIndex
-                                ? 'border-red-500 bg-red-50'
+                                ? 'border-error bg-error/10'
                                 : ''
                         }`}
                     >
@@ -247,23 +247,23 @@ const QuestionsFromTeaching = ({
 
             {/* Feedback Section */}
             {feedback && (
-                <div className={`mb-4 p-4 rounded-lg ${
-                    feedback.correct ? 'bg-green-50 border border-green-200' : 'bg-red-50 border border-red-200'
+                <div className={`mb-4 p-4 rounded-theme-lg ${
+                    feedback.correct ? 'bg-emerald-500/10 border border-emerald-500/30' : 'bg-error/10 border border-error/30'
                 }`}>
                     <div className="flex justify-between items-center">
                         <div>
                             <p className={`font-semibold ${
-                                feedback.correct ? 'text-green-700' : 'text-red-700'
+                                feedback.correct ? 'text-emerald-600 dark:text-emerald-400' : 'text-error'
                             }`}>
                                 {feedback.message}
                             </p>
                             {!feedback.correct && feedback.error_type && (
-                                <p className="text-sm text-gray-600 mt-1">
+                                <p className="text-sm text-theme-text-secondary mt-1">
                                     Error type: <span className="font-medium capitalize">{feedback.error_type}</span>
                                 </p>
                             )}
                             {!feedback.correct && feedback.explanation && (
-                                <p className="text-sm text-gray-600 mt-1">
+                                <p className="text-sm text-theme-text-secondary mt-1">
                                     {feedback.explanation}
                                 </p>
                             )}
@@ -271,11 +271,11 @@ const QuestionsFromTeaching = ({
                         <div className="text-right">
                             {showMetrics && (
                                 <>
-                                    <p className="text-sm text-gray-600">
-                                        Mastery: <span className="font-bold text-blue-600">{feedback.mastery_change}</span>
+                                    <p className="text-sm text-theme-text-muted">
+                                        Mastery: <span className="font-bold text-primary">{feedback.mastery_change}</span>
                                     </p>
-                                    <p className="text-sm text-gray-600">
-                                        θ: <span className="font-bold text-purple-600">{feedback.theta_change}</span>
+                                    <p className="text-sm text-theme-text-muted">
+                                        θ: <span className="font-bold text-violet-500">{feedback.theta_change}</span>
                                     </p>
                                 </>
                             )}
@@ -288,7 +288,7 @@ const QuestionsFromTeaching = ({
             <div className="flex justify-between">
                 <button
                     onClick={onBackToTeaching}
-                    className="px-4 py-2 bg-gray-200 text-gray-700 rounded-lg hover:bg-gray-300"
+                    className="px-4 py-2 bg-theme-bg text-theme-text-secondary rounded-theme-lg hover:bg-theme-border transition-colors"
                 >
                     ← Back to Teaching
                 </button>
@@ -297,14 +297,14 @@ const QuestionsFromTeaching = ({
                     <button
                         onClick={handleSubmit}
                         disabled={selectedOption === null || loading}
-                        className="px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
+                        className="px-6 py-2 gradient-primary text-white rounded-theme-lg hover:shadow-theme-lg transition-all disabled:opacity-50 disabled:cursor-not-allowed"
                     >
                         {loading ? 'Submitting...' : 'Submit Answer'}
                     </button>
                 ) : (
                     <button
                         onClick={handleNext}
-                        className="px-6 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700"
+                        className="px-6 py-2 bg-emerald-500 text-white rounded-theme-lg hover:bg-emerald-600 transition-colors"
                     >
                         {currentIndex < questions.length - 1 ? 'Next Question →' : 'Complete Atom →'}
                     </button>
@@ -313,24 +313,24 @@ const QuestionsFromTeaching = ({
 
             {/* Learning Metrics */}
             {showMetrics && Object.keys(metrics).length > 0 && (
-                <div className="mt-6 pt-4 border-t border-gray-200">
-                    <h4 className="text-sm font-semibold text-gray-600 mb-2">Learning Metrics</h4>
+                <div className="mt-6 pt-4 border-t border-theme-border">
+                    <h4 className="text-sm font-semibold text-theme-text-muted mb-2">Learning Metrics</h4>
                     <div className="grid grid-cols-4 gap-2 text-xs">
-                        <div className="bg-gray-50 p-2 rounded">
-                            <span className="text-gray-500">Confidence:</span>
-                            <span className="ml-1 font-bold">{(metrics.confidence * 100).toFixed(0)}%</span>
+                        <div className="bg-theme-bg p-2 rounded-theme">
+                            <span className="text-theme-text-muted">Confidence:</span>
+                            <span className="ml-1 font-bold text-theme-text">{(metrics.confidence * 100).toFixed(0)}%</span>
                         </div>
-                        <div className="bg-gray-50 p-2 rounded">
-                            <span className="text-gray-500">Quality:</span>
-                            <span className="ml-1 font-bold">{metrics.performance_quality?.toFixed(2)}</span>
+                        <div className="bg-theme-bg p-2 rounded-theme">
+                            <span className="text-theme-text-muted">Quality:</span>
+                            <span className="ml-1 font-bold text-theme-text">{metrics.performance_quality?.toFixed(2)}</span>
                         </div>
-                        <div className="bg-gray-50 p-2 rounded">
-                            <span className="text-gray-500">Learning rate:</span>
-                            <span className="ml-1 font-bold">{metrics.learning_rate?.toFixed(2)}</span>
+                        <div className="bg-theme-bg p-2 rounded-theme">
+                            <span className="text-theme-text-muted">Learning rate:</span>
+                            <span className="ml-1 font-bold text-theme-text">{metrics.learning_rate?.toFixed(2)}</span>
                         </div>
-                        <div className="bg-gray-50 p-2 rounded">
-                            <span className="text-gray-500">Next:</span>
-                            <span className="ml-1 font-bold capitalize">{nextAction?.replace('_', ' ')}</span>
+                        <div className="bg-theme-bg p-2 rounded-theme">
+                            <span className="text-theme-text-muted">Next:</span>
+                            <span className="ml-1 font-bold text-theme-text capitalize">{nextAction?.replace('_', ' ')}</span>
                         </div>
                     </div>
                 </div>

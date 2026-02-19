@@ -1,81 +1,171 @@
 import React from 'react';
 import { Link } from 'react-router-dom';
+import { useTheme } from '../context/ThemeContext';
 
 const Home = () => {
-    return (
-        <div className="min-h-screen bg-gradient-to-r from-blue-500 to-purple-600">
-            <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-                <nav className="flex justify-between items-center py-6">
-                    <div className="text-white text-2xl font-bold">
-                        Student Portal
-                    </div>
-                    <div className="space-x-4">
-                        <Link
-                            to="/login"
-                            className="text-white hover:text-gray-200 px-3 py-2 rounded-md text-sm font-medium"
-                        >
-                            Login
-                        </Link>
-                        <Link
-                            to="/register"
-                            className="bg-white text-blue-600 hover:bg-gray-100 px-4 py-2 rounded-md text-sm font-medium"
-                        >
-                            Register
-                        </Link>
-                    </div>
-                </nav>
+    const { theme, toggleTheme } = useTheme();
 
-                <main className="mt-20">
-                    <div className="text-center">
-                        <h1 className="text-4xl tracking-tight font-extrabold text-white sm:text-5xl md:text-6xl">
-                            <span className="block">Welcome to Student Portal</span>
-                            <span className="block text-3xl mt-3">Your one-stop solution for student management</span>
-                        </h1>
-                        <p className="mt-3 max-w-md mx-auto text-base text-gray-100 sm:text-lg md:mt-5 md:text-xl md:max-w-3xl">
-                            Access your courses, track assignments, and stay updated with upcoming events. 
-                            Join thousands of students already using our platform.
-                        </p>
-                        <div className="mt-10 flex justify-center gap-4">
-                            <Link
-                                to="/register"
-                                className="inline-flex items-center px-6 py-3 border border-transparent text-base font-medium rounded-md text-blue-600 bg-white hover:bg-gray-50 md:text-lg"
+    const features = [
+        {
+            icon: '🧠',
+            title: 'Adaptive Learning',
+            desc: 'AI-powered system that adapts to your pace, mastery level, and learning style in real-time.',
+        },
+        {
+            icon: '📊',
+            title: 'IRT-Based Assessment',
+            desc: 'Item Response Theory ensures precise measurement of your ability with calibrated questions.',
+        },
+        {
+            icon: '⚡',
+            title: 'Smart Pacing',
+            desc: 'Fatigue detection, break recommendations, and velocity tracking keep you in the optimal learning zone.',
+        },
+    ];
+
+    return (
+        <div className="min-h-screen bg-theme-bg overflow-hidden">
+            {/* Navbar */}
+            <nav className="sticky top-0 z-50 glass-strong">
+                <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+                    <div className="flex justify-between h-16 items-center">
+                        <Link to="/" className="flex items-center gap-2 group">
+                            <div className="w-9 h-9 gradient-primary rounded-xl flex items-center justify-center text-white font-bold text-lg shadow-lg group-hover:scale-105 transition-transform">
+                                A
+                            </div>
+                            <span className="text-lg font-bold text-theme-text">
+                                Adapt<span className="text-gradient">Learn</span>
+                            </span>
+                        </Link>
+                        <div className="flex items-center gap-3">
+                            {/* Theme Toggle */}
+                            <button
+                                onClick={toggleTheme}
+                                className="relative w-14 h-7 rounded-full bg-surface-alt border border-theme-border transition-colors duration-300"
+                                aria-label="Toggle theme"
                             >
-                                Get Started
-                            </Link>
-                            <Link
-                                to="/login"
-                                className="inline-flex items-center px-6 py-3 border border-transparent text-base font-medium rounded-md text-white bg-blue-800 bg-opacity-60 hover:bg-opacity-70 md:text-lg"
-                            >
+                                <span className={`absolute top-0.5 left-0.5 w-6 h-6 rounded-full transition-all duration-300 flex items-center justify-center text-sm ${
+                                    theme === 'dark'
+                                        ? 'translate-x-7 bg-indigo-500 text-white'
+                                        : 'translate-x-0 bg-yellow-400 text-yellow-900'
+                                }`}>
+                                    {theme === 'dark' ? '🌙' : '☀️'}
+                                </span>
+                            </button>
+                            <Link to="/login" className="px-4 py-2 rounded-lg text-sm font-medium text-theme-text-secondary hover:text-theme-text transition-colors">
                                 Sign In
                             </Link>
+                            <Link to="/register" className="px-4 py-2 gradient-primary text-white rounded-lg text-sm font-semibold hover:opacity-90 transition-opacity shadow-theme">
+                                Get Started
+                            </Link>
                         </div>
+                    </div>
+                </div>
+            </nav>
+
+            {/* Hero */}
+            <section className="relative pt-20 pb-32 px-4">
+                {/* Background decoration */}
+                <div className="absolute inset-0 overflow-hidden pointer-events-none">
+                    <div className="absolute -top-40 -right-40 w-[600px] h-[600px] rounded-full bg-primary/5 blur-3xl" />
+                    <div className="absolute -bottom-40 -left-40 w-[500px] h-[500px] rounded-full bg-accent/5 blur-3xl" />
+                </div>
+
+                <div className="max-w-5xl mx-auto text-center relative z-10">
+                    <div className="inline-flex items-center gap-2 px-4 py-1.5 rounded-full bg-primary/10 text-primary text-sm font-medium mb-8 animate-fade-in-up">
+                        <span className="w-2 h-2 rounded-full bg-primary animate-pulse" />
+                        AI-Powered Adaptive Learning
                     </div>
 
-                    <div className="mt-20 grid grid-cols-1 gap-8 sm:grid-cols-2 lg:grid-cols-3">
-                        <div className="bg-white rounded-lg shadow-lg p-6">
-                            <div className="text-blue-600 text-2xl mb-4">📚</div>
-                            <h3 className="text-xl font-semibold mb-2">Course Management</h3>
-                            <p className="text-gray-600">
-                                Easily manage and track all your courses in one place.
-                            </p>
-                        </div>
-                        <div className="bg-white rounded-lg shadow-lg p-6">
-                            <div className="text-blue-600 text-2xl mb-4">📝</div>
-                            <h3 className="text-xl font-semibold mb-2">Assignment Tracking</h3>
-                            <p className="text-gray-600">
-                                Keep track of your assignments and never miss a deadline.
-                            </p>
-                        </div>
-                        <div className="bg-white rounded-lg shadow-lg p-6">
-                            <div className="text-blue-600 text-2xl mb-4">📅</div>
-                            <h3 className="text-xl font-semibold mb-2">Event Calendar</h3>
-                            <p className="text-gray-600">
-                                Stay updated with upcoming academic events and deadlines.
-                            </p>
+                    <h1 className="text-5xl sm:text-6xl md:text-7xl font-extrabold tracking-tight mb-6 animate-fade-in-up" style={{ animationDelay: '0.1s' }}>
+                        Learn Smarter,
+                        <br />
+                        <span className="text-gradient">Not Harder</span>
+                    </h1>
+
+                    <p className="text-lg sm:text-xl text-theme-text-secondary max-w-2xl mx-auto mb-10 animate-fade-in-up" style={{ animationDelay: '0.2s' }}>
+                        Experience personalized education powered by cognitive science. Our system adapts to your unique learning pattern, ensuring maximum retention with minimum effort.
+                    </p>
+
+                    <div className="flex flex-col sm:flex-row gap-4 justify-center animate-fade-in-up" style={{ animationDelay: '0.3s' }}>
+                        <Link
+                            to="/register"
+                            className="px-8 py-3.5 gradient-primary text-white rounded-xl text-lg font-semibold hover:opacity-90 transition-all shadow-theme-lg hover:shadow-theme-xl"
+                        >
+                            Start Learning Free
+                        </Link>
+                        <Link
+                            to="/login"
+                            className="px-8 py-3.5 bg-surface border border-theme-border text-theme-text rounded-xl text-lg font-semibold hover:bg-surface-alt transition-all shadow-theme"
+                        >
+                            Sign In
+                        </Link>
+                    </div>
+                </div>
+            </section>
+
+            {/* Features */}
+            <section className="py-20 px-4 bg-surface-alt/50">
+                <div className="max-w-6xl mx-auto">
+                    <div className="text-center mb-16">
+                        <h2 className="text-3xl sm:text-4xl font-bold text-theme-text mb-4">
+                            Why AdaptLearn?
+                        </h2>
+                        <p className="text-theme-text-secondary max-w-xl mx-auto">
+                            Built on proven learning science, designed for real results.
+                        </p>
+                    </div>
+
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-6 stagger">
+                        {features.map((f, i) => (
+                            <div
+                                key={i}
+                                className="bg-surface rounded-theme-xl p-8 shadow-theme hover:shadow-theme-lg transition-all duration-300 border border-theme-border hover:-translate-y-1"
+                            >
+                                <div className="w-14 h-14 gradient-primary rounded-2xl flex items-center justify-center text-2xl mb-5 shadow-lg">
+                                    {f.icon}
+                                </div>
+                                <h3 className="text-xl font-bold text-theme-text mb-2">{f.title}</h3>
+                                <p className="text-theme-text-secondary leading-relaxed">{f.desc}</p>
+                            </div>
+                        ))}
+                    </div>
+                </div>
+            </section>
+
+            {/* Stats */}
+            <section className="py-20 px-4">
+                <div className="max-w-5xl mx-auto">
+                    <div className="gradient-primary rounded-theme-xl p-10 sm:p-14 text-white text-center shadow-theme-xl">
+                        <h2 className="text-3xl font-bold mb-10">Built for Effective Learning</h2>
+                        <div className="grid grid-cols-2 md:grid-cols-4 gap-8">
+                            {[
+                                { val: 'IRT', label: 'Adaptive Engine' },
+                                { val: 'BKT', label: 'Knowledge Tracing' },
+                                { val: 'Real-time', label: 'Pacing Control' },
+                                { val: 'XP', label: 'Gamified Progress' },
+                            ].map((s, i) => (
+                                <div key={i}>
+                                    <div className="text-3xl font-extrabold mb-1">{s.val}</div>
+                                    <div className="text-white/70 text-sm">{s.label}</div>
+                                </div>
+                            ))}
                         </div>
                     </div>
-                </main>
-            </div>
+                </div>
+            </section>
+
+            {/* Footer */}
+            <footer className="py-8 px-4 border-t border-theme-border">
+                <div className="max-w-7xl mx-auto flex flex-col sm:flex-row justify-between items-center gap-4">
+                    <span className="text-sm text-theme-text-muted">
+                        AdaptLearn — Adaptive Learning System
+                    </span>
+                    <span className="text-sm text-theme-text-muted">
+                        Built with AI & Cognitive Science
+                    </span>
+                </div>
+            </footer>
         </div>
     );
 };

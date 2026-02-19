@@ -15,58 +15,58 @@ const AtomComplete = ({ atom, onContinue, recommendation = '' }) => {
         : 0;
 
     return (
-        <div className="bg-white rounded-lg shadow-lg p-8 text-center">
+        <div className="bg-surface rounded-theme-xl shadow-theme-lg p-8 text-center border border-theme-border animate-scale-in">
             {/* Success Icon */}
             <div className="mb-6">
-                <div className="inline-flex items-center justify-center w-24 h-24 bg-green-100 rounded-full">
+                <div className="inline-flex items-center justify-center w-24 h-24 bg-emerald-500/10 rounded-full">
                     <span className="text-5xl">🎉</span>
                 </div>
             </div>
 
-            <h2 className="text-3xl font-bold text-gray-800 mb-2">Atom Complete!</h2>
-            <p className="text-xl text-green-600 mb-8">You've mastered: {atom?.name}</p>
+            <h2 className="text-3xl font-bold text-theme-text mb-2">Atom Complete!</h2>
+            <p className="text-xl text-emerald-500 mb-8">You've mastered: {atom?.name}</p>
 
             {/* Stats Grid */}
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
-                <div className="bg-blue-50 p-4 rounded-lg">
-                    <div className="text-2xl font-bold text-blue-600">
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8 stagger">
+                <div className="bg-primary/10 p-4 rounded-theme-lg">
+                    <div className="text-2xl font-bold text-primary">
                         {Math.round(atomMastery * 100)}%
                     </div>
-                    <div className="text-sm text-gray-600">Final Mastery</div>
+                    <div className="text-sm text-theme-text-muted">Final Mastery</div>
                 </div>
                 
-                <div className="bg-purple-50 p-4 rounded-lg">
-                    <div className="text-2xl font-bold text-purple-600">
+                <div className="bg-violet-500/10 p-4 rounded-theme-lg">
+                    <div className="text-2xl font-bold text-violet-500">
                         {accuracy.toFixed(0)}%
                     </div>
-                    <div className="text-sm text-gray-600">Accuracy</div>
+                    <div className="text-sm text-theme-text-muted">Accuracy</div>
                 </div>
                 
-                <div className="bg-green-50 p-4 rounded-lg">
-                    <div className="text-2xl font-bold text-green-600">
+                <div className="bg-emerald-500/10 p-4 rounded-theme-lg">
+                    <div className="text-2xl font-bold text-emerald-500">
                         {correctCount}/{totalQuestions}
                     </div>
-                    <div className="text-sm text-gray-600">Correct</div>
+                    <div className="text-sm text-theme-text-muted">Correct</div>
                 </div>
                 
-                <div className="bg-orange-50 p-4 rounded-lg">
-                    <div className="text-2xl font-bold text-orange-600">
+                <div className="bg-orange-500/10 p-4 rounded-theme-lg">
+                    <div className="text-2xl font-bold text-orange-500">
                         {avgTime}s
                     </div>
-                    <div className="text-sm text-gray-600">Avg Time</div>
+                    <div className="text-sm text-theme-text-muted">Avg Time</div>
                 </div>
             </div>
 
             {/* Theta Change */}
-            <div className="mb-8 p-4 bg-gray-50 rounded-lg">
-                <div className="text-sm text-gray-600">Ability (θ) Progress</div>
-                <div className="text-2xl font-bold text-gray-800">
+            <div className="mb-8 p-4 bg-theme-bg rounded-theme-lg">
+                <div className="text-sm text-theme-text-muted">Ability (θ) Progress</div>
+                <div className="text-2xl font-bold text-theme-text">
                     {currentTheta.toFixed(2)}
                 </div>
             </div>
 
             {recommendation && (
-                <div className="mb-6 p-4 bg-blue-50 border border-blue-200 rounded-lg text-blue-800">
+                <div className="mb-6 p-4 bg-info/10 border border-info/20 rounded-theme-lg text-info">
                     {recommendation}
                 </div>
             )}
@@ -74,12 +74,12 @@ const AtomComplete = ({ atom, onContinue, recommendation = '' }) => {
             {/* Continue Button */}
             <button
                 onClick={onContinue}
-                className="px-8 py-3 bg-green-600 text-white rounded-lg font-semibold hover:bg-green-700 transition"
+                className="px-8 py-3 bg-emerald-500 text-white rounded-theme font-semibold hover:bg-emerald-600 transition-colors shadow-theme"
             >
                 Continue to Next Atom →
             </button>
 
-            <p className="mt-4 text-sm text-gray-500">
+            <p className="mt-4 text-sm text-theme-text-muted">
                 You're making great progress! Keep going.
             </p>
         </div>

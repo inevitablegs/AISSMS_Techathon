@@ -33,27 +33,27 @@ const ExternalResources = ({ subject, concept, atomName }) => {
     if (loading) {
         return (
             <div className="text-center py-4">
-                <p className="text-gray-600">Loading additional resources...</p>
+                <p className="text-theme-text-muted">Loading additional resources...</p>
             </div>
         );
     }
 
     if (!resources.videos.length && !resources.images.length) {
-        return null; // Don't show anything if no resources
+        return null;
     }
 
     return (
-        <div className="bg-white rounded-lg shadow-lg p-6 mt-6">
-            <h3 className="text-xl font-semibold mb-4">Additional Learning Resources</h3>
+        <div className="bg-surface rounded-theme-xl shadow-theme border border-theme-border p-6 mt-6">
+            <h3 className="text-xl font-semibold text-theme-text mb-4">Additional Learning Resources</h3>
             
             {/* Tabs */}
-            <div className="flex border-b mb-4">
+            <div className="flex border-b border-theme-border mb-4">
                 {resources.videos.length > 0 && (
                     <button
-                        className={`px-4 py-2 font-medium ${
+                        className={`px-4 py-2 font-medium transition-colors ${
                             activeTab === 'videos'
-                                ? 'text-blue-600 border-b-2 border-blue-600'
-                                : 'text-gray-500 hover:text-gray-700'
+                                ? 'text-primary border-b-2 border-primary'
+                                : 'text-theme-text-muted hover:text-theme-text'
                         }`}
                         onClick={() => setActiveTab('videos')}
                     >
@@ -62,10 +62,10 @@ const ExternalResources = ({ subject, concept, atomName }) => {
                 )}
                 {resources.images.length > 0 && (
                     <button
-                        className={`px-4 py-2 font-medium ${
+                        className={`px-4 py-2 font-medium transition-colors ${
                             activeTab === 'images'
-                                ? 'text-blue-600 border-b-2 border-blue-600'
-                                : 'text-gray-500 hover:text-gray-700'
+                                ? 'text-primary border-b-2 border-primary'
+                                : 'text-theme-text-muted hover:text-theme-text'
                         }`}
                         onClick={() => setActiveTab('images')}
                     >
@@ -78,17 +78,17 @@ const ExternalResources = ({ subject, concept, atomName }) => {
             {activeTab === 'videos' && resources.videos.length > 0 && (
                 <div className="space-y-4">
                     {resources.videos.map((video, index) => (
-                        <div key={index} className="border rounded-lg p-4 hover:bg-gray-50">
+                        <div key={index} className="border border-theme-border rounded-theme-lg p-4 hover:bg-surface-alt/50 transition-colors">
                             <a
                                 href={video.url}
                                 target="_blank"
                                 rel="noopener noreferrer"
                                 className="block"
                             >
-                                <h4 className="font-semibold text-blue-600 hover:underline">
+                                <h4 className="font-semibold text-primary hover:underline">
                                     {video.title}
                                 </h4>
-                                <div className="flex items-center text-sm text-gray-600 mt-2">
+                                <div className="flex items-center text-sm text-theme-text-muted mt-2">
                                     <span className="mr-4">📺 {video.channel}</span>
                                     <span className="mr-4">⏱️ {video.duration}</span>
                                     {video.views && <span>👁️ {video.views}</span>}
@@ -103,7 +103,7 @@ const ExternalResources = ({ subject, concept, atomName }) => {
             {activeTab === 'images' && resources.images.length > 0 && (
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                     {resources.images.map((image, index) => (
-                        <div key={index} className="border rounded-lg overflow-hidden hover:shadow-lg">
+                        <div key={index} className="border border-theme-border rounded-theme-lg overflow-hidden hover:shadow-theme transition-shadow">
                             <a
                                 href={image.url}
                                 target="_blank"
@@ -120,8 +120,8 @@ const ExternalResources = ({ subject, concept, atomName }) => {
                                     }}
                                 />
                                 <div className="p-3">
-                                    <p className="text-sm text-gray-700 truncate">{image.title}</p>
-                                    <p className="text-xs text-gray-500 mt-1">Source: {image.source}</p>
+                                    <p className="text-sm text-theme-text truncate">{image.title}</p>
+                                    <p className="text-xs text-theme-text-muted mt-1">Source: {image.source}</p>
                                 </div>
                             </a>
                         </div>
