@@ -147,13 +147,99 @@ export const LearningProvider = ({ children }) => {
         }
     }, []);
 
+    // Generate initial diagnostic quiz
+    const generateInitialQuiz = useCallback(async ({ session_id }) => {
+        setLoading(true);
+        try {
+            const response = await axios.post('/auth/api/initial-quiz/', {
+                session_id: session_id
+            });
+            return { success: true, data: response.data };
+        } catch (error) {
+            return {
+                success: false,
+                error: error.response?.data?.error || 'Failed to generate initial quiz'
+            };
+        } finally {
+            setLoading(false);
+        }
+    }, []);
+
+    const submitInitialQuizAnswer = useCallback(async ({ session_id, question_index, selected, time_taken }) => {
+        try {
+            const response = await axios.post('/auth/api/submit-initial-quiz-answer/', {
+                session_id,
+                question_index,
+                selected,
+                time_taken
+            });
+            return { success: true, data: response.data };
+        } catch (error) {
+            return {
+                success: false,
+                error: error.response?.data?.error || 'Failed to submit initial quiz answer'
+            };
+        }
+    }, []);
+
+    const completeInitialQuiz = useCallback(async ({ session_id }) => {
+        try {
+            const response = await axios.post('/auth/api/complete-initial-quiz/', {
+                session_id
+            });
+            return { success: true, data: response.data };
+        } catch (error) {
+            return {
+                success: false,
+                error: error.response?.data?.error || 'Failed to complete initial quiz'
+            };
+        }
+    }, []);
+
+    const generateFinalChallenge = useCallback(async ({ session_id, atom_id }) => {
+        setLoading(true);
+        try {
+            const response = await axios.post('/auth/api/final-challenge/', {
+                session_id,
+                atom_id
+            });
+            setCurrentQuestions(response.data.questions || []);
+            setCurrentQuestionIndex(0);
+            questionStartTime.current = Date.now();
+            return { success: true, data: response.data };
+        } catch (error) {
+            return {
+                success: false,
+                error: error.response?.data?.error || 'Failed to generate final challenge'
+            };
+        } finally {
+            setLoading(false);
+        }
+    }, []);
+
+    const completeFinalChallenge = useCallback(async ({ session_id, atom_id }) => {
+        try {
+            const response = await axios.post('/auth/api/complete-final-challenge/', {
+                session_id,
+                atom_id
+            });
+            return { success: true, data: response.data };
+        } catch (error) {
+            return {
+                success: false,
+                error: error.response?.data?.error || 'Failed to complete final challenge'
+            };
+        }
+    }, []);
+
     // Submit answer for an atom question with REAL-TIME updates
     const submitAtomAnswer = useCallback(async ({ 
         session_id, 
         atom_id, 
         question_index, 
         selected,
-        forceTimeTaken = null
+        forceTimeTaken = null,
+        question_set = 'teaching'
     }) => {
         // Calculate time taken if not provided
         let time_taken = forceTimeTaken;
@@ -169,7 +255,8 @@ export const LearningProvider = ({ children }) => {
                 atom_id: atom_id,
                 question_index: question_index,
                 selected: selected,
-                time_taken: time_taken
+                time_taken: time_taken,
+                question_set: question_set
             });
             
             const data = response.data;
@@ -322,6 +409,11 @@ export const LearningProvider = ({ children }) => {
         startTeachingSession,
         getTeachingContent,
         generateQuestionsFromTeaching,
+        generateInitialQuiz,
+        submitInitialQuizAnswer,
+        completeInitialQuiz,
+        generateFinalChallenge,
+        completeFinalChallenge,
         submitAtomAnswer,
         completeAtom,
         loadLearningProgress,
@@ -349,6 +441,11 @@ export const LearningProvider = ({ children }) => {
         startTeachingSession,
         getTeachingContent,
         generateQuestionsFromTeaching,
+        generateInitialQuiz,
+        submitInitialQuizAnswer,
+        completeInitialQuiz,
+        generateFinalChallenge,
+        completeFinalChallenge,
         submitAtomAnswer,
         completeAtom,
         loadLearningProgress,

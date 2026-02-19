@@ -38,14 +38,23 @@ def test_generator():
         print("\n" + "=" * 50)
         print("Test 2: Generate questions for first atom")
         print("=" * 50)
-        questions = generator.generate_questions(
+        questions = []
+        questions.extend(generator.generate_questions(
             subject="Microprocessor",
             concept="Memory Organization",
             atom=atoms[0],
-            need_easy=2,
-            need_medium=2,
+            target_difficulty="easy",
+            count=2,
             knowledge_level='intermediate'
-        )
+        ))
+        questions.extend(generator.generate_questions(
+            subject="Microprocessor",
+            concept="Memory Organization",
+            atom=atoms[0],
+            target_difficulty="medium",
+            count=2,
+            knowledge_level='intermediate'
+        ))
         print(f"Generated {len(questions)} questions")
         for i, q in enumerate(questions):
             print(f"\nQ{i+1}: {q.get('question', 'No question')}")

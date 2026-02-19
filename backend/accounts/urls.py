@@ -9,7 +9,9 @@ from .views import (
     # Teaching-first flow views
     StartTeachingSessionView, GetTeachingContentView,
     GenerateQuestionsFromTeachingView, SubmitAtomAnswerView,
-    CompleteAtomView, GetLearningProgressView
+    CompleteAtomView, GetLearningProgressView,
+    GenerateInitialQuizView, SubmitInitialQuizAnswerView, CompleteInitialQuizView,
+    GenerateFinalChallengeView, CompleteFinalChallengeView
 )
 
 urlpatterns = [
@@ -24,10 +26,15 @@ urlpatterns = [
     
     # Teaching-first flow endpoints
     path('api/start-teaching-session/', StartTeachingSessionView.as_view(), name='start_teaching_session'),
+    path('api/initial-quiz/', GenerateInitialQuizView.as_view(), name='generate_initial_quiz'),
+    path('api/submit-initial-quiz-answer/', SubmitInitialQuizAnswerView.as_view(), name='submit_initial_quiz_answer'),
+    path('api/complete-initial-quiz/', CompleteInitialQuizView.as_view(), name='complete_initial_quiz'),
     path('api/teaching-content/', GetTeachingContentView.as_view(), name='teaching_content'),
     path('api/generate-questions-from-teaching/', GenerateQuestionsFromTeachingView.as_view(), name='generate_questions_from_teaching'),
     path('api/submit-atom-answer/', SubmitAtomAnswerView.as_view(), name='submit_atom_answer'),
     path('api/complete-atom/', CompleteAtomView.as_view(), name='complete_atom'),
+    path('api/final-challenge/', GenerateFinalChallengeView.as_view(), name='generate_final_challenge'),
+    path('api/complete-final-challenge/', CompleteFinalChallengeView.as_view(), name='complete_final_challenge'),
     
     # Progress
     path('api/progress/', GetLearningProgressView.as_view(), name='learning_progress'),

@@ -14,10 +14,13 @@ const TeachingFirstFlow = ({ conceptId }) => {
     // Core state
     const [currentAtomData, setCurrentAtomData] = useState(null);
     const [sessionStarted, setSessionStarted] = useState(false);
-    const [flowState, setFlowState] = useState('initializing'); // initializing, teaching, questions, review, complete, concept_complete
+    const [flowState, setFlowState] = useState('initializing'); // initializing, initial_quiz, teaching, questions, review, final_challenge, complete, concept_complete
     const [reviewMetrics, setReviewMetrics] = useState(null);
     const [error, setError] = useState(null);
     const [retryCount, setRetryCount] = useState(0);
+    const [initialQuestions, setInitialQuestions] = useState([]);
+    const [finalRecommendation, setFinalRecommendation] = useState('');
+    const [nextAtomAfterFinal, setNextAtomAfterFinal] = useState(null);
     
     // Get all context values
     const { 
@@ -40,6 +43,11 @@ const TeachingFirstFlow = ({ conceptId }) => {
         startTeachingSession,
         getTeachingContent,
         generateQuestionsFromTeaching,
+        generateInitialQuiz,
+        submitInitialQuizAnswer,
+        completeInitialQuiz,
+        generateFinalChallenge,
+        completeFinalChallenge,
         submitAtomAnswer,
         completeAtom,
         loadLearningProgress,
@@ -79,22 +87,23 @@ const TeachingFirstFlow = ({ conceptId }) => {
                             ? result.data.atoms[0]
                             : null);
 
-                    if (firstAtom) {
-                        // Load teaching content immediately so the UI can render
-                        const contentResult = await getTeachingContent({
-                            session_id: result.data.session_id,
-                            atom_id: firstAtom.id
-                        });
-
-                        if (contentResult.success) {
-                            setCurrentAtomData(firstAtom);
-                            setFlowState('teaching');
-                        } else {
-                            setError(contentResult.error || 'Failed to load teaching content');
-                            setFlowState('error');
-                        }
-                    } else {
+                    if (!firstAtom) {
                         setError('No atoms available for this concept');
+                        setFlowState('error');
+                        return;
+                    }
+
+                    // Generate initial quiz before teaching
+                    const quizResult = await generateInitialQuiz({
+                        session_id: result.data.session_id
+                    });
+
+                    if (quizResult.success && quizResult.data?.questions?.length > 0) {
+                        setInitialQuestions(quizResult.data.questions);
+                        setCurrentAtomData(firstAtom);
+                        setFlowState('initial_quiz');
+                    } else {
+                        setError(quizResult.error || 'Failed to generate initial quiz');
                         setFlowState('error');
                     }
                 } else {
@@ -109,7 +118,7 @@ const TeachingFirstFlow = ({ conceptId }) => {
         };
         
         initSession();
-    }, [conceptId, sessionStarted, startTeachingSession]);
+    }, [conceptId, sessionStarted, startTeachingSession, generateInitialQuiz, getTeachingContent]);
 
     // Handle starting an atom
     const handleStartAtom = useCallback(async (atom) => {
@@ -172,24 +181,48 @@ const TeachingFirstFlow = ({ conceptId }) => {
         }
     }, [currentSession, currentAtomData, generateQuestionsFromTeaching]);
 
+    const handleInitialQuizComplete = useCallback(async () => {
+        if (!currentSession?.session_id || !currentAtomData?.id) return;
+
+        const result = await completeInitialQuiz({ session_id: currentSession.session_id });
+        if (!result.success) {
+            setError('Failed to complete initial quiz');
+            setFlowState('error');
+            return;
+        }
+
+        // After initial quiz, load teaching content
+        const contentResult = await getTeachingContent({
+            session_id: currentSession.session_id,
+            atom_id: currentAtomData.id
+        });
+
+        if (contentResult.success) {
+            setFlowState('teaching');
+        } else {
+            setError(contentResult.error || 'Failed to load teaching content');
+            setFlowState('error');
+        }
+    }, [currentSession, currentAtomData, completeInitialQuiz, getTeachingContent]);
+
     // Handle back to teaching
     const handleBackToTeaching = useCallback(() => {
         setFlowState('teaching');
     }, []);
 
     // Handle answer submission (wrapped to work with QuestionsFromTeaching)
-    const handleSubmitAnswer = useCallback(async (selected, timeTaken) => {
+    const handleSubmitAnswer = useCallback(async (payload) => {
         if (!currentSession?.session_id || !currentAtomData?.id) {
             return { success: false, error: 'No active session' };
         }
-        
-        const currentIndex = 0; // This will be managed by QuestionsFromTeaching
+
         return await submitAtomAnswer({
-            session_id: currentSession.session_id,
-            atom_id: currentAtomData.id,
-            question_index: currentIndex,
-            selected: selected,
-            time_taken: timeTaken
+            session_id: payload.session_id || currentSession.session_id,
+            atom_id: payload.atom_id || currentAtomData.id,
+            question_index: payload.question_index,
+            selected: payload.selected,
+            forceTimeTaken: payload.time_taken,
+            question_set: payload.question_set || 'teaching'
         });
     }, [currentSession, currentAtomData, submitAtomAnswer]);
 
@@ -260,6 +293,21 @@ const TeachingFirstFlow = ({ conceptId }) => {
                 return;
             }
 
+            if (action === 'final_challenge') {
+                const finalResult = await generateFinalChallenge({
+                    session_id: currentSession.session_id,
+                    atom_id: currentAtomData.id
+                });
+
+                if (finalResult.success) {
+                    setFlowState('final_challenge');
+                } else {
+                    setError('Failed to generate final challenge');
+                    setFlowState('error');
+                }
+                return;
+            }
+
             if (data.next_atom) {
                 setCurrentAtomData(data.next_atom);
                 setFlowState('teaching');
@@ -274,7 +322,37 @@ const TeachingFirstFlow = ({ conceptId }) => {
             setError('Failed to complete atom');
             setFlowState('error');
         }
-    }, [currentSession, currentAtomData, answers, atomMastery, metrics, completeAtom, resetForNewAtom]);
+    }, [currentSession, currentAtomData, answers, atomMastery, metrics, completeAtom, resetForNewAtom, generateFinalChallenge]);
+
+    const handleFinalChallengeComplete = useCallback(async () => {
+        if (!currentSession?.session_id || !currentAtomData?.id) return;
+
+        const result = await completeFinalChallenge({
+            session_id: currentSession.session_id,
+            atom_id: currentAtomData.id
+        });
+
+        if (!result.success) {
+            setError('Failed to complete final challenge');
+            setFlowState('error');
+            return;
+        }
+
+        if (result.data.all_completed) {
+            setFlowState('concept_complete');
+            return;
+        }
+
+        if (!result.data.mastered || result.data.next_action === 'review_current') {
+            setFinalRecommendation(result.data.recommendation || 'Let\'s review and retry this atom.');
+            setFlowState('teaching');
+            return;
+        }
+
+        setFinalRecommendation(result.data.recommendation || '');
+        setNextAtomAfterFinal(result.data.next_atom || null);
+        setFlowState('complete');
+    }, [currentSession, currentAtomData, completeFinalChallenge, resetForNewAtom]);
 
     // Handle review complete
     const handleReviewComplete = useCallback(async (action) => {
@@ -349,16 +427,16 @@ const TeachingFirstFlow = ({ conceptId }) => {
 
     // Handle atom complete - continue or go to dashboard
     const handleAtomCompleteContinue = useCallback(() => {
-        if (currentSession?.next_atom) {
-            // More atoms to learn
-            setCurrentAtomData(currentSession.next_atom);
+        if (nextAtomAfterFinal) {
+            setCurrentAtomData(nextAtomAfterFinal);
             setFlowState('teaching');
+            setFinalRecommendation('');
+            setNextAtomAfterFinal(null);
             resetForNewAtom();
         } else {
-            // All done
             navigate('/dashboard');
         }
-    }, [currentSession, navigate, resetForNewAtom]);
+    }, [nextAtomAfterFinal, navigate, resetForNewAtom]);
 
     // Handle retry after error
     const handleRetry = useCallback(() => {
@@ -503,6 +581,20 @@ const TeachingFirstFlow = ({ conceptId }) => {
 
                 {/* Main Content - Flow-based rendering */}
                 <div className="transition-all duration-300">
+                    {/* Initial Diagnostic Quiz */}
+                    {flowState === 'initial_quiz' && initialQuestions.length > 0 && (
+                        <QuestionsFromTeaching
+                            questions={initialQuestions}
+                            atomName={`${currentSession.concept_name} Diagnostic`}
+                            sessionId={currentSession.session_id}
+                            atomId={currentAtomData?.id}
+                            onComplete={handleInitialQuizComplete}
+                            onBackToTeaching={handleBackToDashboard}
+                            onSubmitAnswer={submitInitialQuizAnswer}
+                            showMetrics={false}
+                        />
+                    )}
+
                     {/* Teaching Module */}
                     {flowState === 'teaching' && teachingContent && currentAtomData && (
                         <TeachingModule
@@ -540,12 +632,27 @@ const TeachingFirstFlow = ({ conceptId }) => {
                             onSkip={() => handleReviewComplete('skip')}
                         />
                     )}
+
+                    {/* Final Challenge */}
+                    {flowState === 'final_challenge' && currentQuestions?.length > 0 && currentAtomData && (
+                        <QuestionsFromTeaching
+                            questions={currentQuestions}
+                            atomName={`${currentAtomData.name} Final Challenge`}
+                            sessionId={currentSession.session_id}
+                            atomId={currentAtomData.id}
+                            onComplete={handleFinalChallengeComplete}
+                            onBackToTeaching={handleBackToTeaching}
+                            onSubmitAnswer={(payload) => submitAtomAnswer({ ...payload, question_set: 'final' })}
+                            showMetrics={false}
+                        />
+                    )}
                     
                     {/* Atom Complete Module */}
                     {flowState === 'complete' && currentAtomData && (
                         <AtomComplete
                             atom={currentAtomData}
                             onContinue={handleAtomCompleteContinue}
+                            recommendation={finalRecommendation}
                             mastery={atomMastery}
                             accuracy={answers.length > 0 ? answers.filter(a => a.correct).length / answers.length : 0}
                             totalQuestions={answers.length}

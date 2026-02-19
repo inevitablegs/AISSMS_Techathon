@@ -180,63 +180,102 @@ class QuestionGenerator:
             """
         
         prompt = f"""
-        You are generating multiple-choice assessment questions.
-        
-        Subject: {subject}
-        Concept: {concept}
-        Atomic Concept: {atom}
-        Student Level: {knowledge_level.upper()}
-        Target Difficulty: {target_difficulty.upper()}
-        
-        Generate EXACTLY {count} {target_difficulty} question(s) with these characteristics:
-        - Complexity: {adj['complexity']}
-        - Cognitive levels: {', '.join(allowed_cognitive)}
-        - Hint level: {adj['hint_level']}
-        
-        {error_context}
-        
-        Each question must:
-        - Have exactly 4 options
-        - Be clearly worded and self-contained
-        - Test understanding, not trickery
-        - Include the atomic concept explicitly
-        - Maximum 25 words per question text
-        - For {target_difficulty} questions, the difficulty should be appropriate:
-            * Easy: Direct recall, simple application
-            * Medium: Requires understanding, some analysis
-            * Hard: Complex application, synthesis of ideas
-        
-        Each question MUST include:
-        - "difficulty": "{target_difficulty}"
-        - "cognitive_operation": one of {allowed_cognitive}
-        - "estimated_time": integer (seconds) - recall: 20-40, apply: 40-90, analyze: 90-150
-        - "question": string
-        - "options": array of exactly 4 strings
-        - "correct_index": integer (0-3)
-        
-        OUTPUT STRICT JSON ONLY:
-        
-        {{
-            "questions": [
-                {{
-                    "difficulty": "{target_difficulty}",
-                    "cognitive_operation": "recall",
-                    "estimated_time": 30,
-                    "question": "Question text here?",
-                    "options": [
-                        "Option A",
-                        "Option B",
-                        "Option C",
-                        "Option D"
-                    ],
-                    "correct_index": 1
-                }}
-            ]
-        }}
-        
-        If constraints cannot be satisfied, return:
-        {{"questions": []}}
-        """
+            You are an experienced teacher creating high-quality conceptual assessment questions to evaluate deep student understanding.
+
+            Subject: {subject}
+            Concept: {concept}
+            Atomic Concept: {atom}
+            Student Level: {knowledge_level.upper()}
+            Target Difficulty: {target_difficulty.upper()}
+
+            Generate EXACTLY {count} {target_difficulty} question(s) with these characteristics:
+
+            - Complexity: {adj['complexity']}
+            - Cognitive levels: {', '.join(allowed_cognitive)}
+            - Hint level: {adj['hint_level']}
+
+            {error_context}
+
+            CRITICAL QUALITY REQUIREMENTS:
+
+            The goal is to test CONCEPTUAL UNDERSTANDING, not memorization.
+
+            Each question MUST:
+
+            - Be written like an experienced teacher checking real understanding
+            - Require thinking, reasoning, or application — NOT simple definition recall
+            - Be scenario-based, example-based, comparison-based, or reasoning-based whenever possible
+            - Explicitly involve the atomic concept in a meaningful way
+            - Avoid trivial, obvious, or keyword-matching questions
+            - Avoid fill-in-the-blank style
+
+            OPTIONS REQUIREMENTS (VERY IMPORTANT):
+
+            Each question must have exactly 4 options where:
+
+            - All options are plausible and believable
+            - All options belong to the SAME conceptual category
+            - Incorrect options must reflect common student misconceptions or mistakes
+            - Avoid joke options, extreme options, or obviously wrong answers
+            - Avoid options that differ only in grammar or wording tricks
+
+            QUESTION LENGTH:
+
+            - 10 to 35 words REQUIRED
+            - Must be self-contained and clear
+
+            DIFFICULTY REQUIREMENTS:
+
+            For {target_difficulty} questions:
+
+            Easy:
+            - Simple scenario or example
+            - Direct conceptual application
+
+            Medium:
+            - Requires reasoning, interpretation, or comparison
+
+            Hard:
+            - Multi-step reasoning, prediction, or analysis
+
+
+            Each question MUST include:
+
+            - "difficulty": "{target_difficulty}"
+            - "cognitive_operation": one of {allowed_cognitive}
+            - "estimated_time": integer (seconds)
+                recall: 20-40
+                apply: 40-90
+                analyze: 90-150
+            - "question": string
+            - "options": array of exactly 4 strings
+            - "correct_index": integer (0-3)
+
+            OUTPUT STRICT JSON ONLY:
+
+            {{
+                "questions": [
+                    {{
+                        "difficulty": "{target_difficulty}",
+                        "cognitive_operation": "recall",
+                        "estimated_time": 30,
+                        "question": "Question text here?",
+                        "options": [
+                            "Option A",
+                            "Option B",
+                            "Option C",
+                            "Option D"
+                        ],
+                        "correct_index": 1
+                    }}
+                ]
+            }}
+
+            If constraints cannot be satisfied, return:
+
+            {{"questions": []}}
+            """
+
         
         try:
             response = self.groq_client.chat.completions.create(
@@ -307,42 +346,55 @@ class QuestionGenerator:
             f"{concept} Limitations"
         ]
     
-    def _get_fallback_questions(self, atom: str, need_easy: int, need_medium: int, level: str = 'intermediate') -> List[Dict]:
+    def _get_fallback_questions(self, atom: str, target_difficulty: str, count: int,
+                                level: str = 'intermediate') -> List[Dict]:
         """Provide fallback questions when AI generation fails"""
         questions = []
-        
-        # Generate easy questions
-        for i in range(need_easy):
-            questions.append({
-                "difficulty": "easy",
-                "cognitive_operation": "recall",
-                "estimated_time": 30,
-                "question": f"What is the primary purpose of {atom}?",
-                "options": [
-                    f"To manage {atom} operations",
-                    "To store data permanently",
-                    "To execute instructions",
-                    "To control peripherals"
-                ],
-                "correct_index": 0
-            })
-        
-        # Generate medium questions
-        for i in range(need_medium):
-            questions.append({
-                "difficulty": "medium",
-                "cognitive_operation": "apply",
-                "estimated_time": 60,
-                "question": f"Which scenario best demonstrates the application of {atom}?",
-                "options": [
-                    f"When implementing {atom} in a real system",
-                    "During basic operations",
-                    "In simple calculations",
-                    "At the start of processing"
-                ],
-                "correct_index": 0
-            })
-        
+
+        for _ in range(count):
+            if target_difficulty == 'easy':
+                questions.append({
+                    "difficulty": "easy",
+                    "cognitive_operation": "recall",
+                    "estimated_time": 30,
+                    "question": f"What is the primary purpose of {atom}?",
+                    "options": [
+                        f"To manage {atom} operations",
+                        "To store data permanently",
+                        "To execute instructions",
+                        "To control peripherals"
+                    ],
+                    "correct_index": 0
+                })
+            elif target_difficulty == 'medium':
+                questions.append({
+                    "difficulty": "medium",
+                    "cognitive_operation": "apply",
+                    "estimated_time": 60,
+                    "question": f"Which scenario best demonstrates the application of {atom}?",
+                    "options": [
+                        f"When implementing {atom} in a real system",
+                        "During basic operations",
+                        "In simple calculations",
+                        "At the start of processing"
+                    ],
+                    "correct_index": 0
+                })
+            else:
+                questions.append({
+                    "difficulty": "hard",
+                    "cognitive_operation": "analyze",
+                    "estimated_time": 90,
+                    "question": f"What would happen if {atom} was implemented incorrectly?",
+                    "options": [
+                        "System performance would degrade",
+                        "Nothing would change",
+                        "The system would run faster",
+                        "Data would be more secure"
+                    ],
+                    "correct_index": 0
+                })
+
         return questions
     
     def generate_complete_concept(self, subject: str, concept: str) -> Dict:
@@ -372,14 +424,23 @@ class QuestionGenerator:
         for atom in atoms:
             print(f"Generating questions for atom: {atom}")
             # Generate 2 easy and 2 medium questions per atom
-            questions = self.generate_questions(
+            questions = []
+            questions.extend(self.generate_questions(
                 subject=subject,
                 concept=concept,
                 atom=atom,
-                need_easy=2,
-                need_medium=2,
-                knowledge_level='intermediate'  # Default level
-            )
+                target_difficulty='easy',
+                count=2,
+                knowledge_level='intermediate'
+            ))
+            questions.extend(self.generate_questions(
+                subject=subject,
+                concept=concept,
+                atom=atom,
+                target_difficulty='medium',
+                count=2,
+                knowledge_level='intermediate'
+            ))
             
             result["atoms"][atom] = {
                 "name": atom,
@@ -392,6 +453,37 @@ class QuestionGenerator:
     
     
     
+    def generate_initial_quiz(self, subject: str, concept: str,
+                              knowledge_level: str = 'intermediate',
+                              count: int = 5) -> List[Dict]:
+        """
+        Simple diagnostic quiz based only on subject/concept/knowledge level.
+        Uses the same question generator with atom=concept for simplicity.
+        """
+        easy_count = max(1, count // 2)
+        medium_count = max(0, count - easy_count)
+
+        questions = []
+        questions.extend(self.generate_questions(
+            subject=subject,
+            concept=concept,
+            atom=concept,
+            target_difficulty='easy',
+            count=easy_count,
+            knowledge_level=knowledge_level
+        ))
+        if medium_count > 0:
+            questions.extend(self.generate_questions(
+                subject=subject,
+                concept=concept,
+                atom=concept,
+                target_difficulty='medium',
+                count=medium_count,
+                knowledge_level=knowledge_level
+            ))
+
+        return questions
+
     def generate_questions_from_teaching(self, subject, concept, atom, teaching_content, 
                                         need_easy=1, need_medium=2, need_hard=0, 
                                         knowledge_level='intermediate'):
@@ -427,60 +519,109 @@ class QuestionGenerator:
         examples_text = "\n".join([f"- {ex}" for ex in examples if ex])
         
         prompt = f"""
-        You are generating assessment questions based on specific teaching content that was just shown to a student.
-        
-        Subject: {subject}
-        Concept: {concept}
-        Atomic Concept: {atom}
-        Student Level: {knowledge_level.upper()}
-        
-        TEACHING CONTENT SHOWN TO STUDENT:
-        
-        Explanation:
-        {explanation}
-        
-        Analogy:
-        {analogy}
-        
-        Examples/Applications:
-        {examples_text}
-        
-        TASK:
-        Generate EXACTLY {total_needed} multiple-choice questions that test understanding of the teaching content above.
-        
-        Question Distribution:
-        - Easy: {need_easy} question(s) - Direct recall from the explanation
-        - Medium: {need_medium} question(s) - Apply the concept to new situations
-        - Hard: {need_hard} question(s) - Analyze relationships or troubleshoot
-        
-        RULES:
-        1. Each question must be answerable based SOLELY on the teaching content provided
-        2. Test genuine understanding, not trickery
-        3. Questions should build upon what was taught
-        4. Include the analogy or examples where appropriate
-        5. Each question must have exactly 4 options
-        6. One clearly correct answer, three plausible distractors
-        
-        OUTPUT STRICT JSON ONLY:
-        
-        {{
-            "questions": [
-                {{
-                    "difficulty": "easy",
-                    "cognitive_operation": "recall",
-                    "estimated_time": 30,
-                    "question": "Based on the explanation, what is the main purpose of {atom}?",
-                    "options": [
-                        "Option A based on teaching",
-                        "Option B based on teaching", 
-                        "Option C based on teaching",
-                        "Option D based on teaching"
-                    ],
-                    "correct_index": 0
-                }}
-            ]
-        }}
-        """
+            You are an experienced teacher generating conceptual assessment questions to verify whether a student truly understood the concept that was just taught.
+
+            Subject: {subject}
+            Concept: {concept}
+            Atomic Concept: {atom}
+            Student Level: {knowledge_level.upper()}
+
+            TEACHING CONTENT SHOWN TO STUDENT:
+
+            Explanation:
+            {explanation}
+
+            Analogy:
+            {analogy}
+
+            Examples/Applications:
+            {examples_text}
+
+
+            TASK:
+
+            Generate EXACTLY {total_needed} multiple-choice questions that test CONCEPTUAL UNDERSTANDING of "{atom}" based on the teaching content.
+
+            IMPORTANT:
+
+            The goal is NOT to test memory of the explanation, analogy, or examples.
+
+            The goal is to test whether the student understood the underlying CONCEPT.
+
+
+            CRITICAL RULES:
+
+            1. DO NOT ask questions about the analogy itself
+            2. DO NOT ask questions about the specific examples themselves
+            3. DO NOT ask questions that require recalling sentences from the explanation
+
+            4. Instead, create NEW conceptual situations where the student must APPLY the concept
+
+            5. Questions must test:
+
+            - understanding of how the concept works
+            - when the concept applies
+            - when the concept does NOT apply
+            - consequences of using or misusing the concept
+
+            6. Each question must be meaningful, realistic, and require thinking
+
+            7. Avoid definition questions starting with:
+
+            - What is
+            - Define
+            - Identify
+
+            8. Each question must be 18–35 words
+
+            9. Each question must have exactly 4 options
+
+            10. All options must be:
+
+            - plausible
+            - same conceptual category
+            - based on realistic student mistakes or misconceptions
+
+            11. Avoid obvious wrong answers
+
+
+            DIFFICULTY DISTRIBUTION:
+
+            Easy ({need_easy}):
+
+            - Simple conceptual application
+
+            Medium ({need_medium}):
+
+            - Requires reasoning or interpretation
+
+            Hard ({need_hard}):
+
+            - Requires deeper reasoning, prediction, or identifying incorrect application
+
+
+
+            OUTPUT STRICT JSON ONLY:
+
+            {{
+                "questions": [
+                    {{
+                        "difficulty": "easy",
+                        "cognitive_operation": "apply",
+                        "estimated_time": 40,
+                        "question": "Question text here?",
+                        "options": [
+                            "Option A",
+                            "Option B",
+                            "Option C",
+                            "Option D"
+                        ],
+                        "correct_index": 0
+                    }}
+                ]
+            }}
+            """
+
         
         try:
             response = self.groq_client.chat.completions.create(

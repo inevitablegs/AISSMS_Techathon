@@ -9,7 +9,9 @@ const QuestionsFromTeaching = ({
     sessionId,
     atomId,
     onComplete,
-    onBackToTeaching
+    onBackToTeaching,
+    onSubmitAnswer,
+    showMetrics = true
 }) => {
     const [currentIndex, setCurrentIndex] = useState(0);
     const [selectedOption, setSelectedOption] = useState(null);
@@ -28,6 +30,8 @@ const QuestionsFromTeaching = ({
         metrics,
         loading 
     } = useLearning();
+
+    const submitFn = onSubmitAnswer || submitAtomAnswer;
 
     const currentQuestion = questions[currentIndex];
 
@@ -65,7 +69,7 @@ const QuestionsFromTeaching = ({
         
         const timeTaken = Math.round((Date.now() - startTime) / 1000);
         
-        const result = await submitAtomAnswer({
+        const result = await submitFn({
             session_id: sessionId,
             atom_id: atomId,
             question_index: currentIndex,
@@ -83,7 +87,9 @@ const QuestionsFromTeaching = ({
                 error_type: data.error_type,
                 message: data.correct ? '✅ Correct!' : '❌ Not quite right',
                 mastery_change: data.metrics?.mastery_change?.toFixed(2) || '0',
-                theta_change: data.metrics?.theta_change?.toFixed(2) || '0'
+                theta_change: data.metrics?.theta_change?.toFixed(2) || '0',
+                explanation: data.explanation || '',
+                correct_index: data.correct_index
             });
         }
     };
@@ -129,9 +135,12 @@ const QuestionsFromTeaching = ({
         );
     }
 
+    const correctIndex = feedback?.correct_index ?? currentQuestion.correct_index;
+
     return (
         <div className="bg-white rounded-lg shadow-lg p-6">
             {/* Real-time Mastery Display */}
+            {showMetrics && (
             <div className="mb-6 bg-gradient-to-r from-blue-50 to-purple-50 p-4 rounded-lg border border-blue-100">
                 <div className="flex justify-between items-center">
                     <div>
@@ -154,7 +163,7 @@ const QuestionsFromTeaching = ({
                     </div>
                     
                     {/* Pacing Badge */}
-                    {pacingDecision && (
+                    {showMetrics && pacingDecision && (
                         <div className={`px-3 py-1 rounded-full border ${getPacingColor()}`}>
                             <span className="text-sm font-medium">
                                 {pacingDecision.replace('_', ' ').toUpperCase()}
@@ -173,9 +182,10 @@ const QuestionsFromTeaching = ({
                     </div>
                 </div>
             </div>
+            )}
 
             {/* Pacing Alert */}
-            {showPacingAlert && (
+            {showMetrics && showPacingAlert && (
                 <div className={`mb-4 p-3 rounded-lg border ${getPacingColor()} animate-pulse`}>
                     <p className="text-sm font-medium">{getPacingMessage()}</p>
                 </div>
@@ -220,9 +230,9 @@ const QuestionsFromTeaching = ({
                                 ? 'border-blue-500 bg-blue-50'
                                 : 'border-gray-200 hover:border-gray-300 hover:bg-gray-50'
                         } ${
-                            isSubmitted && index === currentQuestion.correct_index
+                            isSubmitted && index === correctIndex
                                 ? 'border-green-500 bg-green-50'
-                                : isSubmitted && selectedOption === index && selectedOption !== currentQuestion.correct_index
+                                : isSubmitted && selectedOption === index && selectedOption !== correctIndex
                                 ? 'border-red-500 bg-red-50'
                                 : ''
                         }`}
@@ -252,14 +262,23 @@ const QuestionsFromTeaching = ({
                                     Error type: <span className="font-medium capitalize">{feedback.error_type}</span>
                                 </p>
                             )}
+                            {!feedback.correct && feedback.explanation && (
+                                <p className="text-sm text-gray-600 mt-1">
+                                    {feedback.explanation}
+                                </p>
+                            )}
                         </div>
                         <div className="text-right">
-                            <p className="text-sm text-gray-600">
-                                Mastery: <span className="font-bold text-blue-600">{feedback.mastery_change}</span>
-                            </p>
-                            <p className="text-sm text-gray-600">
-                                θ: <span className="font-bold text-purple-600">{feedback.theta_change}</span>
-                            </p>
+                            {showMetrics && (
+                                <>
+                                    <p className="text-sm text-gray-600">
+                                        Mastery: <span className="font-bold text-blue-600">{feedback.mastery_change}</span>
+                                    </p>
+                                    <p className="text-sm text-gray-600">
+                                        θ: <span className="font-bold text-purple-600">{feedback.theta_change}</span>
+                                    </p>
+                                </>
+                            )}
                         </div>
                     </div>
                 </div>
@@ -293,7 +312,7 @@ const QuestionsFromTeaching = ({
             </div>
 
             {/* Learning Metrics */}
-            {Object.keys(metrics).length > 0 && (
+            {showMetrics && Object.keys(metrics).length > 0 && (
                 <div className="mt-6 pt-4 border-t border-gray-200">
                     <h4 className="text-sm font-semibold text-gray-600 mb-2">Learning Metrics</h4>
                     <div className="grid grid-cols-4 gap-2 text-xs">

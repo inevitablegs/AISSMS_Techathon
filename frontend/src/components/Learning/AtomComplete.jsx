@@ -3,7 +3,7 @@
 import React from 'react';
 import { useLearning } from '../../context/LearningContext';
 
-const AtomComplete = ({ atom, onContinue }) => {
+const AtomComplete = ({ atom, onContinue, recommendation = '' }) => {
     const { atomMastery, currentTheta, answers } = useLearning();
 
     // Calculate stats
@@ -64,6 +64,12 @@ const AtomComplete = ({ atom, onContinue }) => {
                     {currentTheta.toFixed(2)}
                 </div>
             </div>
+
+            {recommendation && (
+                <div className="mb-6 p-4 bg-blue-50 border border-blue-200 rounded-lg text-blue-800">
+                    {recommendation}
+                </div>
+            )}
 
             {/* Continue Button */}
             <button

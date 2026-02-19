@@ -169,9 +169,9 @@ class AdaptiveLearningEngine:
         """
         # Mastery threshold (can be adjusted)
         MASTERY_THRESHOLD = 0.7
-        
-        # Need minimum practice
-        if context.questions_answered < 4:
+
+        # Need at least one response to evaluate
+        if context.questions_answered < 1:
             return False
         
         # Check mastery
