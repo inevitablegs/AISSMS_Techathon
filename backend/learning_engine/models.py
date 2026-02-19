@@ -1,6 +1,7 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import List, Dict, Optional
 from enum import Enum
+
 
 class LearningPhase(str, Enum):
     DIAGNOSTIC = "diagnostic"
@@ -10,6 +11,7 @@ class LearningPhase(str, Enum):
     MASTERY_CHECK = "mastery_check"
     COMPLETE = "complete"
 
+
 class ErrorType(str, Enum):
     CONCEPTUAL = "conceptual"
     PROCEDURAL = "procedural"
@@ -17,6 +19,7 @@ class ErrorType(str, Enum):
     GUESSING = "guessing"
     STRUCTURAL = "structural"
     ATTENTIONAL = "attentional"
+
 
 class PacingDecision(str, Enum):
     SPEED_UP = "speed_up"
@@ -27,9 +30,10 @@ class PacingDecision(str, Enum):
     ADVANCE = "advance"
     RETREAT = "retreat"
 
+
 @dataclass
 class TeachingAtomState:
-    """Represents a teaching atom's state in memory"""
+    """Represents a teaching atom's state in memory — enriched for the 10-feature pacing engine."""
     id: int
     name: str
     mastery_score: float = 0.3
@@ -38,11 +42,27 @@ class TeachingAtomState:
     hint_usage: int = 0
     error_history: List[str] = None
     retention_verified: bool = False
-    
+
+    # ── Per-atom learning speed (feature 2) ──
+    time_per_question: List[float] = None
+
+    # ── Retention tracking (feature 6) ──
+    retention_score: float = 1.0
+    retention_checks_passed: int = 0
+    retention_checks_failed: int = 0
+    last_practiced_minutes_ago: float = 0.0
+
+    # ── Velocity snapshots (feature 10) ──
+    velocity_snapshots: List[Dict] = None
+
     def __post_init__(self):
         if self.error_history is None:
             self.error_history = []
-    
+        if self.time_per_question is None:
+            self.time_per_question = []
+        if self.velocity_snapshots is None:
+            self.velocity_snapshots = []
+
     def to_dict(self):
         return {
             'id': self.id,
@@ -52,5 +72,9 @@ class TeachingAtomState:
             'streak': self.streak,
             'hint_usage': self.hint_usage,
             'retention_verified': self.retention_verified,
-            'error_history': self.error_history[-5:]
+            'error_history': self.error_history[-5:],
+            'retention_score': self.retention_score,
+            'retention_checks_passed': self.retention_checks_passed,
+            'time_per_question': self.time_per_question[-10:],
+            'velocity_snapshots': self.velocity_snapshots[-20:],
         }

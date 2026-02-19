@@ -14,7 +14,7 @@ class ExternalResourceFetcher:
     """Fetch external learning resources (images, videos) for concepts"""
     
     def __init__(self):
-        self.serpapi_key = getattr(settings, 'SERPAPI_KEY', os.getenv('SERPAPI_KEY', '9ff15faca6d9615312d4a85351142aa4cc9dc7bf858b2877477e43a135eaa6c3'))
+        self.serpapi_key = getattr(settings, 'SERPAPI_KEY', os.getenv('SERPAPI_KEY', ''))
         self.download_folder = os.path.join(settings.BASE_DIR, 'media', 'concept_images')
         os.makedirs(self.download_folder, exist_ok=True)
     

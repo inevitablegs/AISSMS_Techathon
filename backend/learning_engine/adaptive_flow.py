@@ -1,4 +1,4 @@
-# backend/learning_engine/adaptive_flow.py - Enhanced with pacing engine
+# backend/learning_engine/adaptive_flow.py - Enhanced with robust 10-feature pacing engine
 
 import json
 import random
@@ -7,7 +7,10 @@ from django.conf import settings
 from groq import Groq
 from .models import TeachingAtomState, LearningPhase
 from .knowledge_tracing import calculate_updated_mastery, classify_error_type
-from .pacing_engine import PacingEngine, PacingContext, PacingDecision, NextAction
+from .pacing_engine import (
+    PacingEngine, PacingContext, PacingDecision, NextAction,
+    PacingResult, FatigueLevel,
+)
 
 class AdaptiveLearningEngine:
     """Enhanced adaptive learning engine with real-time mastery and strict pacing"""
@@ -40,11 +43,91 @@ class AdaptiveLearningEngine:
             theta=theta,
             questions_answered=questions_answered,
             knowledge_level=knowledge_level,
-            phase=diagnostic_results.get('phase', 'practice')
+            phase=diagnostic_results.get('phase', 'practice'),
+            # Enriched signals from diagnostic_results
+            avg_response_time=float(diagnostic_results.get('avg_response_time', 0)),
+            expected_response_time=float(diagnostic_results.get('expected_response_time', 60)),
+            time_per_question_history=diagnostic_results.get('time_per_question_history', []),
+            hint_usage_count=int(diagnostic_results.get('hint_usage_count', 0)),
+            session_duration_minutes=float(diagnostic_results.get('session_duration_minutes', 0)),
+            total_questions_session=int(diagnostic_results.get('total_questions_session', 0)),
+            recent_accuracy_trend=diagnostic_results.get('recent_accuracy_trend', []),
+            recent_response_times=diagnostic_results.get('recent_response_times', []),
+            last_practiced_minutes_ago=float(diagnostic_results.get('last_practiced_minutes_ago', 0)),
+            retention_score=float(diagnostic_results.get('retention_score', 1.0)),
+            retention_checks_passed=int(diagnostic_results.get('retention_checks_passed', 0)),
+            engagement_score=float(diagnostic_results.get('engagement_score', 0.7)),
+            diagnostic_accuracy=diagnostic_results.get('diagnostic_accuracy'),
         )
 
-        pacing_decision, _next_action, _reasoning = self.pacing_engine.decide_pacing(context)
-        return pacing_decision.value if hasattr(pacing_decision, 'value') else pacing_decision
+        result: PacingResult = self.pacing_engine.decide_pacing(context)
+        return result.decision.value if hasattr(result.decision, 'value') else result.decision
+
+    def determine_pacing_full(self, diagnostic_results: Dict, knowledge_level: str, session=None) -> Dict[str, Any]:
+        """
+        Full pacing decision with all 10-feature signals.
+        Returns a rich dict with decision, fatigue, retention, hints, velocity, etc.
+        Optionally accepts a session object to enrich context with session-level data.
+        """
+        accuracy = float(diagnostic_results.get('accuracy', 0))
+        mastery = float(diagnostic_results.get('mastery', 0))
+        streak = int(diagnostic_results.get('streak', 0))
+        error_types = diagnostic_results.get('error_types', []) or []
+        theta = float(diagnostic_results.get('theta', 0.0))
+        questions_answered = int(diagnostic_results.get('questions_answered', 0))
+
+        context = PacingContext(
+            accuracy=accuracy,
+            mastery_score=mastery,
+            streak=streak,
+            error_types=error_types,
+            theta=theta,
+            questions_answered=questions_answered,
+            knowledge_level=knowledge_level,
+            phase=diagnostic_results.get('phase', 'practice'),
+            avg_response_time=float(diagnostic_results.get('avg_response_time', 0)),
+            expected_response_time=float(diagnostic_results.get('expected_response_time', 60)),
+            time_per_question_history=diagnostic_results.get('time_per_question_history', []),
+            hint_usage_count=int(diagnostic_results.get('hint_usage_count', 0)),
+            session_duration_minutes=float(diagnostic_results.get('session_duration_minutes', 0)),
+            total_questions_session=int(diagnostic_results.get('total_questions_session', 0)),
+            recent_accuracy_trend=diagnostic_results.get('recent_accuracy_trend', []),
+            recent_response_times=diagnostic_results.get('recent_response_times', []),
+            last_practiced_minutes_ago=float(diagnostic_results.get('last_practiced_minutes_ago', 0)),
+            retention_score=float(diagnostic_results.get('retention_score', 1.0)),
+            retention_checks_passed=int(diagnostic_results.get('retention_checks_passed', 0)),
+            retention_checks_failed=int(diagnostic_results.get('retention_checks_failed', 0)),
+            engagement_score=float(diagnostic_results.get('engagement_score', 0.7)),
+            consecutive_skips=int(diagnostic_results.get('consecutive_skips', 0)),
+            drop_off_risk=float(diagnostic_results.get('drop_off_risk', 0)),
+            diagnostic_accuracy=diagnostic_results.get('diagnostic_accuracy'),
+        )
+
+        # Enrich context from session object if available
+        if session is not None:
+            from django.utils import timezone as tz
+            elapsed = (tz.now() - session.start_time).total_seconds() / 60.0
+            context.session_duration_minutes = max(context.session_duration_minutes, elapsed)
+            context.consecutive_skips = getattr(session, 'consecutive_skips', 0)
+            perf = (session.session_data or {}).get('performance_history', [])
+            if perf and not context.time_per_question_history:
+                context.time_per_question_history = [p.get('time_taken', 30) for p in perf]
+
+        result: PacingResult = self.pacing_engine.decide_pacing(context)
+
+        return {
+            'pacing': result.decision.value,
+            'decision': result.decision.value,
+            'next_action': result.next_action.value,
+            'fatigue': result.fatigue.value,
+            'recommended_difficulty': result.recommended_difficulty,
+            'mastery_verdict': result.mastery_verdict,
+            'retention_action': result.retention_action,
+            'hint_warning': result.hint_warning,
+            'velocity_snapshot': result.velocity_snapshot,
+            'engagement_adjustment': result.engagement_adjustment,
+            'reasoning': result.reasoning,
+        }
     
     def process_answer(self, 
                       atom_state: TeachingAtomState,
@@ -108,7 +191,23 @@ class AdaptiveLearningEngine:
         # Get recent error types
         recent_errors = [e for e in atom_state.error_history[-5:] if e]
         
-        # Create pacing context
+        # Collect time-per-question history from questions_history
+        time_history = [q.get('time_taken', 30) for q in questions_history if 'time_taken' in q]
+        time_history.append(time_taken)
+
+        # Compute accuracy trend (rolling window of recent correctness)
+        accuracy_trend = []
+        for q in questions_history[-10:]:
+            accuracy_trend.append(1.0 if q.get('correct', False) else 0.0)
+        accuracy_trend.append(1.0 if correct else 0.0)
+
+        # Hint usage count from atom state
+        hint_count = atom_state.hint_usage
+
+        # Expected response time from question
+        expected_time = question.get('estimated_time', 60)
+
+        # Create enriched pacing context with all 10 features
         pacing_context = PacingContext(
             accuracy=recent_accuracy,
             mastery_score=new_mastery,
@@ -117,11 +216,27 @@ class AdaptiveLearningEngine:
             theta=new_theta,
             questions_answered=len(questions_history) + 1,
             knowledge_level=knowledge_level,
-            phase=atom_state.phase.value if hasattr(atom_state.phase, 'value') else atom_state.phase
+            phase=atom_state.phase.value if hasattr(atom_state.phase, 'value') else atom_state.phase,
+            # Feature 2: learning speed
+            avg_response_time=time_taken,
+            expected_response_time=float(expected_time),
+            time_per_question_history=time_history,
+            # Feature 7: hint depth
+            hint_usage_count=hint_count,
+            # Feature 8: fatigue (session-level, passed from caller if available)
+            recent_accuracy_trend=accuracy_trend,
+            recent_response_times=time_history[-10:],
+            # Feature 6: retention
+            retention_score=getattr(atom_state, 'retention_score', 1.0),
+            retention_checks_passed=getattr(atom_state, 'retention_checks_passed', 0),
+            last_practiced_minutes_ago=getattr(atom_state, 'last_practiced_minutes_ago', 0),
         )
-        
-        # Get pacing decision
-        pacing_decision, next_action, reasoning = self.pacing_engine.decide_pacing(pacing_context)
+
+        # Get full pacing result (10-feature)
+        pacing_result: PacingResult = self.pacing_engine.decide_pacing(pacing_context)
+        pacing_decision = pacing_result.decision
+        next_action = pacing_result.next_action
+        reasoning = pacing_result.reasoning
         
         # Determine next difficulty based on ability and pacing
         next_difficulty = self.pacing_engine.get_next_difficulty(
@@ -131,7 +246,18 @@ class AdaptiveLearningEngine:
         # Check if atom is complete
         atom_complete = self._check_atom_complete(atom_state, pacing_context)
         
-        # Prepare result
+        # Store velocity snapshot on atom state
+        if hasattr(atom_state, 'velocity_snapshots'):
+            atom_state.velocity_snapshots.append(pacing_result.velocity_snapshot)
+
+        # Store time_taken on atom state for per-atom speed tracking
+        if hasattr(atom_state, 'time_per_question'):
+            atom_state.time_per_question.append(time_taken)
+
+        # Fatigue recommendation
+        fatigue_rec = self.pacing_engine.get_fatigue_recommendation(pacing_result.fatigue)
+
+        # Prepare result with all 10 feature outputs
         result = {
             'correct': correct,
             'error_type': error_type,
@@ -143,9 +269,26 @@ class AdaptiveLearningEngine:
             'next_difficulty': next_difficulty,
             'reasoning': reasoning,
             'atom_complete': atom_complete,
-            'streak': atom_state.streak
+            'streak': atom_state.streak,
+            # ── Feature 5: mastery verdict ──
+            'mastery_verdict': pacing_result.mastery_verdict,
+            # ── Feature 6: retention ──
+            'retention_action': pacing_result.retention_action,
+            # ── Feature 7: hint warning ──
+            'hint_warning': pacing_result.hint_warning,
+            # ── Feature 8: fatigue ──
+            'fatigue': {
+                'level': pacing_result.fatigue.value,
+                'message': fatigue_rec.get('message', ''),
+                'break_suggested': fatigue_rec.get('break_suggested', False),
+                'lighter_mode': fatigue_rec.get('lighter_mode', False),
+            },
+            # ── Feature 9: engagement ──
+            'engagement_adjustment': pacing_result.engagement_adjustment,
+            # ── Feature 10: velocity snapshot ──
+            'velocity_snapshot': pacing_result.velocity_snapshot,
         }
-        
+
         # Add specific recommendations
         if next_action == NextAction.RETEACH:
             result['recommendation'] = 'review_teaching'
@@ -153,45 +296,31 @@ class AdaptiveLearningEngine:
         elif next_action == NextAction.ADVANCE_NEXT_ATOM:
             result['recommendation'] = 'advance'
             result['message'] = "Great job! Ready for the next concept."
+        elif next_action == NextAction.TAKE_BREAK:
+            result['recommendation'] = 'take_break'
+            result['message'] = fatigue_rec.get('message', "Time for a short break!")
+        elif next_action == NextAction.LIGHTER_TASK:
+            result['recommendation'] = 'lighter_task'
+            result['message'] = "Switching to lighter tasks to keep you going."
+        elif next_action == NextAction.INSERT_REVIEW:
+            result['recommendation'] = 'review_old_content'
+            result['message'] = "Let's quickly review some earlier content to keep it fresh."
         elif pacing_decision == PacingDecision.SHARP_SLOWDOWN:
             result['recommendation'] = 'easier_questions'
             result['message'] = "Let's try some easier questions to build confidence."
         elif pacing_decision == PacingDecision.SPEED_UP:
             result['recommendation'] = 'challenge'
             result['message'] = "You're doing great! Ready for a challenge?"
-        
+
         return result
     
     def _check_atom_complete(self, atom_state: TeachingAtomState, 
                             context: PacingContext) -> bool:
         """
-        Check if atom should be marked complete based on mastery, not question count
+        Check if atom should be marked complete using the engine's should_exit_atom.
         """
-        # Mastery threshold (can be adjusted)
-        MASTERY_THRESHOLD = 0.7
-
-        # Need at least one response to evaluate
-        if context.questions_answered < 1:
-            return False
-        
-        # Check mastery
-        if atom_state.mastery_score < MASTERY_THRESHOLD:
-            return False
-        
-        # Check recent performance
-        if context.accuracy < 0.75:
-            return False
-        
-        # Check streak
-        if context.streak < 2:
-            return False
-        
-        # Check for conceptual errors
-        if any(e in ['conceptual', 'structural'] for e in context.error_types[-3:] if context.error_types):
-            return False
-        
-        # All conditions met
-        return True
+        should_exit, reason = self.pacing_engine.should_exit_atom(context)
+        return should_exit
     
     def select_next_questions(self, 
                              atom_state: TeachingAtomState,

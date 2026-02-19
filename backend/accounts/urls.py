@@ -11,7 +11,11 @@ from .views import (
     GenerateQuestionsFromTeachingView, SubmitAtomAnswerView,
     CompleteAtomView, GetLearningProgressView,
     GenerateInitialQuizView, SubmitInitialQuizAnswerView, CompleteInitialQuizView,
-    GenerateFinalChallengeView, CompleteFinalChallengeView
+    GenerateFinalChallengeView, CompleteFinalChallengeView,
+
+    # Enhanced pacing engine views
+    GetVelocityGraphView, GetFatigueStatusView, RecordBreakView,
+    RetentionCheckView, RecordHintUsageView,
 )
 
 urlpatterns = [
@@ -40,4 +44,11 @@ urlpatterns = [
     path('api/progress/', GetLearningProgressView.as_view(), name='learning_progress'),
     
     path('api/concept-resources/', GetConceptResourcesView.as_view(), name='concept_resources'),
+
+    # Enhanced pacing engine endpoints
+    path('api/velocity-graph/', GetVelocityGraphView.as_view(), name='velocity_graph'),
+    path('api/fatigue-status/', GetFatigueStatusView.as_view(), name='fatigue_status'),
+    path('api/record-break/', RecordBreakView.as_view(), name='record_break'),
+    path('api/retention-check/', RetentionCheckView.as_view(), name='retention_check'),
+    path('api/record-hint/', RecordHintUsageView.as_view(), name='record_hint'),
 ]

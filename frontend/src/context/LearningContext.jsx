@@ -23,6 +23,15 @@ export const LearningProvider = ({ children }) => {
     const [showTeaching, setShowTeaching] = useState(false);
     const [teachingContent, setTeachingContent] = useState(null);
     const [metrics, setMetrics] = useState({});
+
+    // Enhanced pacing engine state
+    const [fatigueLevel, setFatigueLevel] = useState('fresh');
+    const [velocityData, setVelocityData] = useState([]);
+    const [retentionAction, setRetentionAction] = useState(null);
+    const [hintWarning, setHintWarning] = useState(null);
+    const [engagementScore, setEngagementScore] = useState(0.7);
+    const [masteryVerdict, setMasteryVerdict] = useState(null);
+    const [showBreakModal, setShowBreakModal] = useState(false);
     
     // Timers
     const questionStartTime = useRef(null);
@@ -267,6 +276,19 @@ export const LearningProvider = ({ children }) => {
             setPacingDecision(data.pacing_decision);
             setNextAction(data.next_action);
             setMetrics(data.metrics || {});
+
+            // Enhanced pacing engine updates
+            if (data.fatigue) setFatigueLevel(data.fatigue);
+            if (data.retention_action) setRetentionAction(data.retention_action);
+            if (data.hint_warning) setHintWarning(data.hint_warning);
+            if (data.engagement_adjustment) setEngagementScore(data.engagement_adjustment.score ?? engagementScore);
+            if (data.mastery_verdict) setMasteryVerdict(data.mastery_verdict);
+            if (data.velocity_snapshot) setVelocityData(prev => [...prev, data.velocity_snapshot]);
+
+            // Auto-show break modal on high fatigue
+            if (data.fatigue === 'high' || data.fatigue === 'critical') {
+                setShowBreakModal(true);
+            }
             
             // Store answer
             const newAnswer = {
@@ -369,6 +391,72 @@ export const LearningProvider = ({ children }) => {
         }
     }, []);
 
+    // ── Enhanced pacing engine API methods ──
+
+    const fetchVelocityGraph = useCallback(async (sessionId) => {
+        try {
+            const response = await axios.get('/auth/api/velocity-graph/', {
+                params: { session_id: sessionId }
+            });
+            setVelocityData(response.data.session_velocity || []);
+            setEngagementScore(response.data.engagement_score ?? 0.7);
+            return { success: true, data: response.data };
+        } catch (error) {
+            return { success: false, error: error.response?.data?.error || 'Failed to fetch velocity' };
+        }
+    }, []);
+
+    const fetchFatigueStatus = useCallback(async (sessionId) => {
+        try {
+            const response = await axios.get('/auth/api/fatigue-status/', {
+                params: { session_id: sessionId }
+            });
+            setFatigueLevel(response.data.fatigue_level || 'fresh');
+            return { success: true, data: response.data };
+        } catch (error) {
+            return { success: false, error: error.response?.data?.error || 'Failed to fetch fatigue' };
+        }
+    }, []);
+
+    const recordBreak = useCallback(async (sessionId) => {
+        try {
+            const response = await axios.post('/auth/api/record-break/', {
+                session_id: sessionId
+            });
+            setFatigueLevel('fresh');
+            setShowBreakModal(false);
+            return { success: true, data: response.data };
+        } catch (error) {
+            return { success: false, error: error.response?.data?.error || 'Failed to record break' };
+        }
+    }, []);
+
+    const checkRetention = useCallback(async ({ session_id, atom_id, passed = null }) => {
+        try {
+            const response = await axios.post('/auth/api/retention-check/', {
+                session_id, atom_id, passed
+            });
+            if (passed !== null) {
+                setRetentionAction(null); // Clear after recording
+            }
+            return { success: true, data: response.data };
+        } catch (error) {
+            return { success: false, error: error.response?.data?.error || 'Failed retention check' };
+        }
+    }, []);
+
+    const recordHint = useCallback(async ({ atom_id, hint_level = 1 }) => {
+        try {
+            const response = await axios.post('/auth/api/record-hint/', {
+                atom_id, hint_level
+            });
+            setHintWarning(response.data.hint_warning);
+            return { success: true, data: response.data };
+        } catch (error) {
+            return { success: false, error: error.response?.data?.error || 'Failed to record hint' };
+        }
+    }, []);
+
     // Reset for new atom
     const resetForNewAtom = useCallback(() => {
         setCurrentQuestions([]);
@@ -399,10 +487,20 @@ export const LearningProvider = ({ children }) => {
         teachingContent,
         metrics,
         timeSpent,
+
+        // Enhanced pacing engine state
+        fatigueLevel,
+        velocityData,
+        retentionAction,
+        hintWarning,
+        engagementScore,
+        masteryVerdict,
+        showBreakModal,
         
         // Setters
         setKnowledgeLevel,
         setShowTeaching,
+        setShowBreakModal,
         
         // Core methods
         generateConcept,
@@ -418,7 +516,14 @@ export const LearningProvider = ({ children }) => {
         completeAtom,
         loadLearningProgress,
         nextQuestion,
-        resetForNewAtom
+        resetForNewAtom,
+
+        // Enhanced pacing engine methods
+        fetchVelocityGraph,
+        fetchFatigueStatus,
+        recordBreak,
+        checkRetention,
+        recordHint,
         
     }), [
         currentSession,
@@ -437,6 +542,13 @@ export const LearningProvider = ({ children }) => {
         teachingContent,
         metrics,
         timeSpent,
+        fatigueLevel,
+        velocityData,
+        retentionAction,
+        hintWarning,
+        engagementScore,
+        masteryVerdict,
+        showBreakModal,
         generateConcept,
         startTeachingSession,
         getTeachingContent,
@@ -450,7 +562,12 @@ export const LearningProvider = ({ children }) => {
         completeAtom,
         loadLearningProgress,
         nextQuestion,
-        resetForNewAtom
+        resetForNewAtom,
+        fetchVelocityGraph,
+        fetchFatigueStatus,
+        recordBreak,
+        checkRetention,
+        recordHint,
     ]);
 
     return (

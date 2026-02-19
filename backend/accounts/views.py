@@ -289,7 +289,10 @@ class StartTeachingSessionView(APIView):
             phase=current_atom.phase.value if current_atom and hasattr(current_atom.phase, 'value') else 'diagnostic'
         )
 
-        initial_pacing, next_action, reasoning = pacing_engine.decide_pacing(pacing_context)
+        pacing_result = pacing_engine.decide_pacing(pacing_context)
+        initial_pacing = pacing_result.decision
+        next_action = pacing_result.next_action
+        reasoning = pacing_result.reasoning
 
         # Get user's learning profile
         try:
@@ -304,9 +307,11 @@ class StartTeachingSessionView(APIView):
             'subject': concept.subject,
             'atoms': [state.to_dict() for state in atom_states],
             'current_atom': current_atom.to_dict() if current_atom else None,
-            'initial_pacing': initial_pacing,
-            'next_action': next_action,
+            'initial_pacing': initial_pacing.value if hasattr(initial_pacing, 'value') else initial_pacing,
+            'next_action': next_action.value if hasattr(next_action, 'value') else next_action,
             'reasoning': reasoning,
+            'fatigue': pacing_result.fatigue.value if hasattr(pacing_result.fatigue, 'value') else str(pacing_result.fatigue) if pacing_result.fatigue else 'fresh',
+            'recommended_difficulty': pacing_result.recommended_difficulty,
             'overall_theta': profile.overall_theta,
             'knowledge_level': knowledge_level
         })
@@ -444,7 +449,10 @@ class CompleteInitialQuizView(APIView):
             knowledge_level=session.knowledge_level,
             phase='initial_quiz'
         )
-        pacing, next_action, reasoning = pacing_engine.decide_pacing(context)
+        pacing_result = pacing_engine.decide_pacing(context)
+        pacing = pacing_result.decision
+        next_action = pacing_result.next_action
+        reasoning = pacing_result.reasoning
 
         session.session_data['pacing_history'] = session.session_data.get('pacing_history', []) + [{
             'phase': 'initial_quiz',
@@ -915,8 +923,24 @@ class SubmitAtomAnswerView(APIView):
                 'atom_complete': result['atom_complete'],
                 'metrics': result['metrics'],
                 'correct_index': question.get('correct_index') if not result['correct'] else None,
-                'explanation': explanation
+                'explanation': explanation,
+                # ── Enhanced pacing engine data ──
+                'fatigue': result.get('fatigue', 'fresh'),
+                'retention_action': result.get('retention_action'),
+                'hint_warning': result.get('hint_warning'),
+                'velocity_snapshot': result.get('velocity_snapshot'),
+                'engagement_adjustment': result.get('engagement_adjustment'),
+                'mastery_verdict': result.get('mastery_verdict'),
             }
+            
+            # Persist enriched data to session-level fatigue/velocity
+            session.fatigue_level = result.get('fatigue', 'fresh')
+            if result.get('velocity_snapshot'):
+                vel_data = session.velocity_data or []
+                vel_data.append(result['velocity_snapshot'])
+                session.velocity_data = vel_data
+            if result.get('engagement_adjustment'):
+                session.engagement_score = result['engagement_adjustment'].get('score', session.engagement_score)
             
             # If atom complete, get next atom info
             if result['atom_complete']:
@@ -1176,10 +1200,19 @@ class CompleteAtomView(APIView):
         }
         
         engine = AdaptiveLearningEngine()
-        pacing = engine.determine_pacing(
+        pacing_full = engine.determine_pacing_full(
             diagnostic_results=diagnostic_results,
-            knowledge_level=session.knowledge_level
+            knowledge_level=session.knowledge_level,
+            session=session
         )
+        pacing = pacing_full.get('pacing', 'stay')
+        
+        # Extract enriched pacing features
+        fatigue_info = pacing_full.get('fatigue', 'fresh')
+        retention_action = pacing_full.get('retention_action')
+        velocity_snapshot = pacing_full.get('velocity_snapshot')
+        mastery_verdict = pacing_full.get('mastery_verdict')
+        engagement_adjustment = pacing_full.get('engagement_adjustment')
         
         # ========== STEP 7: MAKE AUTOMATIC DECISION ==========
 
@@ -1344,6 +1377,13 @@ class CompleteAtomView(APIView):
                 'color': self._get_pacing_color(pacing)
             },
             
+            # ===== ENHANCED PACING FEATURES =====
+            'fatigue': fatigue_info,
+            'retention_action': retention_action,
+            'velocity_snapshot': velocity_snapshot,
+            'mastery_verdict': mastery_verdict,
+            'engagement_adjustment': engagement_adjustment,
+            
             # ===== NEXT ACTION (AUTOMATIC) =====
             'next_action': {
                 'action': next_action,
@@ -1484,7 +1524,10 @@ class CompleteFinalChallengeView(APIView):
             knowledge_level=session.knowledge_level,
             phase='final_challenge'
         )
-        pacing, _next_action, _reasoning = pacing_engine.decide_pacing(pacing_context)
+        pacing_result = pacing_engine.decide_pacing(pacing_context)
+        pacing = pacing_result.decision
+        _next_action = pacing_result.next_action
+        _reasoning = pacing_result.reasoning
         pacing_value = pacing.value if hasattr(pacing, 'value') else pacing
 
         mastered = accuracy >= 0.7 and float(progress.mastery_score) >= 0.7
@@ -1643,9 +1686,237 @@ class GetLearningProgressView(APIView):
             return 'accelerated'
         else:
             return 'balanced'
-        
-        
-        
+
+
+# ==================== ENHANCED PACING ENGINE VIEWS ====================
+
+class GetVelocityGraphView(APIView):
+    """Return velocity snapshots for the current session (Feature 10)."""
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        session_id = request.query_params.get('session_id')
+        if not session_id:
+            return Response({'error': 'session_id required'}, status=400)
+
+        try:
+            session = LearningSession.objects.get(id=session_id, user=request.user)
+        except LearningSession.DoesNotExist:
+            return Response({'error': 'Session not found'}, status=404)
+
+        velocity_data = session.velocity_data or []
+
+        # Also gather per-atom velocity snapshots from StudentProgress
+        atom_velocities = {}
+        progresses = StudentProgress.objects.filter(
+            user=request.user,
+            atom__concept=session.concept
+        )
+        for p in progresses:
+            snaps = p.velocity_snapshots or []
+            if snaps:
+                atom_velocities[p.atom.name] = snaps
+
+        return Response({
+            'session_velocity': velocity_data,
+            'atom_velocities': atom_velocities,
+            'engagement_score': session.engagement_score,
+        })
+
+
+class GetFatigueStatusView(APIView):
+    """Return current fatigue level and break recommendations (Feature 8)."""
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        session_id = request.query_params.get('session_id')
+        if not session_id:
+            return Response({'error': 'session_id required'}, status=400)
+
+        try:
+            session = LearningSession.objects.get(id=session_id, user=request.user)
+        except LearningSession.DoesNotExist:
+            return Response({'error': 'Session not found'}, status=404)
+
+        # Compute fatigue using PacingEngine
+        pacing_engine = PacingEngine()
+        elapsed = (timezone.now() - session.start_time).total_seconds() / 60.0
+
+        # Build minimal context for fatigue computation
+        perf_history = session.session_data.get('performance_history', [])
+        time_history = [p.get('time_taken', 30) for p in perf_history]
+        accuracy_trend = []
+        window = []
+        for p in perf_history:
+            window.append(1.0 if p.get('correct') else 0.0)
+            if len(window) >= 3:
+                accuracy_trend.append(sum(window[-3:]) / 3.0)
+
+        ctx = PacingContext(
+            accuracy=sum(1 for p in perf_history if p.get('correct')) / max(len(perf_history), 1),
+            mastery_score=0.5,
+            streak=0,
+            error_types=[],
+            theta=0.0,
+            questions_answered=len(perf_history),
+            knowledge_level=session.knowledge_level,
+            phase='practice',
+            session_duration_minutes=elapsed,
+            consecutive_skips=session.consecutive_skips,
+            time_per_question_history=time_history,
+            recent_accuracy_trend=accuracy_trend,
+        )
+
+        fatigue_rec = pacing_engine.get_fatigue_recommendation(
+            pacing_engine._detect_fatigue(ctx)
+        )
+
+        return Response({
+            'fatigue_level': session.fatigue_level,
+            'break_count': session.break_count,
+            'last_break_at': session.last_break_at,
+            'session_duration_minutes': round(elapsed, 1),
+            'recommendation': fatigue_rec,
+        })
+
+
+class RecordBreakView(APIView):
+    """Record that the student took a break (Feature 8)."""
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        session_id = request.data.get('session_id')
+
+        try:
+            session = LearningSession.objects.get(id=session_id, user=request.user)
+        except LearningSession.DoesNotExist:
+            return Response({'error': 'Session not found'}, status=404)
+
+        session.break_count = (session.break_count or 0) + 1
+        session.last_break_at = timezone.now()
+        session.fatigue_level = 'fresh'  # Reset after break
+        session.consecutive_skips = 0
+        session.save()
+
+        return Response({
+            'break_count': session.break_count,
+            'fatigue_level': 'fresh',
+            'message': 'Break recorded. Fatigue reset.'
+        })
+
+
+class RetentionCheckView(APIView):
+    """Trigger or record a retention check for an atom (Feature 6)."""
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        session_id = request.data.get('session_id')
+        atom_id = request.data.get('atom_id')
+        passed = request.data.get('passed')  # True/False or None (request check)
+
+        try:
+            session = LearningSession.objects.get(id=session_id, user=request.user)
+            atom = TeachingAtom.objects.get(id=atom_id)
+            progress = StudentProgress.objects.get(user=request.user, atom=atom)
+        except (LearningSession.DoesNotExist, TeachingAtom.DoesNotExist, StudentProgress.DoesNotExist):
+            return Response({'error': 'Not found'}, status=404)
+
+        if passed is None:
+            # Request: should we do a retention check?
+            pacing_engine = PacingEngine()
+            last_practiced = None
+            if progress.next_review_at and progress.next_review_at <= timezone.now():
+                should_review = True
+            else:
+                elapsed = (timezone.now() - (progress.next_review_at or session.start_time)).total_seconds() / 60.0
+                ctx = PacingContext(
+                    accuracy=0.5, mastery_score=float(progress.mastery_score),
+                    streak=progress.streak, error_types=[],
+                    theta=0.0, questions_answered=0,
+                    knowledge_level=session.knowledge_level,
+                    phase=progress.phase,
+                    last_practiced_minutes_ago=abs(elapsed),
+                    retention_score=float(progress.retention_score),
+                )
+                ret = pacing_engine.compute_retention_score(ctx)
+                should_review = ret < 0.5
+
+            return Response({
+                'should_review': should_review,
+                'retention_score': float(progress.retention_score),
+                'next_review_at': progress.next_review_at,
+            })
+
+        # Record result
+        if passed:
+            progress.retention_checks_passed = (progress.retention_checks_passed or 0) + 1
+            progress.retention_score = min(1.0, float(progress.retention_score) + 0.1)
+        else:
+            progress.retention_checks_failed = (progress.retention_checks_failed or 0) + 1
+            progress.retention_score = max(0.0, float(progress.retention_score) - 0.15)
+
+        # Schedule next review using Ebbinghaus spacing
+        pacing_engine = PacingEngine()
+        ctx = PacingContext(
+            accuracy=0.5, mastery_score=float(progress.mastery_score),
+            streak=progress.streak, error_types=[],
+            theta=0.0, questions_answered=0,
+            knowledge_level=session.knowledge_level,
+            phase=progress.phase,
+            retention_score=float(progress.retention_score),
+            retention_checks_passed=progress.retention_checks_passed,
+        )
+        next_review_minutes = pacing_engine.schedule_next_review(ctx)
+        progress.next_review_at = timezone.now() + timezone.timedelta(minutes=next_review_minutes)
+        progress.save()
+
+        return Response({
+            'passed': passed,
+            'retention_score': float(progress.retention_score),
+            'next_review_at': progress.next_review_at,
+            'retention_checks_passed': progress.retention_checks_passed,
+            'retention_checks_failed': progress.retention_checks_failed,
+        })
+
+
+class RecordHintUsageView(APIView):
+    """Track hint usage for adaptive hint depth (Feature 7)."""
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        atom_id = request.data.get('atom_id')
+        hint_level = request.data.get('hint_level', 1)  # 1=nudge, 2=worked example, 3=full solution
+
+        try:
+            atom = TeachingAtom.objects.get(id=atom_id)
+            progress = StudentProgress.objects.get(user=request.user, atom=atom)
+        except (TeachingAtom.DoesNotExist, StudentProgress.DoesNotExist):
+            return Response({'error': 'Not found'}, status=404)
+
+        progress.hint_usage = (progress.hint_usage or 0) + 1
+        progress.save()
+
+        # Determine hint depth warning
+        pacing_engine = PacingEngine()
+        ctx = PacingContext(
+            accuracy=0.5, mastery_score=float(progress.mastery_score),
+            streak=progress.streak, error_types=progress.error_history[-5:] if progress.error_history else [],
+            theta=0.0, questions_answered=0,
+            knowledge_level='intermediate',
+            phase=progress.phase,
+            hint_usage_count=progress.hint_usage,
+        )
+        result = pacing_engine.decide_pacing(ctx)
+        hint_warning = result.hint_warning
+
+        return Response({
+            'hint_usage': progress.hint_usage,
+            'hint_level': hint_level,
+            'hint_warning': hint_warning,
+            'mastery_score': float(progress.mastery_score),
+        })
+
+
 # Add to backend/accounts/views.py
 
 from learning_engine.external_resources import ExternalResourceFetcher

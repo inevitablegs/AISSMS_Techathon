@@ -7,6 +7,8 @@ import TeachingModule from './TeachingModule';
 import QuestionsFromTeaching from './QuestionsFromTeaching';
 import AtomComplete from './AtomComplete';
 import AtomReview from './AtomReview';
+import FatigueIndicator from './FatigueIndicator';
+import LearningVelocityGraph from './LearningVelocityGraph';
 
 const TeachingFirstFlow = ({ conceptId }) => {
     const navigate = useNavigate();
@@ -51,7 +53,18 @@ const TeachingFirstFlow = ({ conceptId }) => {
         submitAtomAnswer,
         completeAtom,
         loadLearningProgress,
-        resetForNewAtom
+        resetForNewAtom,
+
+        // Enhanced pacing engine
+        fatigueLevel,
+        velocityData,
+        retentionAction,
+        hintWarning,
+        engagementScore,
+        masteryVerdict,
+        recordBreak,
+        checkRetention,
+        recordHint,
     } = useLearning();
 
     const [currentSubject, setCurrentSubject] = useState('');
@@ -587,6 +600,24 @@ useEffect(() => {
                                 </div>
                             )}
                         </div>
+                    </div>
+
+                    {/* Fatigue indicator + Velocity graph row */}
+                    <div className="mt-3 grid grid-cols-1 md:grid-cols-2 gap-3">
+                        <div>
+                            <FatigueIndicator />
+                            {retentionAction && (
+                                <div className="mt-1 text-xs text-orange-600 font-medium">
+                                    🔁 {typeof retentionAction === 'string' ? retentionAction : 'Retention review recommended'}
+                                </div>
+                            )}
+                            {hintWarning && (
+                                <div className="mt-1 text-xs text-yellow-600 font-medium">
+                                    💡 {hintWarning}
+                                </div>
+                            )}
+                        </div>
+                        <LearningVelocityGraph sessionId={currentSession?.session_id} />
                     </div>
                 </div>
 

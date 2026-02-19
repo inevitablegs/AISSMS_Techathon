@@ -96,7 +96,7 @@ class Question(models.Model):
         }
 
 class StudentProgress(models.Model):
-    """Track student progress on atoms"""
+    """Track student progress on atoms — enriched for 10-feature pacing engine."""
     user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='progress')
     atom = models.ForeignKey(TeachingAtom, on_delete=models.CASCADE)
     mastery_score = models.FloatField(default=0.3)
@@ -107,7 +107,19 @@ class StudentProgress(models.Model):
     retention_verified = models.BooleanField(default=False)
     last_practiced = models.DateTimeField(auto_now=True)
     times_practiced = models.IntegerField(default=0)
-    
+
+    # ── Feature 2: per-atom learning speed ──
+    time_per_question = models.JSONField(default=list, blank=True)  # list of floats (seconds)
+
+    # ── Feature 6: retention tracking ──
+    retention_score = models.FloatField(default=1.0)
+    retention_checks_passed = models.IntegerField(default=0)
+    retention_checks_failed = models.IntegerField(default=0)
+    next_review_at = models.DateTimeField(null=True, blank=True)
+
+    # ── Feature 10: velocity snapshots ──
+    velocity_snapshots = models.JSONField(default=list, blank=True)
+
     class Meta:
         unique_together = ['user', 'atom']
 
@@ -121,7 +133,7 @@ class KnowledgeLevel(models.TextChoices):
 
 
 class LearningSession(models.Model):
-    """Track learning sessions"""
+    """Track learning sessions — enriched for 10-feature pacing engine."""
     user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='learning_sessions')
     concept = models.ForeignKey(Concept, on_delete=models.CASCADE)
     start_time = models.DateTimeField(auto_now_add=True)
@@ -135,7 +147,19 @@ class LearningSession(models.Model):
         choices=KnowledgeLevel.choices,
         default=KnowledgeLevel.ZERO
     )
-    user_feedback = models.JSONField(default=dict)  
+    user_feedback = models.JSONField(default=dict)
+
+    # ── Feature 8: fatigue tracking ──
+    fatigue_level = models.CharField(max_length=20, default='fresh')   # fresh|mild|moderate|high|critical
+    break_count = models.IntegerField(default=0)
+    last_break_at = models.DateTimeField(null=True, blank=True)
+
+    # ── Feature 9: engagement ──
+    engagement_score = models.FloatField(default=0.7)
+    consecutive_skips = models.IntegerField(default=0)
+
+    # ── Feature 10: session-level velocity snapshots ──
+    velocity_data = models.JSONField(default=list, blank=True)  
     
 
 
