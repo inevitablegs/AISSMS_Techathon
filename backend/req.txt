@@ -1,3 +1,5 @@
 pip install django djangorestframework
 pip install djangorestframework-simplejwt
 pip install django-cors-headers
+pip install youtube-search-python
+pip install serpapi

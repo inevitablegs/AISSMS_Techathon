@@ -182,14 +182,23 @@ def test_generator():
         print("\n" + "=" * 50)
         print("Test 2: Generate questions for first atom")
         print("=" * 50)
-        questions = generator.generate_questions(
+        questions = []
+        questions.extend(generator.generate_questions(
             subject="Microprocessor",
             concept="Memory Organization",
             atom=atoms[0],
-            need_easy=2,
-            need_medium=2,
+            target_difficulty="easy",
+            count=2,
             knowledge_level='intermediate'
-        )
+        ))
+        questions.extend(generator.generate_questions(
+            subject="Microprocessor",
+            concept="Memory Organization",
+            atom=atoms[0],
+            target_difficulty="medium",
+            count=2,
+            knowledge_level='intermediate'
+        ))
         print(f"Generated {len(questions)} questions")
         for i, q in enumerate(questions):
             print(f"\nQ{i+1}: {q.get('question', 'No question')}")
@@ -538,7 +547,9 @@ from .views import (
     # Teaching-first flow views
     StartTeachingSessionView, GetTeachingContentView,
     GenerateQuestionsFromTeachingView, SubmitAtomAnswerView,
-    CompleteAtomView, GetLearningProgressView
+    CompleteAtomView, GetLearningProgressView,
+    GenerateInitialQuizView, SubmitInitialQuizAnswerView, CompleteInitialQuizView,
+    GenerateFinalChallengeView, CompleteFinalChallengeView
 )
 
 urlpatterns = [
@@ -553,10 +564,15 @@ urlpatterns = [
     
     # Teaching-first flow endpoints
     path('api/start-teaching-session/', StartTeachingSessionView.as_view(), name='start_teaching_session'),
+    path('api/initial-quiz/', GenerateInitialQuizView.as_view(), name='generate_initial_quiz'),
+    path('api/submit-initial-quiz-answer/', SubmitInitialQuizAnswerView.as_view(), name='submit_initial_quiz_answer'),
+    path('api/complete-initial-quiz/', CompleteInitialQuizView.as_view(), name='complete_initial_quiz'),
     path('api/teaching-content/', GetTeachingContentView.as_view(), name='teaching_content'),
     path('api/generate-questions-from-teaching/', GenerateQuestionsFromTeachingView.as_view(), name='generate_questions_from_teaching'),
     path('api/submit-atom-answer/', SubmitAtomAnswerView.as_view(), name='submit_atom_answer'),
     path('api/complete-atom/', CompleteAtomView.as_view(), name='complete_atom'),
+    path('api/final-challenge/', GenerateFinalChallengeView.as_view(), name='generate_final_challenge'),
+    path('api/complete-final-challenge/', CompleteFinalChallengeView.as_view(), name='complete_final_challenge'),
     
     # Progress
     path('api/progress/', GetLearningProgressView.as_view(), name='learning_progress'),
@@ -566,7 +582,7 @@ urlpatterns = [
 ================================================
 FILE: backend/accounts/views.py
 ================================================
-Error reading file with 'cp1252': 'charmap' codec can't decode byte 0x8f in position 41483: character maps to <undefined>
+Error reading file with 'cp1252': 'charmap' codec can't decode byte 0x8f in position 39437: character maps to <undefined>
 
 
 ================================================
@@ -1134,6 +1150,32 @@ class AdaptiveLearningEngine:
             self.groq_client = Groq(api_key=groq_key)
         
         self.pacing_engine = PacingEngine()
+
+    def determine_pacing(self, diagnostic_results: Dict, knowledge_level: str) -> str:
+        """
+        Compatibility helper for legacy callers.
+        Translates aggregate diagnostics into a PacingContext and returns a pacing decision string.
+        """
+        accuracy = float(diagnostic_results.get('accuracy', 0))
+        mastery = float(diagnostic_results.get('mastery', 0))
+        streak = int(diagnostic_results.get('streak', 0))
+        error_types = diagnostic_results.get('error_types', []) or []
+        theta = float(diagnostic_results.get('theta', 0.0))
+        questions_answered = int(diagnostic_results.get('questions_answered', 0))
+
+        context = PacingContext(
+            accuracy=accuracy,
+            mastery_score=mastery,
+            streak=streak,
+            error_types=error_types,
+            theta=theta,
+            questions_answered=questions_answered,
+            knowledge_level=knowledge_level,
+            phase=diagnostic_results.get('phase', 'practice')
+        )
+
+        pacing_decision, _next_action, _reasoning = self.pacing_engine.decide_pacing(context)
+        return pacing_decision.value if hasattr(pacing_decision, 'value') else pacing_decision
     
     def process_answer(self, 
                       atom_state: TeachingAtomState,
@@ -1258,9 +1300,9 @@ class AdaptiveLearningEngine:
         """
         # Mastery threshold (can be adjusted)
         MASTERY_THRESHOLD = 0.7
-        
-        # Need minimum practice
-        if context.questions_answered < 4:
+
+        # Need at least one response to evaluate
+        if context.questions_answered < 1:
             return False
         
         # Check mastery
@@ -2450,63 +2492,102 @@ class QuestionGenerator:
             """
         
         prompt = f"""
-        You are generating multiple-choice assessment questions.
-        
-        Subject: {subject}
-        Concept: {concept}
-        Atomic Concept: {atom}
-        Student Level: {knowledge_level.upper()}
-        Target Difficulty: {target_difficulty.upper()}
-        
-        Generate EXACTLY {count} {target_difficulty} question(s) with these characteristics:
-        - Complexity: {adj['complexity']}
-        - Cognitive levels: {', '.join(allowed_cognitive)}
-        - Hint level: {adj['hint_level']}
-        
-        {error_context}
-        
-        Each question must:
-        - Have exactly 4 options
-        - Be clearly worded and self-contained
-        - Test understanding, not trickery
-        - Include the atomic concept explicitly
-        - Maximum 25 words per question text
-        - For {target_difficulty} questions, the difficulty should be appropriate:
-            * Easy: Direct recall, simple application
-            * Medium: Requires understanding, some analysis
-            * Hard: Complex application, synthesis of ideas
-        
-        Each question MUST include:
-        - "difficulty": "{target_difficulty}"
-        - "cognitive_operation": one of {allowed_cognitive}
-        - "estimated_time": integer (seconds) - recall: 20-40, apply: 40-90, analyze: 90-150
-        - "question": string
-        - "options": array of exactly 4 strings
-        - "correct_index": integer (0-3)
-        
-        OUTPUT STRICT JSON ONLY:
-        
-        {{
-            "questions": [
-                {{
-                    "difficulty": "{target_difficulty}",
-                    "cognitive_operation": "recall",
-                    "estimated_time": 30,
-                    "question": "Question text here?",
-                    "options": [
-                        "Option A",
-                        "Option B",
-                        "Option C",
-                        "Option D"
-                    ],
-                    "correct_index": 1
-                }}
-            ]
-        }}
-        
-        If constraints cannot be satisfied, return:
-        {{"questions": []}}
-        """
+            You are an experienced teacher creating high-quality conceptual assessment questions to evaluate deep student understanding.
+
+            Subject: {subject}
+            Concept: {concept}
+            Atomic Concept: {atom}
+            Student Level: {knowledge_level.upper()}
+            Target Difficulty: {target_difficulty.upper()}
+
+            Generate EXACTLY {count} {target_difficulty} question(s) with these characteristics:
+
+            - Complexity: {adj['complexity']}
+            - Cognitive levels: {', '.join(allowed_cognitive)}
+            - Hint level: {adj['hint_level']}
+
+            {error_context}
+
+            CRITICAL QUALITY REQUIREMENTS:
+
+            The goal is to test CONCEPTUAL UNDERSTANDING, not memorization.
+
+            Each question MUST:
+
+            - Be written like an experienced teacher checking real understanding
+            - Require thinking, reasoning, or application â€” NOT simple definition recall
+            - Be scenario-based, example-based, comparison-based, or reasoning-based whenever possible
+            - Explicitly involve the atomic concept in a meaningful way
+            - Avoid trivial, obvious, or keyword-matching questions
+            - Avoid fill-in-the-blank style
+
+            OPTIONS REQUIREMENTS (VERY IMPORTANT):
+
+            Each question must have exactly 4 options where:
+
+            - All options are plausible and believable
+            - All options belong to the SAME conceptual category
+            - Incorrect options must reflect common student misconceptions or mistakes
+            - Avoid joke options, extreme options, or obviously wrong answers
+            - Avoid options that differ only in grammar or wording tricks
+
+            QUESTION LENGTH:
+
+            - 10 to 35 words REQUIRED
+            - Must be self-contained and clear
+
+            DIFFICULTY REQUIREMENTS:
+
+            For {target_difficulty} questions:
+
+            Easy:
+            - Simple scenario or example
+            - Direct conceptual application
+
+            Medium:
+            - Requires reasoning, interpretation, or comparison
+
+            Hard:
+            - Multi-step reasoning, prediction, or analysis
+
+
+            Each question MUST include:
+
+            - "difficulty": "{target_difficulty}"
+            - "cognitive_operation": one of {allowed_cognitive}
+            - "estimated_time": integer (seconds)
+                recall: 20-40
+                apply: 40-90
+                analyze: 90-150
+            - "question": string
+            - "options": array of exactly 4 strings
+            - "correct_index": integer (0-3)
+
+            OUTPUT STRICT JSON ONLY:
+
+            {{
+                "questions": [
+                    {{
+                        "difficulty": "{target_difficulty}",
+                        "cognitive_operation": "recall",
+                        "estimated_time": 30,
+                        "question": "Question text here?",
+                        "options": [
+                            "Option A",
+                            "Option B",
+                            "Option C",
+                            "Option D"
+                        ],
+                        "correct_index": 1
+                    }}
+                ]
+            }}
+
+            If constraints cannot be satisfied, return:
+
+            {{"questions": []}}
+            """
+
         
         try:
             response = self.groq_client.chat.completions.create(
@@ -2577,42 +2658,55 @@ class QuestionGenerator:
             f"{concept} Limitations"
         ]
     
-    def _get_fallback_questions(self, atom: str, need_easy: int, need_medium: int, level: str = 'intermediate') -> List[Dict]:
+    def _get_fallback_questions(self, atom: str, target_difficulty: str, count: int,
+                                level: str = 'intermediate') -> List[Dict]:
         """Provide fallback questions when AI generation fails"""
         questions = []
-        
-        # Generate easy questions
-        for i in range(need_easy):
-            questions.append({
-                "difficulty": "easy",
-                "cognitive_operation": "recall",
-                "estimated_time": 30,
-                "question": f"What is the primary purpose of {atom}?",
-                "options": [
-                    f"To manage {atom} operations",
-                    "To store data permanently",
-                    "To execute instructions",
-                    "To control peripherals"
-                ],
-                "correct_index": 0
-            })
-        
-        # Generate medium questions
-        for i in range(need_medium):
-            questions.append({
-                "difficulty": "medium",
-                "cognitive_operation": "apply",
-                "estimated_time": 60,
-                "question": f"Which scenario best demonstrates the application of {atom}?",
-                "options": [
-                    f"When implementing {atom} in a real system",
-                    "During basic operations",
-                    "In simple calculations",
-                    "At the start of processing"
-                ],
-                "correct_index": 0
-            })
-        
+
+        for _ in range(count):
+            if target_difficulty == 'easy':
+                questions.append({
+                    "difficulty": "easy",
+                    "cognitive_operation": "recall",
+                    "estimated_time": 30,
+                    "question": f"What is the primary purpose of {atom}?",
+                    "options": [
+                        f"To manage {atom} operations",
+                        "To store data permanently",
+                        "To execute instructions",
+                        "To control peripherals"
+                    ],
+                    "correct_index": 0
+                })
+            elif target_difficulty == 'medium':
+                questions.append({
+                    "difficulty": "medium",
+                    "cognitive_operation": "apply",
+                    "estimated_time": 60,
+                    "question": f"Which scenario best demonstrates the application of {atom}?",
+                    "options": [
+                        f"When implementing {atom} in a real system",
+                        "During basic operations",
+                        "In simple calculations",
+                        "At the start of processing"
+                    ],
+                    "correct_index": 0
+                })
+            else:
+                questions.append({
+                    "difficulty": "hard",
+                    "cognitive_operation": "analyze",
+                    "estimated_time": 90,
+                    "question": f"What would happen if {atom} was implemented incorrectly?",
+                    "options": [
+                        "System performance would degrade",
+                        "Nothing would change",
+                        "The system would run faster",
+                        "Data would be more secure"
+                    ],
+                    "correct_index": 0
+                })
+
         return questions
     
     def generate_complete_concept(self, subject: str, concept: str) -> Dict:
@@ -2642,14 +2736,23 @@ class QuestionGenerator:
         for atom in atoms:
             print(f"Generating questions for atom: {atom}")
             # Generate 2 easy and 2 medium questions per atom
-            questions = self.generate_questions(
+            questions = []
+            questions.extend(self.generate_questions(
                 subject=subject,
                 concept=concept,
                 atom=atom,
-                need_easy=2,
-                need_medium=2,
-                knowledge_level='intermediate'  # Default level
-            )
+                target_difficulty='easy',
+                count=2,
+                knowledge_level='intermediate'
+            ))
+            questions.extend(self.generate_questions(
+                subject=subject,
+                concept=concept,
+                atom=atom,
+                target_difficulty='medium',
+                count=2,
+                knowledge_level='intermediate'
+            ))
             
             result["atoms"][atom] = {
                 "name": atom,
@@ -2662,6 +2765,37 @@ class QuestionGenerator:
     
     
     
+    def generate_initial_quiz(self, subject: str, concept: str,
+                              knowledge_level: str = 'intermediate',
+                              count: int = 5) -> List[Dict]:
+        """
+        Simple diagnostic quiz based only on subject/concept/knowledge level.
+        Uses the same question generator with atom=concept for simplicity.
+        """
+        easy_count = max(1, count // 2)
+        medium_count = max(0, count - easy_count)
+
+        questions = []
+        questions.extend(self.generate_questions(
+            subject=subject,
+            concept=concept,
+            atom=concept,
+            target_difficulty='easy',
+            count=easy_count,
+            knowledge_level=knowledge_level
+        ))
+        if medium_count > 0:
+            questions.extend(self.generate_questions(
+                subject=subject,
+                concept=concept,
+                atom=concept,
+                target_difficulty='medium',
+                count=medium_count,
+                knowledge_level=knowledge_level
+            ))
+
+        return questions
+
     def generate_questions_from_teaching(self, subject, concept, atom, teaching_content, 
                                         need_easy=1, need_medium=2, need_hard=0, 
                                         knowledge_level='intermediate'):
@@ -2697,60 +2831,109 @@ class QuestionGenerator:
         examples_text = "\n".join([f"- {ex}" for ex in examples if ex])
         
         prompt = f"""
-        You are generating assessment questions based on specific teaching content that was just shown to a student.
-        
-        Subject: {subject}
-        Concept: {concept}
-        Atomic Concept: {atom}
-        Student Level: {knowledge_level.upper()}
-        
-        TEACHING CONTENT SHOWN TO STUDENT:
-        
-        Explanation:
-        {explanation}
-        
-        Analogy:
-        {analogy}
-        
-        Examples/Applications:
-        {examples_text}
-        
-        TASK:
-        Generate EXACTLY {total_needed} multiple-choice questions that test understanding of the teaching content above.
-        
-        Question Distribution:
-        - Easy: {need_easy} question(s) - Direct recall from the explanation
-        - Medium: {need_medium} question(s) - Apply the concept to new situations
-        - Hard: {need_hard} question(s) - Analyze relationships or troubleshoot
-        
-        RULES:
-        1. Each question must be answerable based SOLELY on the teaching content provided
-        2. Test genuine understanding, not trickery
-        3. Questions should build upon what was taught
-        4. Include the analogy or examples where appropriate
-        5. Each question must have exactly 4 options
-        6. One clearly correct answer, three plausible distractors
-        
-        OUTPUT STRICT JSON ONLY:
-        
-        {{
-            "questions": [
-                {{
-                    "difficulty": "easy",
-                    "cognitive_operation": "recall",
-                    "estimated_time": 30,
-                    "question": "Based on the explanation, what is the main purpose of {atom}?",
-                    "options": [
-                        "Option A based on teaching",
-                        "Option B based on teaching", 
-                        "Option C based on teaching",
-                        "Option D based on teaching"
-                    ],
-                    "correct_index": 0
-                }}
-            ]
-        }}
-        """
+            You are an experienced teacher generating conceptual assessment questions to verify whether a student truly understood the concept that was just taught.
+
+            Subject: {subject}
+            Concept: {concept}
+            Atomic Concept: {atom}
+            Student Level: {knowledge_level.upper()}
+
+            TEACHING CONTENT SHOWN TO STUDENT:
+
+            Explanation:
+            {explanation}
+
+            Analogy:
+            {analogy}
+
+            Examples/Applications:
+            {examples_text}
+
+
+            TASK:
+
+            Generate EXACTLY {total_needed} multiple-choice questions that test CONCEPTUAL UNDERSTANDING of "{atom}" based on the teaching content.
+
+            IMPORTANT:
+
+            The goal is NOT to test memory of the explanation, analogy, or examples.
+
+            The goal is to test whether the student understood the underlying CONCEPT.
+
+
+            CRITICAL RULES:
+
+            1. DO NOT ask questions about the analogy itself
+            2. DO NOT ask questions about the specific examples themselves
+            3. DO NOT ask questions that require recalling sentences from the explanation
+
+            4. Instead, create NEW conceptual situations where the student must APPLY the concept
+
+            5. Questions must test:
+
+            - understanding of how the concept works
+            - when the concept applies
+            - when the concept does NOT apply
+            - consequences of using or misusing the concept
+
+            6. Each question must be meaningful, realistic, and require thinking
+
+            7. Avoid definition questions starting with:
+
+            - What is
+            - Define
+            - Identify
+
+            8. Each question must be 18â€“35 words
+
+            9. Each question must have exactly 4 options
+
+            10. All options must be:
+
+            - plausible
+            - same conceptual category
+            - based on realistic student mistakes or misconceptions
+
+            11. Avoid obvious wrong answers
+
+
+            DIFFICULTY DISTRIBUTION:
+
+            Easy ({need_easy}):
+
+            - Simple conceptual application
+
+            Medium ({need_medium}):
+
+            - Requires reasoning or interpretation
+
+            Hard ({need_hard}):
+
+            - Requires deeper reasoning, prediction, or identifying incorrect application
+
+
+
+            OUTPUT STRICT JSON ONLY:
+
+            {{
+                "questions": [
+                    {{
+                        "difficulty": "easy",
+                        "cognitive_operation": "apply",
+                        "estimated_time": 40,
+                        "question": "Question text here?",
+                        "options": [
+                            "Option A",
+                            "Option B",
+                            "Option C",
+                            "Option D"
+                        ],
+                        "correct_index": 0
+                    }}
+                ]
+            }}
+            """
+
         
         try:
             response = self.groq_client.chat.completions.create(
@@ -3869,7 +4052,7 @@ FILE: frontend/src/components/Learning/AtomComplete.jsx
 import React from 'react';
 import { useLearning } from '../../context/LearningContext';
 
-const AtomComplete = ({ atom, onContinue }) => {
+const AtomComplete = ({ atom, onContinue, recommendation = '' }) => {
     const { atomMastery, currentTheta, answers } = useLearning();
 
     // Calculate stats
@@ -3930,6 +4113,12 @@ const AtomComplete = ({ atom, onContinue }) => {
                     {currentTheta.toFixed(2)}
                 </div>
             </div>
+
+            {recommendation && (
+                <div className="mb-6 p-4 bg-blue-50 border border-blue-200 rounded-lg text-blue-800">
+                    {recommendation}
+                </div>
+            )}
 
             {/* Continue Button */}
             <button
@@ -4046,10 +4235,9 @@ export default AtomList;
 ================================================
 FILE: frontend/src/components/Learning/AtomReview.jsx
 ================================================
-import React, { useState } from 'react';
+import React from 'react';
 
 const AtomReview = ({ atom, metrics, onComplete, onSkip }) => {
-    const [reviewMode, setReviewMode] = useState('summary');
 
     return (
         <div className="bg-white rounded-lg shadow-lg p-6">
@@ -4118,13 +4306,13 @@ const AtomReview = ({ atom, metrics, onComplete, onSkip }) => {
             {/* Review Options */}
             <div className="space-y-3">
                 <button
-                    onClick={() => setReviewMode('teaching')}
+                    onClick={() => onComplete('reteach')}
                     className="w-full bg-blue-600 text-white py-3 rounded-lg hover:bg-blue-700"
                 >
                     Review Teaching Material
                 </button>
                 <button
-                    onClick={() => setReviewMode('practice')}
+                    onClick={() => onComplete('practice')}
                     className="w-full bg-green-600 text-white py-3 rounded-lg hover:bg-green-700"
                 >
                     Practice with New Questions
@@ -4322,7 +4510,7 @@ export default LearningRoute;
 ================================================
 FILE: frontend/src/components/Learning/QuestionsFromTeaching.jsx
 ================================================
-Error reading file with 'cp1252': 'charmap' codec can't decode byte 0x9d in position 2580: character maps to <undefined>
+Error reading file with 'cp1252': 'charmap' codec can't decode byte 0x9d in position 2678: character maps to <undefined>
 
 
 ================================================
@@ -4542,7 +4730,7 @@ export default StartAnyConceptSessionRoute;
 ================================================
 FILE: frontend/src/components/Learning/TeachingFirstFlow.jsx
 ================================================
-Error reading file with 'cp1252': 'charmap' codec can't decode byte 0x8f in position 8956: character maps to <undefined>
+Error reading file with 'cp1252': 'charmap' codec can't decode byte 0x8d in position 19846: character maps to <undefined>
 
 
 ================================================
@@ -4747,11 +4935,24 @@ export const LearningProvider = ({ children }) => {
                 session_id: session_id,
                 atom_id: atom_id
             });
-            
-            setTeachingContent(response.data);
+
+            // Normalize payload: backend may nest under teaching_content
+            const raw = response.data?.teaching_content || response.data || {};
+            const examples = Array.isArray(raw.examples) ? raw.examples : [];
+
+            const normalized = {
+                explanation: raw.explanation || '',
+                example: raw.example || examples[0] || '',
+                analogy: raw.analogy || '',
+                misconception: raw.misconception || examples[2] || '',
+                practical_application: raw.practical_application || examples[1] || '',
+                examples: examples
+            };
+
+            setTeachingContent(normalized);
             setCurrentAtom({
                 id: atom_id,
-                ...response.data
+                name: response.data?.atom_name || response.data?.name || raw.atom_name || raw.name,
             });
             
             return { success: true, data: response.data };
@@ -4766,12 +4967,13 @@ export const LearningProvider = ({ children }) => {
     }, []);
 
     // Generate questions based on teaching content
-    const generateQuestionsFromTeaching = useCallback(async ({ session_id, atom_id }) => {
+    const generateQuestionsFromTeaching = useCallback(async ({ session_id, atom_id, force_new = false }) => {
         setLoading(true);
         try {
             const response = await axios.post('/auth/api/generate-questions-from-teaching/', {
                 session_id: session_id,
-                atom_id: atom_id
+                atom_id: atom_id,
+                force_new: force_new
             });
             
             setCurrentQuestions(response.data.questions || []);
@@ -4791,13 +4993,99 @@ export const LearningProvider = ({ children }) => {
         }
     }, []);
 
+    // Generate initial diagnostic quiz
+    const generateInitialQuiz = useCallback(async ({ session_id }) => {
+        setLoading(true);
+        try {
+            const response = await axios.post('/auth/api/initial-quiz/', {
+                session_id: session_id
+            });
+            return { success: true, data: response.data };
+        } catch (error) {
+            return {
+                success: false,
+                error: error.response?.data?.error || 'Failed to generate initial quiz'
+            };
+        } finally {
+            setLoading(false);
+        }
+    }, []);
+
+    const submitInitialQuizAnswer = useCallback(async ({ session_id, question_index, selected, time_taken }) => {
+        try {
+            const response = await axios.post('/auth/api/submit-initial-quiz-answer/', {
+                session_id,
+                question_index,
+                selected,
+                time_taken
+            });
+            return { success: true, data: response.data };
+        } catch (error) {
+            return {
+                success: false,
+                error: error.response?.data?.error || 'Failed to submit initial quiz answer'
+            };
+        }
+    }, []);
+
+    const completeInitialQuiz = useCallback(async ({ session_id }) => {
+        try {
+            const response = await axios.post('/auth/api/complete-initial-quiz/', {
+                session_id
+            });
+            return { success: true, data: response.data };
+        } catch (error) {
+            return {
+                success: false,
+                error: error.response?.data?.error || 'Failed to complete initial quiz'
+            };
+        }
+    }, []);
+
+    const generateFinalChallenge = useCallback(async ({ session_id, atom_id }) => {
+        setLoading(true);
+        try {
+            const response = await axios.post('/auth/api/final-challenge/', {
+                session_id,
+                atom_id
+            });
+            setCurrentQuestions(response.data.questions || []);
+            setCurrentQuestionIndex(0);
+            questionStartTime.current = Date.now();
+            return { success: true, data: response.data };
+        } catch (error) {
+            return {
+                success: false,
+                error: error.response?.data?.error || 'Failed to generate final challenge'
+            };
+        } finally {
+            setLoading(false);
+        }
+    }, []);
+
+    const completeFinalChallenge = useCallback(async ({ session_id, atom_id }) => {
+        try {
+            const response = await axios.post('/auth/api/complete-final-challenge/', {
+                session_id,
+                atom_id
+            });
+            return { success: true, data: response.data };
+        } catch (error) {
+            return {
+                success: false,
+                error: error.response?.data?.error || 'Failed to complete final challenge'
+            };
+        }
+    }, []);
+
     // Submit answer for an atom question with REAL-TIME updates
     const submitAtomAnswer = useCallback(async ({ 
         session_id, 
         atom_id, 
         question_index, 
         selected,
-        forceTimeTaken = null
+        forceTimeTaken = null,
+        question_set = 'teaching'
     }) => {
         // Calculate time taken if not provided
         let time_taken = forceTimeTaken;
@@ -4813,7 +5101,8 @@ export const LearningProvider = ({ children }) => {
                 atom_id: atom_id,
                 question_index: question_index,
                 selected: selected,
-                time_taken: time_taken
+                time_taken: time_taken,
+                question_set: question_set
             });
             
             const data = response.data;
@@ -4966,6 +5255,11 @@ export const LearningProvider = ({ children }) => {
         startTeachingSession,
         getTeachingContent,
         generateQuestionsFromTeaching,
+        generateInitialQuiz,
+        submitInitialQuizAnswer,
+        completeInitialQuiz,
+        generateFinalChallenge,
+        completeFinalChallenge,
         submitAtomAnswer,
         completeAtom,
         loadLearningProgress,
@@ -4993,6 +5287,11 @@ export const LearningProvider = ({ children }) => {
         startTeachingSession,
         getTeachingContent,
         generateQuestionsFromTeaching,
+        generateInitialQuiz,
+        submitInitialQuizAnswer,
+        completeInitialQuiz,
+        generateFinalChallenge,
+        completeFinalChallenge,
         submitAtomAnswer,
         completeAtom,
         loadLearningProgress,

@@ -1,7 +1,7 @@
 from django.urls import path
 from .views import (
     # Auth views
-    RegisterView, LoginView, DashboardView,
+    GetConceptResourcesView, RegisterView, LoginView, DashboardView,
     
     # Concept management
     ConceptListView, GenerateConceptView,
@@ -38,4 +38,6 @@ urlpatterns = [
     
     # Progress
     path('api/progress/', GetLearningProgressView.as_view(), name='learning_progress'),
+    
+    path('api/concept-resources/', GetConceptResourcesView.as_view(), name='concept_resources'),
 ]

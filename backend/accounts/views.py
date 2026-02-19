@@ -1643,3 +1643,37 @@ class GetLearningProgressView(APIView):
             return 'accelerated'
         else:
             return 'balanced'
+        
+        
+        
+# Add to backend/accounts/views.py
+
+from learning_engine.external_resources import ExternalResourceFetcher
+
+class GetConceptResourcesView(APIView):
+    """Get external resources (videos, images) for a concept"""
+    permission_classes = [IsAuthenticated]
+    
+    def post(self, request):
+        try:
+            subject = request.data.get('subject')
+            concept = request.data.get('concept')
+            atom_name = request.data.get('atom_name')
+            
+            if not subject or not concept:
+                return Response(
+                    {'error': 'Subject and concept are required'},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+            
+            fetcher = ExternalResourceFetcher()
+            resources = fetcher.get_resources_for_concept(subject, concept, atom_name)
+            
+            return Response(resources, status=status.HTTP_200_OK)
+            
+        except Exception as e:
+            logger.error(f"Error fetching resources: {str(e)}")
+            return Response(
+                {'error': 'Failed to fetch resources'},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )

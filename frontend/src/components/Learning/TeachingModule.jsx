@@ -2,16 +2,23 @@
 
 import React, { useState, useEffect } from 'react';
 import { useLearning } from '../../context/LearningContext';
+import ExternalResources from './ExternalResources.jsx'
 
 const TeachingModule = ({ 
     atom, 
+    subject,     
+    concept,
     teachingContent, 
     onContinue, 
     onBack,
     showBackButton = true 
 }) => {
+    const { currentSession } = useLearning();
     const [showDetails, setShowDetails] = useState({});
     const { pacingDecision, atomMastery, currentTheta } = useLearning();
+
+    const displaySubject = subject || currentSession?.subject || '';
+    const displayConcept = concept || currentSession?.concept_name || '';
 
     // If no teaching content, show loading or fallback
     if (!teachingContent) {
@@ -91,6 +98,25 @@ const TeachingModule = ({
                     <p className="text-gray-800">{explanation}</p>
                 </div>
             </div>
+
+            <div className="mb-6">
+                <h3 className="text-lg font-semibold mb-2 flex items-center">
+                    <span className="bg-blue-100 text-blue-800 p-1 rounded mr-2">📖</span>
+                    External
+                </h3>
+                <div className="bg-blue-50 p-4 rounded-lg">
+                    {/* External Resources - only show if we have subject and concept */}
+                    {displaySubject && displayConcept && (
+                        <ExternalResources 
+                            subject={displaySubject}
+                            concept={displayConcept}
+                            atomName={atom?.name}
+                        />
+                    )}
+                </div>
+            </div>
+
+            
 
             {/* Collapsible Sections */}
             <div className="space-y-3">
@@ -188,6 +214,8 @@ const TeachingModule = ({
                     ></div>
                 </div>
             </div>
+
+            
 
             {/* Continue Button */}
             <div className="mt-6 flex justify-between">

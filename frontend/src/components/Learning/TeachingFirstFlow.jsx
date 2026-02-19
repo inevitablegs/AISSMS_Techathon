@@ -54,6 +54,17 @@ const TeachingFirstFlow = ({ conceptId }) => {
         resetForNewAtom
     } = useLearning();
 
+    const [currentSubject, setCurrentSubject] = useState('');
+const [currentConceptName, setCurrentConceptName] = useState('');
+
+// When starting the session, store the subject and concept
+useEffect(() => {
+    if (currentSession) {
+        setCurrentSubject(currentSession.subject || '');
+        setCurrentConceptName(currentSession.concept_name || '');
+    }
+}, [currentSession]);
+
     // Refs for tracking
     const sessionIdRef = useRef(null);
     const conceptIdRef = useRef(conceptId);
@@ -599,6 +610,8 @@ const TeachingFirstFlow = ({ conceptId }) => {
                     {flowState === 'teaching' && teachingContent && currentAtomData && (
                         <TeachingModule
                             atom={currentAtomData}
+                            subject={currentSubject}  // Pass subject
+                            concept={currentConceptName}
                             teachingContent={teachingContent}
                             onContinue={handleContinueToQuestions}
                             onBack={handleBackToDashboard}
