@@ -16,6 +16,13 @@ from .views import (
     # Enhanced pacing engine views
     GetVelocityGraphView, GetFatigueStatusView, RecordBreakView,
     RetentionCheckView, RecordHintUsageView,
+
+    # Leaderboard views
+    LeaderboardView, MyXPView,
+
+    # Concept final challenge views
+    GenerateConceptFinalChallengeView, SubmitConceptFinalAnswerView,
+    CompleteConceptFinalChallengeView,
 )
 
 urlpatterns = [
@@ -51,4 +58,13 @@ urlpatterns = [
     path('api/record-break/', RecordBreakView.as_view(), name='record_break'),
     path('api/retention-check/', RetentionCheckView.as_view(), name='retention_check'),
     path('api/record-hint/', RecordHintUsageView.as_view(), name='record_hint'),
+
+    # Leaderboard endpoints
+    path('api/leaderboard/', LeaderboardView.as_view(), name='leaderboard'),
+    path('api/my-xp/', MyXPView.as_view(), name='my_xp'),
+
+    # Concept final challenge endpoints
+    path('api/concept-final-challenge/', GenerateConceptFinalChallengeView.as_view(), name='generate_concept_final_challenge'),
+    path('api/submit-concept-final-answer/', SubmitConceptFinalAnswerView.as_view(), name='submit_concept_final_answer'),
+    path('api/complete-concept-final-challenge/', CompleteConceptFinalChallengeView.as_view(), name='complete_concept_final_challenge'),
 ]

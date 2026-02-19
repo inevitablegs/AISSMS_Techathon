@@ -11,7 +11,7 @@ from rest_framework_simplejwt.tokens import RefreshToken
 
 from .models import (
     Concept, TeachingAtom, Question, StudentProgress, 
-    LearningSession, LearningProfile, KnowledgeLevel
+    LearningSession, LearningProfile, KnowledgeLevel, UserXP
 )
 from .serializers import (
     RegisterSerializer, UserSerializer, ConceptSerializer,
@@ -892,6 +892,12 @@ class SubmitAtomAnswerView(APIView):
             session.questions_answered += 1
             if result['correct']:
                 session.correct_answers += 1
+                # Award XP for correct answer based on difficulty
+                difficulty = question.get('difficulty', 'medium')
+                xp_map = {'easy': 1, 'medium': 2, 'hard': 3}
+                xp_amount = xp_map.get(difficulty, 2)
+                xp_profile, _ = UserXP.objects.get_or_create(user=request.user)
+                xp_profile.award_xp(xp_amount, category='questions')
             
             session.save()
             
@@ -964,8 +970,9 @@ class SubmitAtomAnswerView(APIView):
                     }
                     response_data['next_action'] = 'next_atom'
                 else:
-                    # All atoms complete
+                    # All atoms complete — signal concept final challenge
                     response_data['concept_complete'] = True
+                    response_data['concept_final_challenge_ready'] = True
             
             return Response(response_data)
             
@@ -1408,16 +1415,21 @@ class CompleteAtomView(APIView):
                 'current_mastery': next_progress.mastery_score
             }
         
+        # Award XP for atom completion
+        xp_profile, _ = UserXP.objects.get_or_create(user=request.user)
+        atom_xp = 10 if current_mastery >= 0.8 else 5
+        xp_profile.award_xp(atom_xp, category='atoms')
+        response_data['xp_earned_atom'] = atom_xp
+
         # Add completion message
         if all_completed:
-            response_data['completion_message'] = '🎉 Congratulations! You have mastered all atoms in this concept!'
+            response_data['completion_message'] = 'All atoms done! Complete the Concept Final Challenge to finish.'
+            response_data['concept_final_challenge_ready'] = True
             
-            # Calculate overall concept mastery
+            # Calculate overall concept mastery (for display, XP awarded after concept final challenge)
             concept_atoms = TeachingAtom.objects.filter(concept=atom.concept)
             concept_mastery = sum(StudentProgress.objects.get(user=request.user, atom=a).mastery_score for a in concept_atoms) / len(concept_atoms)
             response_data['concept_mastery'] = concept_mastery
-            session.end_time = timezone.now()
-            session.save(update_fields=['session_data', 'end_time'])
         
         return Response(response_data)
 
@@ -1541,6 +1553,12 @@ class CompleteFinalChallengeView(APIView):
             progress.retention_verified = False
         progress.save()
 
+        # Award XP for atom completion via final challenge
+        if mastered:
+            xp_profile, _ = UserXP.objects.get_or_create(user=request.user)
+            atom_xp = 10 if float(progress.mastery_score) >= 0.8 else 5
+            xp_profile.award_xp(atom_xp, category='atoms')
+
         # Determine next atom
         next_atom = TeachingAtom.objects.filter(
             concept=atom.concept,
@@ -1592,25 +1610,36 @@ class CompleteFinalChallengeView(APIView):
                 'id': next_atom.id,
                 'name': next_atom.name
             } if mastered and next_atom and not all_completed else None,
-            'all_completed': all_completed
+            'all_completed': all_completed,
+            'concept_final_challenge_ready': all_completed,
         })
     
 class GetLearningProgressView(APIView):
-    """Get overall learning progress with pacing history"""
+    """Get overall learning progress with pacing history and stats"""
     permission_classes = [IsAuthenticated]
     
     def get(self, request):
-        profile = request.user.learning_profile
+        try:
+            profile = request.user.learning_profile
+        except:
+            profile = LearningProfile.objects.create(user=request.user)
         
         # Get all progress records
         progress_records = StudentProgress.objects.filter(
             user=request.user
         ).select_related('atom__concept')
         
-        # Get recent sessions for pacing analysis
-        recent_sessions = LearningSession.objects.filter(
-            user=request.user
-        ).order_by('-start_time')[:5]
+        # Get all sessions
+        all_sessions = LearningSession.objects.filter(user=request.user)
+        
+        # Session stats
+        total_sessions = all_sessions.count()
+        total_questions_answered = sum(s.questions_answered for s in all_sessions)
+        total_correct_answers = sum(s.correct_answers for s in all_sessions)
+        total_hints_used = sum(s.hints_used for s in all_sessions)
+
+        # Recent sessions for pacing analysis
+        recent_sessions = all_sessions.order_by('-start_time')[:5]
         
         pacing_trend = []
         for session in recent_sessions:
@@ -1622,13 +1651,32 @@ class GetLearningProgressView(APIView):
                     'date': session.start_time,
                     'final_pacing': pacing_history[-1].get('pacing') if pacing_history else None
                 })
+
+        # Recent sessions list (for history display)
+        recent_sessions_list = []
+        for s in all_sessions.order_by('-start_time')[:10]:
+            duration_mins = None
+            if s.end_time and s.start_time:
+                duration_mins = round((s.end_time - s.start_time).total_seconds() / 60, 1)
+            recent_sessions_list.append({
+                'concept_name': s.concept.name,
+                'subject': s.concept.subject,
+                'start_time': s.start_time.isoformat(),
+                'end_time': s.end_time.isoformat() if s.end_time else None,
+                'duration_mins': duration_mins,
+                'questions_answered': s.questions_answered,
+                'correct_answers': s.correct_answers,
+                'accuracy': round(s.correct_answers / s.questions_answered, 2) if s.questions_answered > 0 else 0,
+            })
         
         # Group by concept
         concepts_data = {}
         for p in progress_records:
             concept_name = p.atom.concept.name
+            concept_id = p.atom.concept.id
             if concept_name not in concepts_data:
                 concepts_data[concept_name] = {
+                    'id': concept_id,
                     'name': concept_name,
                     'subject': p.atom.concept.subject,
                     'atoms': [],
@@ -1642,24 +1690,69 @@ class GetLearningProgressView(APIView):
                 'phase': p.phase,
                 'streak': p.streak,
                 'hint_usage': p.hint_usage,
-                'error_count': len(p.error_history)
+                'error_count': len(p.error_history),
+                'last_practiced': p.last_practiced.isoformat() if p.last_practiced else None,
             })
             concepts_data[concept_name]['total_count'] += 1
             if p.phase == 'complete':
                 concepts_data[concept_name]['mastered_count'] += 1
+
+        # Compute per-concept mastery %
+        for cdata in concepts_data.values():
+            if cdata['total_count'] > 0:
+                cdata['mastery_pct'] = round(
+                    sum(a['mastery'] for a in cdata['atoms']) / cdata['total_count'] * 100
+                )
+            else:
+                cdata['mastery_pct'] = 0
         
         # Calculate overall mastery
         if progress_records:
             overall_mastery = sum(p.mastery_score for p in progress_records) / len(progress_records)
         else:
             overall_mastery = 0
+
+        # Completed atoms / concepts
+        total_atoms = progress_records.count()
+        mastered_atoms = progress_records.filter(phase='complete').count()
+
+        concept_ids_started = set(p.atom.concept_id for p in progress_records)
+        concepts_completed = 0
+        for cid in concept_ids_started:
+            c_atoms = TeachingAtom.objects.filter(concept_id=cid).count()
+            c_mastered = progress_records.filter(atom__concept_id=cid, phase='complete').count()
+            if c_atoms > 0 and c_mastered >= c_atoms:
+                concepts_completed += 1
+
+        # XP stats
+        try:
+            xp_profile = request.user.xp_profile
+            xp_data = {
+                'total_xp': xp_profile.total_xp,
+                'questions_xp': xp_profile.questions_xp,
+                'atoms_xp': xp_profile.atoms_xp,
+                'concepts_xp': xp_profile.concepts_xp,
+            }
+        except:
+            xp_data = {'total_xp': 0, 'questions_xp': 0, 'atoms_xp': 0, 'concepts_xp': 0}
         
         return Response({
             'overall_mastery': overall_mastery,
             'overall_theta': profile.overall_theta,
             'learning_streak': profile.learning_streak,
+            'total_time_spent': profile.total_time_spent,
             'concepts': list(concepts_data.values()),
-            'total_atoms': progress_records.count(),
+            'total_atoms': total_atoms,
+            'mastered_atoms': mastered_atoms,
+            'concepts_started': len(concept_ids_started),
+            'concepts_completed': concepts_completed,
+            'total_sessions': total_sessions,
+            'total_questions_answered': total_questions_answered,
+            'total_correct_answers': total_correct_answers,
+            'total_hints_used': total_hints_used,
+            'overall_accuracy': round(total_correct_answers / total_questions_answered, 2) if total_questions_answered > 0 else 0,
+            'xp': xp_data,
+            'recent_sessions': recent_sessions_list,
             'pacing_trend': pacing_trend,
             'recommended_pacing': self._get_recommended_pacing(pacing_trend)
         })
@@ -1948,3 +2041,281 @@ class GetConceptResourcesView(APIView):
                 {'error': 'Failed to fetch resources'},
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR
             )
+
+
+# ==================== LEADERBOARD ====================
+
+class LeaderboardView(APIView):
+    """Get XP leaderboard"""
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        # Ensure current user has an XP profile
+        UserXP.objects.get_or_create(user=request.user)
+
+        leaderboard = UserXP.objects.select_related('user').order_by('-total_xp')[:50]
+        data = []
+        for rank, entry in enumerate(leaderboard, 1):
+            data.append({
+                'rank': rank,
+                'username': entry.user.username,
+                'first_name': entry.user.first_name,
+                'last_name': entry.user.last_name,
+                'total_xp': entry.total_xp,
+                'questions_xp': entry.questions_xp,
+                'atoms_xp': entry.atoms_xp,
+                'concepts_xp': entry.concepts_xp,
+                'is_current_user': entry.user.id == request.user.id,
+            })
+
+        # If current user not in top 50, add their entry
+        current_in_list = any(d['is_current_user'] for d in data)
+        if not current_in_list:
+            user_xp = UserXP.objects.get(user=request.user)
+            user_rank = UserXP.objects.filter(total_xp__gt=user_xp.total_xp).count() + 1
+            data.append({
+                'rank': user_rank,
+                'username': request.user.username,
+                'first_name': request.user.first_name,
+                'last_name': request.user.last_name,
+                'total_xp': user_xp.total_xp,
+                'questions_xp': user_xp.questions_xp,
+                'atoms_xp': user_xp.atoms_xp,
+                'concepts_xp': user_xp.concepts_xp,
+                'is_current_user': True,
+            })
+
+        return Response(data)
+
+
+class MyXPView(APIView):
+    """Get current user's XP details"""
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        xp_profile, _ = UserXP.objects.get_or_create(user=request.user)
+        rank = UserXP.objects.filter(total_xp__gt=xp_profile.total_xp).count() + 1
+        total_users = UserXP.objects.count()
+        return Response({
+            'total_xp': xp_profile.total_xp,
+            'questions_xp': xp_profile.questions_xp,
+            'atoms_xp': xp_profile.atoms_xp,
+            'concepts_xp': xp_profile.concepts_xp,
+            'rank': rank,
+            'total_users': total_users,
+        })
+
+
+# ==================== CONCEPT FINAL CHALLENGE ====================
+
+class GenerateConceptFinalChallengeView(APIView):
+    """Generate a final challenge spanning ALL atoms after all atoms are completed."""
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        session_id = request.data.get('session_id')
+        concept_id = request.data.get('concept_id')
+
+        try:
+            session = LearningSession.objects.get(id=session_id, user=request.user)
+            concept = Concept.objects.get(id=concept_id)
+        except (LearningSession.DoesNotExist, Concept.DoesNotExist):
+            return Response({'error': 'Session or concept not found'}, status=404)
+
+        atoms = TeachingAtom.objects.filter(concept=concept).order_by('order')
+        if not atoms.exists():
+            return Response({'error': 'No atoms found for concept'}, status=400)
+
+        generator = QuestionGenerator()
+        all_questions = []
+
+        # Generate 2 questions per atom (1 medium + 1 hard) for a comprehensive challenge
+        for atom in atoms:
+            teaching_content = {
+                'explanation': atom.explanation or '',
+                'analogy': atom.analogy or '',
+                'examples': atom.examples or []
+            }
+            qs = generator.generate_questions_from_teaching(
+                subject=concept.subject,
+                concept=concept.name,
+                atom=atom.name,
+                teaching_content=teaching_content,
+                need_easy=0,
+                need_medium=1,
+                need_hard=1,
+                knowledge_level=session.knowledge_level
+            )
+            for q in qs:
+                q['source_atom_id'] = atom.id
+                q['source_atom_name'] = atom.name
+            all_questions.extend(qs)
+
+        # Store in session
+        session_data = session.session_data
+        session_data['concept_final_questions'] = all_questions
+        session_data['concept_final_answers'] = []
+        session_data['current_phase'] = 'concept_final_challenge'
+        session.session_data = session_data
+        session.save()
+
+        # Build payload without correct_index
+        questions_payload = []
+        for q in all_questions:
+            questions_payload.append({
+                'difficulty': q.get('difficulty', 'medium'),
+                'cognitive_operation': q.get('cognitive_operation', 'apply'),
+                'estimated_time': q.get('estimated_time', 60),
+                'question': q.get('question', ''),
+                'options': q.get('options', []),
+                'source_atom_name': q.get('source_atom_name', ''),
+            })
+
+        return Response({
+            'questions': questions_payload,
+            'total_questions': len(questions_payload),
+            'concept_name': concept.name,
+        })
+
+
+class SubmitConceptFinalAnswerView(APIView):
+    """Submit an individual answer during the concept final challenge."""
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        session_id = request.data.get('session_id')
+        question_index = request.data.get('question_index')
+        selected = request.data.get('selected')
+        time_taken = request.data.get('time_taken', 30)
+
+        try:
+            session = LearningSession.objects.get(id=session_id, user=request.user)
+        except LearningSession.DoesNotExist:
+            return Response({'error': 'Session not found'}, status=404)
+
+        questions = session.session_data.get('concept_final_questions', [])
+        try:
+            question_index = int(question_index)
+        except (TypeError, ValueError):
+            return Response({'error': 'Invalid question index'}, status=400)
+
+        if question_index < 0 or question_index >= len(questions):
+            return Response({'error': 'Invalid question index'}, status=400)
+
+        question = questions[question_index]
+        correct_index = question.get('correct_index')
+        is_correct = (selected == correct_index)
+
+        # Award XP for correct answer
+        if is_correct:
+            difficulty = question.get('difficulty', 'medium')
+            xp_map = {'easy': 1, 'medium': 2, 'hard': 3}
+            xp_amount = xp_map.get(difficulty, 2)
+            xp_profile, _ = UserXP.objects.get_or_create(user=request.user)
+            xp_profile.award_xp(xp_amount, category='questions')
+
+        # Store answer
+        if 'concept_final_answers' not in session.session_data:
+            session.session_data['concept_final_answers'] = []
+        session.session_data['concept_final_answers'].append({
+            'question_index': question_index,
+            'selected': selected,
+            'correct': is_correct,
+            'correct_index': correct_index,
+            'time_taken': time_taken,
+            'difficulty': question.get('difficulty', 'medium'),
+        })
+        session.save()
+
+        explanation = ''
+        if not is_correct:
+            options = question.get('options', [])
+            correct_option = options[correct_index] if isinstance(correct_index, int) and 0 <= correct_index < len(options) else None
+            explanation = f"Correct answer: {correct_option}" if correct_option else "Review the concept and try again."
+
+        return Response({
+            'correct': is_correct,
+            'correct_index': correct_index if not is_correct else None,
+            'explanation': explanation,
+        })
+
+
+class CompleteConceptFinalChallengeView(APIView):
+    """Finalize the concept final challenge, calculate mastery, and award XP."""
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        session_id = request.data.get('session_id')
+        concept_id = request.data.get('concept_id')
+
+        try:
+            session = LearningSession.objects.get(id=session_id, user=request.user)
+            concept = Concept.objects.get(id=concept_id)
+        except (LearningSession.DoesNotExist, Concept.DoesNotExist):
+            return Response({'error': 'Session or concept not found'}, status=404)
+
+        final_answers = session.session_data.get('concept_final_answers', [])
+        if not final_answers:
+            return Response({'error': 'No concept final challenge answers'}, status=400)
+
+        correct_count = sum(1 for a in final_answers if a.get('correct'))
+        total = len(final_answers)
+        accuracy = correct_count / total
+
+        # Overall concept mastery from atoms
+        concept_atoms = TeachingAtom.objects.filter(concept=concept)
+        atom_masteries = []
+        for atom in concept_atoms:
+            try:
+                prog = StudentProgress.objects.get(user=request.user, atom=atom)
+                atom_masteries.append(float(prog.mastery_score))
+            except StudentProgress.DoesNotExist:
+                atom_masteries.append(0.0)
+        concept_mastery = sum(atom_masteries) / max(len(atom_masteries), 1)
+
+        # Blend atom mastery with final challenge accuracy
+        final_mastery = (concept_mastery * 0.6) + (accuracy * 0.4)
+
+        # Determine if passed
+        passed = accuracy >= 0.6
+
+        # Award concept XP
+        xp_profile, _ = UserXP.objects.get_or_create(user=request.user)
+        if passed:
+            concept_xp = 50 if final_mastery >= 0.8 else 25
+            xp_profile.award_xp(concept_xp, category='concepts')
+        else:
+            concept_xp = 0
+
+        # Update session
+        session.end_time = timezone.now()
+        session_data = session.session_data
+        session_data['concept_final_result'] = {
+            'accuracy': accuracy,
+            'correct': correct_count,
+            'total': total,
+            'concept_mastery': concept_mastery,
+            'final_mastery': final_mastery,
+            'passed': passed,
+            'xp_earned': concept_xp,
+        }
+        session.session_data = session_data
+        session.save()
+
+        if passed:
+            recommendation = f"🎉 Congratulations! You passed with {accuracy:.0%} accuracy and earned {concept_xp} XP!"
+        elif accuracy >= 0.4:
+            recommendation = f"Almost there! You scored {accuracy:.0%}. Review weaker atoms and try again."
+        else:
+            recommendation = f"You scored {accuracy:.0%}. Take some time to review the atoms before retrying."
+
+        return Response({
+            'passed': passed,
+            'accuracy': accuracy,
+            'correct': correct_count,
+            'total': total,
+            'concept_mastery': concept_mastery,
+            'final_mastery': final_mastery,
+            'concept_xp': concept_xp,
+            'recommendation': recommendation,
+        })

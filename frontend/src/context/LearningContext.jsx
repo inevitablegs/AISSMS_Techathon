@@ -241,6 +241,75 @@ export const LearningProvider = ({ children }) => {
         }
     }, []);
 
+    // ── Concept Final Challenge ──
+
+    const generateConceptFinalChallenge = useCallback(async ({ session_id, concept_id }) => {
+        setLoading(true);
+        try {
+            const response = await axios.post('/auth/api/concept-final-challenge/', {
+                session_id,
+                concept_id
+            });
+            setCurrentQuestions(response.data.questions || []);
+            setCurrentQuestionIndex(0);
+            questionStartTime.current = Date.now();
+            return { success: true, data: response.data };
+        } catch (error) {
+            return {
+                success: false,
+                error: error.response?.data?.error || 'Failed to generate concept final challenge'
+            };
+        } finally {
+            setLoading(false);
+        }
+    }, []);
+
+    const submitConceptFinalAnswer = useCallback(async ({ session_id, question_index, selected, time_taken }) => {
+        let timeTaken = time_taken;
+        if (timeTaken === undefined && questionStartTime.current) {
+            timeTaken = Math.round((Date.now() - questionStartTime.current) / 1000);
+        } else if (timeTaken === undefined) {
+            timeTaken = 30;
+        }
+        try {
+            const response = await axios.post('/auth/api/submit-concept-final-answer/', {
+                session_id,
+                question_index,
+                selected,
+                time_taken: timeTaken
+            });
+            const data = response.data;
+            const newAnswer = {
+                question_index,
+                selected,
+                correct: data.correct,
+                time_taken: timeTaken,
+            };
+            setAnswers(prev => [...prev, newAnswer]);
+            return { success: true, data };
+        } catch (error) {
+            return {
+                success: false,
+                error: error.response?.data?.error || 'Failed to submit concept final answer'
+            };
+        }
+    }, []);
+
+    const completeConceptFinalChallenge = useCallback(async ({ session_id, concept_id }) => {
+        try {
+            const response = await axios.post('/auth/api/complete-concept-final-challenge/', {
+                session_id,
+                concept_id
+            });
+            return { success: true, data: response.data };
+        } catch (error) {
+            return {
+                success: false,
+                error: error.response?.data?.error || 'Failed to complete concept final challenge'
+            };
+        }
+    }, []);
+
     // Submit answer for an atom question with REAL-TIME updates
     const submitAtomAnswer = useCallback(async ({ 
         session_id, 
@@ -524,6 +593,11 @@ export const LearningProvider = ({ children }) => {
         recordBreak,
         checkRetention,
         recordHint,
+
+        // Concept final challenge methods
+        generateConceptFinalChallenge,
+        submitConceptFinalAnswer,
+        completeConceptFinalChallenge,
         
     }), [
         currentSession,
@@ -568,6 +642,9 @@ export const LearningProvider = ({ children }) => {
         recordBreak,
         checkRetention,
         recordHint,
+        generateConceptFinalChallenge,
+        submitConceptFinalAnswer,
+        completeConceptFinalChallenge,
     ]);
 
     return (

@@ -9,6 +9,8 @@ import Dashboard from './components/Dashboard';
 import ProtectedRoute from './components/ProtectedRoute';
 import LearningRoute from './components/Learning/LearningRoute';
 import StartAnyConceptSessionRoute from './components/Learning/StartAnyConceptSessionRoute';
+import Leaderboard from './components/Leaderboard';
+import Progress from './components/Progress';
 
 function App() {
     return (
@@ -28,6 +30,24 @@ function App() {
                         }
                     />
 
+                    <Route
+                        path="/leaderboard"
+                        element={
+                            <ProtectedRoute>
+                                <Leaderboard />
+                            </ProtectedRoute>
+                        }
+                    />
+
+                    <Route
+                        path="/progress"
+                        element={
+                            <ProtectedRoute>
+                                <Progress />
+                            </ProtectedRoute>
+                        }
+                    />
+
                     {/* This is the important route - note the :conceptId parameter */}
                     <Route
                         path="/learn/:conceptId"
@@ -43,6 +63,15 @@ function App() {
                         element={
                             <ProtectedRoute>
                                 <StartAnyConceptSessionRoute />
+                            </ProtectedRoute>
+                        }
+                    />
+
+                    <Route
+                        path="/leaderboard"
+                        element={
+                            <ProtectedRoute>
+                                <Leaderboard />
                             </ProtectedRoute>
                         }
                     />

@@ -55,6 +55,12 @@ const Dashboard = () => {
         navigate('/progress');
     };
 
+    const handleViewLeaderboard = () => {
+        navigate('/leaderboard');
+    };
+
+    
+
     const filteredConcepts = selectedSubject
         ? concepts.filter(c => c.subject === selectedSubject)
         : concepts;
@@ -110,7 +116,7 @@ const Dashboard = () => {
                             </h3>
                         </div>
                         <div className="border-t border-gray-200 px-4 py-5 sm:px-6">
-                            <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+                            <div className="grid grid-cols-1 gap-4 sm:grid-cols-4">
                                 <button
                                     onClick={handleStartAnyConcept}
                                     className="bg-green-600 hover:bg-green-700 text-white font-bold py-3 px-4 rounded-lg text-center transition"
@@ -124,6 +130,15 @@ const Dashboard = () => {
                                 >
                                     📊 View Progress
                                 </button>
+
+                                <button
+                                    onClick={handleViewLeaderboard}
+                                    className="bg-yellow-500 hover:bg-yellow-600 text-white font-bold py-3 px-4 rounded-lg text-center transition"
+                                >
+                                    🏆 Leaderboard
+                                </button>
+
+                                
 
                                 <button
                                     onClick={() => window.location.reload()}

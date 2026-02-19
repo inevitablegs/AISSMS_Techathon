@@ -160,7 +160,31 @@ class LearningSession(models.Model):
 
     # ── Feature 10: session-level velocity snapshots ──
     velocity_data = models.JSONField(default=list, blank=True)  
-    
 
 
+class UserXP(models.Model):
+    """Track XP points for leaderboard"""
+    user = models.OneToOneField(User, on_delete=models.CASCADE, related_name='xp_profile')
+    total_xp = models.IntegerField(default=0)
+    questions_xp = models.IntegerField(default=0)
+    atoms_xp = models.IntegerField(default=0)
+    concepts_xp = models.IntegerField(default=0)
+    updated_at = models.DateTimeField(auto_now=True)
 
+    class Meta:
+        db_table = 'user_xp'
+        ordering = ['-total_xp']
+
+    def __str__(self):
+        return f"{self.user.username} - {self.total_xp} XP"
+
+    def award_xp(self, amount, category='questions'):
+        """Award XP and update totals"""
+        self.total_xp += amount
+        if category == 'questions':
+            self.questions_xp += amount
+        elif category == 'atoms':
+            self.atoms_xp += amount
+        elif category == 'concepts':
+            self.concepts_xp += amount
+        self.save()

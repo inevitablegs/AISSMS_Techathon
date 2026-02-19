@@ -16,13 +16,14 @@ const TeachingFirstFlow = ({ conceptId }) => {
     // Core state
     const [currentAtomData, setCurrentAtomData] = useState(null);
     const [sessionStarted, setSessionStarted] = useState(false);
-    const [flowState, setFlowState] = useState('initializing'); // initializing, initial_quiz, teaching, questions, review, final_challenge, complete, concept_complete
+    const [flowState, setFlowState] = useState('initializing'); // initializing, initial_quiz, teaching, questions, review, final_challenge, concept_final_challenge, complete, concept_complete
     const [reviewMetrics, setReviewMetrics] = useState(null);
     const [error, setError] = useState(null);
     const [retryCount, setRetryCount] = useState(0);
     const [initialQuestions, setInitialQuestions] = useState([]);
     const [finalRecommendation, setFinalRecommendation] = useState('');
     const [nextAtomAfterFinal, setNextAtomAfterFinal] = useState(null);
+    const [conceptFinalResult, setConceptFinalResult] = useState(null);
     
     // Get all context values
     const { 
@@ -65,6 +66,11 @@ const TeachingFirstFlow = ({ conceptId }) => {
         recordBreak,
         checkRetention,
         recordHint,
+
+        // Concept final challenge
+        generateConceptFinalChallenge,
+        submitConceptFinalAnswer,
+        completeConceptFinalChallenge,
     } = useLearning();
 
     const [currentSubject, setCurrentSubject] = useState('');
@@ -272,8 +278,9 @@ useEffect(() => {
 
             const data = completeResult.data;
 
-            if (data.all_completed || data.next_action?.action === 'concept_complete') {
-                setFlowState('concept_complete');
+            if (data.all_completed || data.next_action?.action === 'concept_complete' || data.concept_final_challenge_ready) {
+                // All atoms done — trigger concept final challenge
+                await launchConceptFinalChallenge();
                 return;
             }
 
@@ -348,6 +355,30 @@ useEffect(() => {
         }
     }, [currentSession, currentAtomData, answers, atomMastery, metrics, completeAtom, resetForNewAtom, generateFinalChallenge]);
 
+    // Launch concept final challenge (after all atoms done)
+    const launchConceptFinalChallenge = useCallback(async () => {
+        if (!currentSession?.session_id) return;
+        setFlowState('loading');
+        setError(null);
+        resetForNewAtom(); // clear previous question state
+        try {
+            const result = await generateConceptFinalChallenge({
+                session_id: currentSession.session_id,
+                concept_id: conceptId,
+            });
+            if (result.success && result.data.questions?.length > 0) {
+                setFlowState('concept_final_challenge');
+            } else {
+                setError('Failed to generate concept final challenge');
+                setFlowState('error');
+            }
+        } catch (err) {
+            console.error('Error launching concept final challenge:', err);
+            setError('Failed to generate concept final challenge');
+            setFlowState('error');
+        }
+    }, [currentSession, conceptId, generateConceptFinalChallenge, resetForNewAtom]);
+
     const handleFinalChallengeComplete = useCallback(async () => {
         if (!currentSession?.session_id || !currentAtomData?.id) return;
 
@@ -362,8 +393,8 @@ useEffect(() => {
             return;
         }
 
-        if (result.data.all_completed) {
-            setFlowState('concept_complete');
+        if (result.data.all_completed || result.data.concept_final_challenge_ready) {
+            await launchConceptFinalChallenge();
             return;
         }
 
@@ -376,7 +407,33 @@ useEffect(() => {
         setFinalRecommendation(result.data.recommendation || '');
         setNextAtomAfterFinal(result.data.next_atom || null);
         setFlowState('complete');
-    }, [currentSession, currentAtomData, completeFinalChallenge, resetForNewAtom]);
+    }, [currentSession, currentAtomData, completeFinalChallenge, launchConceptFinalChallenge]);
+
+    // Handle concept final challenge questions complete
+    const handleConceptFinalChallengeComplete = useCallback(async () => {
+        if (!currentSession?.session_id) return;
+        setFlowState('completing');
+
+        try {
+            const result = await completeConceptFinalChallenge({
+                session_id: currentSession.session_id,
+                concept_id: conceptId,
+            });
+
+            if (!result.success) {
+                setError('Failed to complete concept final challenge');
+                setFlowState('error');
+                return;
+            }
+
+            setConceptFinalResult(result.data);
+            setFlowState('concept_complete');
+        } catch (err) {
+            console.error('Error completing concept final challenge:', err);
+            setError('Failed to complete concept final challenge');
+            setFlowState('error');
+        }
+    }, [currentSession, conceptId, completeConceptFinalChallenge]);
 
     // Handle review complete
     const handleReviewComplete = useCallback(async (action) => {
@@ -548,6 +605,7 @@ useEffect(() => {
                                 {flowState === 'questions' && '✍️ Answering questions'}
                                 {flowState === 'review' && '🔄 Reviewing material'}
                                 {flowState === 'complete' && '✅ Atom complete'}
+                                {flowState === 'concept_final_challenge' && '🏆 Concept Final Challenge'}
                                 {flowState === 'concept_complete' && '🎉 Concept mastered!'}
                                 {flowState === 'loading' && '⏳ Loading...'}
                             </p>
@@ -703,45 +761,105 @@ useEffect(() => {
                         />
                     )}
                     
+                    {/* Concept Final Challenge */}
+                    {flowState === 'concept_final_challenge' && currentQuestions?.length > 0 && (
+                        <QuestionsFromTeaching
+                            questions={currentQuestions}
+                            atomName={`${currentSession.concept_name || 'Concept'} — Final Challenge`}
+                            sessionId={currentSession.session_id}
+                            atomId={null}
+                            onComplete={handleConceptFinalChallengeComplete}
+                            onBackToTeaching={handleBackToDashboard}
+                            onSubmitAnswer={(payload) =>
+                                submitConceptFinalAnswer({
+                                    session_id: currentSession.session_id,
+                                    question_index: payload.question_index,
+                                    selected: payload.selected,
+                                    time_taken: payload.time_taken,
+                                })
+                            }
+                            showMetrics={false}
+                        />
+                    )}
+                    
                     {/* Concept Complete */}
                     {flowState === 'concept_complete' && (
                         <div className="bg-white rounded-lg shadow-lg p-12 text-center">
-                            <div className="text-6xl mb-4">🏆</div>
+                            <div className="text-6xl mb-4">{conceptFinalResult?.passed ? '🏆' : '📚'}</div>
                             <h2 className="text-3xl font-bold text-gray-800 mb-2">
-                                Concept Mastered!
+                                {conceptFinalResult?.passed ? 'Concept Mastered!' : 'Almost There!'}
                             </h2>
-                            <p className="text-xl text-gray-600 mb-8">
-                                You've completed all atoms in this concept
+                            <p className="text-lg text-gray-600 mb-6">
+                                {conceptFinalResult?.recommendation || "You've completed all atoms in this concept."}
                             </p>
                             
                             {/* Final Stats */}
-                            <div className="grid grid-cols-3 gap-4 max-w-md mx-auto mb-8">
-                                <div className="bg-blue-50 p-4 rounded-lg">
-                                    <div className="text-2xl font-bold text-blue-600">
-                                        {Math.round(atomMastery * 100)}%
+                            {conceptFinalResult && (
+                                <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 max-w-xl mx-auto mb-8">
+                                    <div className="bg-blue-50 p-4 rounded-lg">
+                                        <div className="text-2xl font-bold text-blue-600">
+                                            {Math.round((conceptFinalResult.accuracy || 0) * 100)}%
+                                        </div>
+                                        <div className="text-sm text-gray-600">Challenge Score</div>
                                     </div>
-                                    <div className="text-sm text-gray-600">Final Mastery</div>
-                                </div>
-                                <div className="bg-green-50 p-4 rounded-lg">
-                                    <div className="text-2xl font-bold text-green-600">
-                                        {currentTheta.toFixed(2)}
+                                    <div className="bg-green-50 p-4 rounded-lg">
+                                        <div className="text-2xl font-bold text-green-600">
+                                            {conceptFinalResult.correct}/{conceptFinalResult.total}
+                                        </div>
+                                        <div className="text-sm text-gray-600">Correct</div>
                                     </div>
-                                    <div className="text-sm text-gray-600">Ability (θ)</div>
-                                </div>
-                                <div className="bg-purple-50 p-4 rounded-lg">
-                                    <div className="text-2xl font-bold text-purple-600">
-                                        {answers.length}
+                                    <div className="bg-purple-50 p-4 rounded-lg">
+                                        <div className="text-2xl font-bold text-purple-600">
+                                            {Math.round((conceptFinalResult.final_mastery || 0) * 100)}%
+                                        </div>
+                                        <div className="text-sm text-gray-600">Final Mastery</div>
                                     </div>
-                                    <div className="text-sm text-gray-600">Questions</div>
+                                    <div className="bg-yellow-50 p-4 rounded-lg">
+                                        <div className="text-2xl font-bold text-yellow-600">
+                                            +{conceptFinalResult.concept_xp || 0}
+                                        </div>
+                                        <div className="text-sm text-gray-600">XP Earned</div>
+                                    </div>
                                 </div>
-                            </div>
+                            )}
+
+                            {!conceptFinalResult && (
+                                <div className="grid grid-cols-3 gap-4 max-w-md mx-auto mb-8">
+                                    <div className="bg-blue-50 p-4 rounded-lg">
+                                        <div className="text-2xl font-bold text-blue-600">
+                                            {Math.round(atomMastery * 100)}%
+                                        </div>
+                                        <div className="text-sm text-gray-600">Mastery</div>
+                                    </div>
+                                    <div className="bg-green-50 p-4 rounded-lg">
+                                        <div className="text-2xl font-bold text-green-600">
+                                            {currentTheta.toFixed(2)}
+                                        </div>
+                                        <div className="text-sm text-gray-600">Ability (θ)</div>
+                                    </div>
+                                    <div className="bg-purple-50 p-4 rounded-lg">
+                                        <div className="text-2xl font-bold text-purple-600">
+                                            {answers.length}
+                                        </div>
+                                        <div className="text-sm text-gray-600">Questions</div>
+                                    </div>
+                                </div>
+                            )}
                             
-                            <button
-                                onClick={handleBackToDashboard}
-                                className="px-8 py-3 bg-green-600 text-white rounded-lg font-semibold hover:bg-green-700 transition"
-                            >
-                                Return to Dashboard
-                            </button>
+                            <div className="flex justify-center space-x-4">
+                                <button
+                                    onClick={handleBackToDashboard}
+                                    className="px-8 py-3 bg-green-600 text-white rounded-lg font-semibold hover:bg-green-700 transition"
+                                >
+                                    Return to Dashboard
+                                </button>
+                                <button
+                                    onClick={() => navigate('/leaderboard')}
+                                    className="px-8 py-3 bg-yellow-500 text-white rounded-lg font-semibold hover:bg-yellow-600 transition"
+                                >
+                                    🏆 Leaderboard
+                                </button>
+                            </div>
                         </div>
                     )}
                     
