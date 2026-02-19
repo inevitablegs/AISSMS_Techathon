@@ -19,7 +19,7 @@ class QuestionGenerator:
         gemini_key = getattr(settings, 'GOOGLE_API_KEY', '')
         if gemini_key:
             genai.configure(api_key=gemini_key)
-            self.gemini_model = genai.GenerativeModel('gemini-1.5-flash')
+            self.gemini_model = genai.GenerativeModel('gemini-2.5-flash')
         else:
             self.gemini_model = None
     
@@ -373,3 +373,173 @@ class QuestionGenerator:
             print(f"Generated {len(questions)} questions for {atom}")
         
         return result
+    
+    
+    
+    def generate_questions_from_teaching(self, subject, concept, atom, teaching_content, 
+                                        need_easy=1, need_medium=2, need_hard=0, 
+                                        knowledge_level='intermediate'):
+        """
+        Generate questions based on the teaching content that was shown
+        
+        Args:
+            subject: Subject name
+            concept: Concept name
+            atom: Atomic concept name
+            teaching_content: Dict with explanation, analogy, examples
+            need_easy: Number of easy questions
+            need_medium: Number of medium questions
+            need_hard: Number of hard questions
+            knowledge_level: Student's knowledge level
+        
+        Returns:
+            List of question dictionaries
+        """
+        print(f"Generating questions from teaching for atom: {atom}")
+        
+        if not self.groq_client:
+            print("Groq client not available, using fallback")
+            return self._get_fallback_questions_from_teaching(atom, need_easy, need_medium, need_hard)
+        
+        total_needed = need_easy + need_medium + need_hard
+        
+        # Extract teaching content
+        explanation = teaching_content.get('explanation', '')
+        analogy = teaching_content.get('analogy', '')
+        examples = teaching_content.get('examples', [])
+        
+        examples_text = "\n".join([f"- {ex}" for ex in examples if ex])
+        
+        prompt = f"""
+        You are generating assessment questions based on specific teaching content that was just shown to a student.
+        
+        Subject: {subject}
+        Concept: {concept}
+        Atomic Concept: {atom}
+        Student Level: {knowledge_level.upper()}
+        
+        TEACHING CONTENT SHOWN TO STUDENT:
+        
+        Explanation:
+        {explanation}
+        
+        Analogy:
+        {analogy}
+        
+        Examples/Applications:
+        {examples_text}
+        
+        TASK:
+        Generate EXACTLY {total_needed} multiple-choice questions that test understanding of the teaching content above.
+        
+        Question Distribution:
+        - Easy: {need_easy} question(s) - Direct recall from the explanation
+        - Medium: {need_medium} question(s) - Apply the concept to new situations
+        - Hard: {need_hard} question(s) - Analyze relationships or troubleshoot
+        
+        RULES:
+        1. Each question must be answerable based SOLELY on the teaching content provided
+        2. Test genuine understanding, not trickery
+        3. Questions should build upon what was taught
+        4. Include the analogy or examples where appropriate
+        5. Each question must have exactly 4 options
+        6. One clearly correct answer, three plausible distractors
+        
+        OUTPUT STRICT JSON ONLY:
+        
+        {{
+            "questions": [
+                {{
+                    "difficulty": "easy",
+                    "cognitive_operation": "recall",
+                    "estimated_time": 30,
+                    "question": "Based on the explanation, what is the main purpose of {atom}?",
+                    "options": [
+                        "Option A based on teaching",
+                        "Option B based on teaching", 
+                        "Option C based on teaching",
+                        "Option D based on teaching"
+                    ],
+                    "correct_index": 0
+                }}
+            ]
+        }}
+        """
+        
+        try:
+            response = self.groq_client.chat.completions.create(
+                model="llama-3.3-70b-versatile",
+                messages=[{"role": "user", "content": prompt}],
+                temperature=0.3,
+                max_tokens=1024,
+            )
+            
+            raw_text = response.choices[0].message.content
+            if "```" in raw_text:
+                raw_text = raw_text.split("```")[1]
+                if raw_text.startswith("json"):
+                    raw_text = raw_text[4:]
+            
+            result = json.loads(raw_text.strip())
+            questions = result.get("questions", [])
+            
+            print(f"Generated {len(questions)} questions from teaching")
+            return questions
+            
+        except Exception as e:
+            print(f"Error generating questions from teaching: {e}")
+            return self._get_fallback_questions_from_teaching(atom, need_easy, need_medium, need_hard)
+
+    def _get_fallback_questions_from_teaching(self, atom, need_easy, need_medium, need_hard):
+        """Fallback questions based on teaching content"""
+        questions = []
+        
+        # Easy questions
+        for i in range(need_easy):
+            questions.append({
+                "difficulty": "easy",
+                "cognitive_operation": "recall",
+                "estimated_time": 30,
+                "question": f"What is the main purpose of {atom}?",
+                "options": [
+                    f"To {atom.lower()} efficiently",
+                    "To store data permanently",
+                    "To execute instructions",
+                    "To control peripherals"
+                ],
+                "correct_index": 0
+            })
+        
+        # Medium questions
+        for i in range(need_medium):
+            questions.append({
+                "difficulty": "medium",
+                "cognitive_operation": "apply",
+                "estimated_time": 60,
+                "question": f"Which scenario best demonstrates the application of {atom}?",
+                "options": [
+                    f"When implementing {atom} in a real system",
+                    "During basic operations",
+                    "In simple calculations",
+                    "At the start of processing"
+                ],
+                "correct_index": 0
+            })
+        
+        # Hard questions
+        for i in range(need_hard):
+            questions.append({
+                "difficulty": "hard",
+                "cognitive_operation": "analyze",
+                "estimated_time": 90,
+                "question": f"What would happen if {atom} was implemented incorrectly?",
+                "options": [
+                    "System performance would degrade",
+                    "Nothing would change",
+                    "The system would run faster",
+                    "Data would be more secure"
+                ],
+                "correct_index": 0
+            })
+        
+        return questions

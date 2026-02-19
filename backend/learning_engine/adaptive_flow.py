@@ -1,4 +1,4 @@
-# backend/learning_engine/adaptive_flow.py - Enhanced version
+# backend/learning_engine/adaptive_flow.py - Enhanced with proper pacing
 
 import json
 import random
@@ -8,7 +8,7 @@ from groq import Groq
 from .models import TeachingAtomState, LearningPhase
 
 class AdaptiveLearningEngine:
-    """Enhanced adaptive learning engine with knowledge levels"""
+    """Enhanced adaptive learning engine with knowledge levels and pacing"""
     
     def __init__(self):
         self.groq_client = None
@@ -110,30 +110,66 @@ class AdaptiveLearningEngine:
     
     def determine_pacing(self, diagnostic_results: Dict, knowledge_level: str) -> str:
         """
-        Determine learning pace based on diagnostic results and initial knowledge level
+        CRITICAL: Determine learning pace based on diagnostic results and initial knowledge level
+        
+        Args:
+            diagnostic_results: Dict with 'accuracy', 'mastery', 'streak', 'error_types'
+            knowledge_level: Student's self-reported level
+        
+        Returns:
+            pacing decision: 'sharp_slowdown', 'slow_down', 'stay', 'speed_up'
         """
         accuracy = diagnostic_results.get('accuracy', 0)
+        mastery = diagnostic_results.get('mastery', 0.3)
+        streak = diagnostic_results.get('streak', 0)
+        error_types = diagnostic_results.get('error_types', [])
         
-        # Adjust thresholds based on knowledge level
+        # Check for critical errors
+        has_conceptual_errors = 'conceptual' in error_types
+        has_repeated_errors = len(error_types) >= 2
+        
+        # Base thresholds by knowledge level
         if knowledge_level == 'advanced':
-            if accuracy < 0.6:
+            # Advanced students should perform well
+            if accuracy < 0.5 or mastery < 0.4 or has_conceptual_errors:
+                return 'sharp_slowdown'
+            elif accuracy < 0.7 or mastery < 0.6:
+                return 'slow_down'
+            elif accuracy < 0.85:
+                return 'stay'
+            else:
+                return 'speed_up'
+                
+        elif knowledge_level == 'intermediate':
+            # Intermediate students
+            if accuracy < 0.4 or mastery < 0.3 or has_conceptual_errors:
+                return 'sharp_slowdown'
+            elif accuracy < 0.6 or mastery < 0.5:
                 return 'slow_down'
             elif accuracy < 0.8:
                 return 'stay'
             else:
                 return 'speed_up'
-        elif knowledge_level == 'intermediate':
-            if accuracy < 0.5:
+                
+        elif knowledge_level == 'beginner':
+            # Beginners - more forgiving but watch for repeated failures
+            if accuracy < 0.3 or (accuracy < 0.5 and has_repeated_errors):
+                return 'sharp_slowdown'
+            elif accuracy < 0.5 or mastery < 0.4:
                 return 'slow_down'
             elif accuracy < 0.75:
                 return 'stay'
             else:
                 return 'speed_up'
-        else:  # zero or beginner
-            if accuracy < 0.4:
+                
+        else:  # zero knowledge
+            # Complete beginners - very cautious
+            if accuracy < 0.25 or (accuracy < 0.4 and streak == 0):
                 return 'sharp_slowdown'
-            elif accuracy < 0.7:
+            elif accuracy < 0.45 or mastery < 0.3:
                 return 'slow_down'
+            elif accuracy < 0.7:
+                return 'stay'
             else:
                 return 'speed_up'
     

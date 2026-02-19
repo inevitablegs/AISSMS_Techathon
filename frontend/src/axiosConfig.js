@@ -10,21 +10,49 @@ const axiosInstance = axios.create({
 // Add token to requests if it exists
 axiosInstance.interceptors.request.use(
     (config) => {
-        const url = config.url || '';
-        const isAuthEndpoint =
-            url.includes('/auth/api/login/') ||
-            url.includes('/auth/api/register/') ||
-            url.includes('/api/token/refresh/');
-
-        if (!isAuthEndpoint) {
-            const token = localStorage.getItem('access_token');
-            if (token) {
-                config.headers.Authorization = `Bearer ${token}`;
-            }
+        const token = localStorage.getItem('access_token');
+        
+        if (token) {
+            config.headers.Authorization = `Bearer ${token}`;
         }
         return config;
     },
     (error) => {
+        return Promise.reject(error);
+    }
+);
+
+// Handle 401 errors and token refresh
+axiosInstance.interceptors.response.use(
+    (response) => response,
+    async (error) => {
+        const originalRequest = error.config;
+        
+        // If error is 401 and we haven't tried to refresh token yet
+        if (error.response?.status === 401 && !originalRequest._retry) {
+            originalRequest._retry = true;
+            
+            try {
+                const refreshToken = localStorage.getItem('refresh_token');
+                if (refreshToken) {
+                    const response = await axios.post('http://localhost:8000/api/token/refresh/', {
+                        refresh: refreshToken
+                    });
+                    
+                    if (response.data.access) {
+                        localStorage.setItem('access_token', response.data.access);
+                        originalRequest.headers.Authorization = `Bearer ${response.data.access}`;
+                        return axiosInstance(originalRequest);
+                    }
+                }
+            } catch (refreshError) {
+                // Refresh failed - clear tokens and redirect to login
+                localStorage.removeItem('access_token');
+                localStorage.removeItem('refresh_token');
+                window.location.href = '/login';
+            }
+        }
+        
         return Promise.reject(error);
     }
 );

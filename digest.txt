@@ -1,6 +1,8 @@
 Directory structure:
 └── Final/
+    ├── tempCodeRunnerFile.python
     ├── backend/
+    │   ├── a.py
     │   ├── manage.py
     │   ├── req
     │   ├── accounts/
@@ -15,6 +17,7 @@ Directory structure:
     │   │   └── migrations/
     │   │       ├── 0001_initial.py
     │   │       ├── 0002_concept_created_by.py
+    │   │       ├── 0003_learningsession_knowledge_level_and_more.py
     │   │       └── __init__.py
     │   ├── core/
     │   │   ├── __init__.py
@@ -50,18 +53,158 @@ Directory structure:
             │   ├── ProtectedRoute.jsx
             │   ├── Register.jsx
             │   └── Learning/
-            │       ├── AdaptiveLearning.jsx
-            │       ├── DiagnosticQuiz.jsx
+            │       ├── AtomComplete.jsx
+            │       ├── AtomList.jsx
             │       ├── LearningProgress.jsx
             │       ├── LearningRoute.jsx
-            │       ├── MasteryCheck.jsx
-            │       ├── PracticeSession.jsx
+            │       ├── QuestionsFromTeaching.jsx
             │       ├── StartAnyConceptSession.jsx
             │       ├── StartAnyConceptSessionRoute.jsx
+            │       ├── TeachingFirstFlow.jsx
             │       └── TeachingModule.jsx
             └── context/
                 ├── AuthContext.jsx
                 └── LearningContext.jsx
+
+================================================
+FILE: tempCodeRunnerFile.python
+================================================
+# backend/test_question_generator.py
+
+import os
+import sys
+import django
+
+# Setup Django environment
+sys.path.append(os.path.dirname(os.path.abspath(__file__)))
+os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'core.settings')
+django.setup()
+
+from learning_engine.question_generator import QuestionGenerator
+from django.conf import settings
+
+def test_generator():
+    print("=" * 50)
+    print("Testing QuestionGenerator")
+    print("=" * 50)
+    
+    print(f"GROQ_API_KEY present: {'Yes' if settings.GROQ_API_KEY else 'No'}")
+    print(f"GOOGLE_API_KEY present: {'Yes' if settings.GOOGLE_API_KEY else 'No'}")
+    
+    generator = QuestionGenerator()
+    print(f"Groq client initialized: {'Yes' if generator.groq_client else 'No'}")
+    print(f"Gemini model initialized: {'Yes' if generator.gemini_model else 'No'}")
+    
+    if not generator.groq_client and not generator.gemini_model:
+        print("\n❌ ERROR: No AI clients available! Check your API keys.")
+        return
+    
+    print("\n" + "=" * 50)
+    print("Test 1: Generate atoms")
+    print("=" * 50)
+    atoms = generator.generate_atoms("Microprocessor", "Memory Organization")
+    print(f"Generated atoms: {atoms}")
+    
+    if atoms:
+        print("\n" + "=" * 50)
+        print("Test 2: Generate questions for first atom")
+        print("=" * 50)
+        questions = generator.generate_questions(
+            subject="Microprocessor",
+            concept="Memory Organization",
+            atom=atoms[0],
+            need_easy=2,
+            need_medium=2,
+            knowledge_level='intermediate'
+        )
+        print(f"Generated {len(questions)} questions")
+        for i, q in enumerate(questions):
+            print(f"\nQ{i+1}: {q.get('question', 'No question')}")
+            print(f"   Difficulty: {q.get('difficulty')}")
+            print(f"   Cognitive: {q.get('cognitive_operation')}")
+            print(f"   Time: {q.get('estimated_time')}s")
+    
+    print("\n" + "=" * 50)
+    print("Test 3: Generate complete concept")
+    print("=" * 50)
+    result = generator.generate_complete_concept("Microprocessor", "Memory Organization")
+    print(f"Generated concept with {len(result.get('atoms', {}))} atoms")
+    for atom_name, atom_data in result['atoms'].items():
+        print(f"  - {atom_name}: {len(atom_data['questions'])} questions")
+
+if __name__ == "__main__":
+    test_generator()
+
+
+================================================
+FILE: backend/a.py
+================================================
+# backend/test_question_generator.py
+
+import os
+import sys
+import django
+
+# Setup Django environment
+sys.path.append(os.path.dirname(os.path.abspath(__file__)))
+os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'core.settings')
+django.setup()
+
+from learning_engine.question_generator import QuestionGenerator
+from django.conf import settings
+
+def test_generator():
+    print("=" * 50)
+    print("Testing QuestionGenerator")
+    print("=" * 50)
+    
+    print(f"GROQ_API_KEY present: {'Yes' if settings.GROQ_API_KEY else 'No'}")
+    print(f"GOOGLE_API_KEY present: {'Yes' if settings.GOOGLE_API_KEY else 'No'}")
+    
+    generator = QuestionGenerator()
+    print(f"Groq client initialized: {'Yes' if generator.groq_client else 'No'}")
+    print(f"Gemini model initialized: {'Yes' if generator.gemini_model else 'No'}")
+    
+    if not generator.groq_client and not generator.gemini_model:
+        print("\n❌ ERROR: No AI clients available! Check your API keys.")
+        return
+    
+    print("\n" + "=" * 50)
+    print("Test 1: Generate atoms")
+    print("=" * 50)
+    atoms = generator.generate_atoms("Microprocessor", "Memory Organization")
+    print(f"Generated atoms: {atoms}")
+    
+    if atoms:
+        print("\n" + "=" * 50)
+        print("Test 2: Generate questions for first atom")
+        print("=" * 50)
+        questions = generator.generate_questions(
+            subject="Microprocessor",
+            concept="Memory Organization",
+            atom=atoms[0],
+            need_easy=2,
+            need_medium=2,
+            knowledge_level='intermediate'
+        )
+        print(f"Generated {len(questions)} questions")
+        for i, q in enumerate(questions):
+            print(f"\nQ{i+1}: {q.get('question', 'No question')}")
+            print(f"   Difficulty: {q.get('difficulty')}")
+            print(f"   Cognitive: {q.get('cognitive_operation')}")
+            print(f"   Time: {q.get('estimated_time')}s")
+    
+    print("\n" + "=" * 50)
+    print("Test 3: Generate complete concept")
+    print("=" * 50)
+    result = generator.generate_complete_concept("Microprocessor", "Memory Organization")
+    print(f"Generated concept with {len(result.get('atoms', {}))} atoms")
+    for atom_name, atom_data in result['atoms'].items():
+        print(f"  - {atom_name}: {len(atom_data['questions'])} questions")
+
+if __name__ == "__main__":
+    test_generator()
+
 
 ================================================
 FILE: backend/manage.py
@@ -242,6 +385,15 @@ class StudentProgress(models.Model):
     class Meta:
         unique_together = ['user', 'atom']
 
+
+    
+class KnowledgeLevel(models.TextChoices):
+    ZERO = 'zero', 'Zero Knowledge'
+    BEGINNER = 'beginner', 'Beginner'
+    INTERMEDIATE = 'intermediate', 'Intermediate'
+    ADVANCED = 'advanced', 'Advanced'
+
+
 class LearningSession(models.Model):
     """Track learning sessions"""
     user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='learning_sessions')
@@ -252,6 +404,17 @@ class LearningSession(models.Model):
     correct_answers = models.IntegerField(default=0)
     hints_used = models.IntegerField(default=0)
     session_data = models.JSONField(default=dict)
+    knowledge_level = models.CharField(
+        max_length=20,
+        choices=KnowledgeLevel.choices,
+        default=KnowledgeLevel.ZERO
+    )
+    user_feedback = models.JSONField(default=dict)  
+    
+
+
+
+
 
 
 ================================================
@@ -298,6 +461,11 @@ class RegisterSerializer(serializers.ModelSerializer):
         )
         user.set_password(validated_data['password'])
         user.save()
+        
+        # Create learning profile for the user
+        from .models import LearningProfile
+        LearningProfile.objects.create(user=user)
+        
         return user
 
 class UserSerializer(serializers.ModelSerializer):
@@ -358,698 +526,53 @@ FILE: backend/accounts/urls.py
 ================================================
 from django.urls import path
 from .views import (
+    # Auth views
     RegisterView, LoginView, DashboardView,
-    ConceptListView, StartLearningSessionView, SubmitDiagnosticView,
-    GetTeachingContentView, GetPracticeQuestionsView, SubmitPracticeAnswerView,
-    GetHintView, GetLearningProgressView,
-    GenerateConceptView, GetAtomsView
+    
+    # Core learning views (keep these)
+    ConceptListView, GetTeachingContentView, GetPracticeQuestionsView,
+    SubmitPracticeAnswerView, GetHintView, GetLearningProgressView,
+    
+    # Concept generation
+    GenerateConceptView, GetAtomsView,
+    
+    # NEW TEACHING-FIRST FLOW VIEWS (keep these)
+    StartTeachingFirstSessionView, GetAtomListView, 
+    GenerateQuestionsFromTeachingView, SubmitAtomQuestionAnswerView, 
+    CompleteAtomView
 )
 
 urlpatterns = [
+    # Auth endpoints
     path('api/register/', RegisterView.as_view(), name='register'),
     path('api/login/', LoginView.as_view(), name='login'),
     path('api/dashboard/', DashboardView.as_view(), name='dashboard'),
     
-    # Learning endpoints
+    # Core learning endpoints
     path('api/concepts/', ConceptListView.as_view(), name='concepts'),
-    path('api/start-session/', StartLearningSessionView.as_view(), name='start_session'),
-    path('api/submit-diagnostic/', SubmitDiagnosticView.as_view(), name='submit_diagnostic'),
     path('api/teaching/<int:atom_id>/', GetTeachingContentView.as_view(), name='teaching_content'),
     path('api/practice/<int:atom_id>/', GetPracticeQuestionsView.as_view(), name='practice_questions'),
     path('api/submit-answer/', SubmitPracticeAnswerView.as_view(), name='submit_answer'),
     path('api/get-hint/', GetHintView.as_view(), name='get_hint'),
     path('api/progress/', GetLearningProgressView.as_view(), name='learning_progress'),
     
-    # Atom generation endpoints
+    # Concept generation
     path('api/generate-concept/', GenerateConceptView.as_view(), name='generate_concept'),
     path('api/concepts/<int:concept_id>/atoms/', GetAtomsView.as_view(), name='get_atoms'),
+    
+    # TEACHING-FIRST FLOW ENDPOINTS
+    path('api/start-teaching-session/', StartTeachingFirstSessionView.as_view(), name='start_teaching_session'),
+    path('api/concepts/<int:concept_id>/atoms-list/', GetAtomListView.as_view(), name='atoms_list'),
+    path('api/generate-questions-from-teaching/', GenerateQuestionsFromTeachingView.as_view(), name='generate_questions_from_teaching'),
+    path('api/submit-atom-answer/', SubmitAtomQuestionAnswerView.as_view(), name='submit_atom_answer'),
+    path('api/complete-atom/', CompleteAtomView.as_view(), name='complete_atom'),
 ]
 
 
 ================================================
 FILE: backend/accounts/views.py
 ================================================
-from django.contrib.auth.models import User
-from django.db.models import Q
-from rest_framework import generics, permissions, status
-from rest_framework.response import Response
-from rest_framework.views import APIView
-from rest_framework_simplejwt.tokens import RefreshToken
-from .serializers import RegisterSerializer, UserSerializer
-
-class RegisterView(generics.CreateAPIView):
-    queryset = User.objects.all()
-    permission_classes = (permissions.AllowAny,)
-    serializer_class = RegisterSerializer
-
-class LoginView(APIView):
-    permission_classes = (permissions.AllowAny,)
-
-    def post(self, request):
-        identifier = (
-            request.data.get('username')
-            or request.data.get('email')
-            or request.data.get('identifier')
-        )
-        password = request.data.get('password')
-
-        if isinstance(identifier, str):
-            identifier = identifier.strip()
-        
-        if not identifier or not password:
-            return Response(
-                {'error': 'Please provide both username/email and password'},
-                status=status.HTTP_400_BAD_REQUEST
-            )
-
-        user = User.objects.filter(
-            Q(username__iexact=identifier) | Q(email__iexact=identifier)
-        ).first()
-        
-        if user is None:
-            return Response(
-                {'error': 'Invalid credentials'},
-                status=status.HTTP_401_UNAUTHORIZED
-            )
-
-        if not user.is_active:
-            return Response(
-                {'error': 'Account is disabled'},
-                status=status.HTTP_401_UNAUTHORIZED
-            )
-        
-        if not user.check_password(password):
-            return Response(
-                {'error': 'Invalid credentials'},
-                status=status.HTTP_401_UNAUTHORIZED
-            )
-        
-        refresh = RefreshToken.for_user(user)
-        
-        return Response({
-            'refresh': str(refresh),
-            'access': str(refresh.access_token),
-            'user': UserSerializer(user).data
-        })
-
-class DashboardView(APIView):
-    permission_classes = (permissions.IsAuthenticated,)
-
-    def get(self, request):
-        user = request.user
-        return Response({
-            'message': f'Welcome to your dashboard, {user.first_name}!',
-            'user': UserSerializer(user).data,
-            'dashboard_data': {
-                'total_courses': 5,
-                'completed_assignments': 3,
-                'upcoming_events': 2
-            }
-        })
-        
-        
-        
-from django.contrib.auth.models import User
-from rest_framework import generics, permissions, status
-from rest_framework.response import Response
-from rest_framework.views import APIView
-from .models import (
-    LearningProfile, Concept, TeachingAtom, 
-    Question, StudentProgress, LearningSession
-)
-from .serializers import (
-    ConceptSerializer, TeachingAtomSerializer, 
-    QuestionSerializer, StudentProgressSerializer,
-    LearningSessionSerializer
-)
-from learning_engine.adaptive_flow import AdaptiveLearningEngine
-import json
-
-# ... existing views ...
-
-class ConceptListView(APIView):
-    permission_classes = [permissions.IsAuthenticated]
-    
-    def get(self, request):
-        subject = request.query_params.get('subject', '')
-        access_filter = Q(created_by__isnull=True) | Q(created_by=request.user)
-        concepts_qs = Concept.objects.filter(access_filter)
-        concepts = concepts_qs.filter(subject__icontains=subject) if subject else concepts_qs
-        serializer = ConceptSerializer(concepts, many=True)
-        return Response(serializer.data)
-
-class StartLearningSessionView(APIView):
-    permission_classes = [permissions.IsAuthenticated]
-    
-    def post(self, request):
-        concept_id = request.data.get('concept_id')
-        
-        try:
-            concept = Concept.objects.get(
-                Q(id=concept_id) & (Q(created_by__isnull=True) | Q(created_by=request.user))
-            )
-            
-            # Create learning session
-            session = LearningSession.objects.create(
-                user=request.user,
-                concept=concept
-            )
-            
-            # Initialize progress for all atoms in this concept
-            atoms = TeachingAtom.objects.filter(concept=concept)
-            for atom in atoms:
-                StudentProgress.objects.get_or_create(
-                    user=request.user,
-                    atom=atom,
-                    defaults={'phase': 'diagnostic'}
-                )
-            
-            # Diagnostic: 1 easy + 1 medium random question per atom
-            import random
-
-            def pick_random_question(atom_obj, difficulty, exclude_ids=None):
-                exclude_ids = exclude_ids or []
-                qs = Question.objects.filter(atom=atom_obj, difficulty=difficulty).exclude(id__in=exclude_ids)
-                ids = list(qs.values_list('id', flat=True))
-                if not ids:
-                    return None
-                return Question.objects.get(id=random.choice(ids))
-
-            diagnostic_questions = []
-            for atom in atoms:
-                picked_ids = []
-
-                easy_q = pick_random_question(atom, 'easy')
-                if easy_q is not None:
-                    picked_ids.append(easy_q.id)
-                    q_dict = easy_q.to_dict()
-                    q_dict['atom_id'] = atom.id
-                    q_dict['atom_name'] = atom.name
-                    diagnostic_questions.append(q_dict)
-
-                medium_q = pick_random_question(atom, 'medium', exclude_ids=picked_ids)
-                if medium_q is None:
-                    # Fallback if no medium exists
-                    medium_q = pick_random_question(atom, 'easy', exclude_ids=picked_ids)
-                if medium_q is not None:
-                    q_dict = medium_q.to_dict()
-                    q_dict['atom_id'] = atom.id
-                    q_dict['atom_name'] = atom.name
-                    diagnostic_questions.append(q_dict)
-
-            random.shuffle(diagnostic_questions)
-            
-            return Response({
-                'session_id': session.id,
-                'diagnostic_questions': diagnostic_questions,
-                'total_atoms': atoms.count(),
-                'total_diagnostic_questions': len(diagnostic_questions)
-            })
-            
-        except Concept.DoesNotExist:
-            return Response({'error': 'Concept not found'}, status=404)
-
-class SubmitDiagnosticView(APIView):
-    permission_classes = [permissions.IsAuthenticated]
-    
-    def post(self, request):
-        session_id = request.data.get('session_id')
-        answers = request.data.get('answers', [])
-        
-        try:
-            session = LearningSession.objects.get(id=session_id, user=request.user)
-            
-            # Process answers and update progress
-            results = {
-                'correct': 0,
-                'total': len(answers),
-                'by_atom': {},
-                'weak_atoms': []
-            }
-            
-            for answer in answers:
-                question_id = answer.get('question_id')
-                selected = answer.get('selected')
-                time_taken = answer.get('time_taken', 30)
-                
-                try:
-                    question = Question.objects.get(id=question_id)
-                    correct = (selected == question.correct_index)
-                    
-                    if correct:
-                        results['correct'] += 1
-                    
-                    # Update atom stats
-                    atom_id = question.atom_id
-                    if atom_id not in results['by_atom']:
-                        results['by_atom'][atom_id] = {'correct': 0, 'total': 0}
-                    
-                    results['by_atom'][atom_id]['total'] += 1
-                    if correct:
-                        results['by_atom'][atom_id]['correct'] += 1
-                    
-                    # Update progress
-                    progress, _ = StudentProgress.objects.get_or_create(
-                        user=request.user,
-                        atom=question.atom
-                    )
-                    
-                    # Simple BKT update
-                    if not correct:
-                        if time_taken < question.estimated_time * 0.5:
-                            error_type = 'guessing'
-                        else:
-                            error_type = 'conceptual'
-                        
-                        error_history = progress.error_history or []
-                        error_history.append(error_type)
-                        progress.error_history = error_history[-10:]  # Keep last 10
-                        progress.save()
-                    
-                except Question.DoesNotExist:
-                    pass
-            
-            # Identify weak atoms
-            accuracy = results['correct'] / results['total'] if results['total'] > 0 else 0
-
-            # Build weak->strong sequence across ALL atoms in this concept
-            concept_atom_ids = list(
-                TeachingAtom.objects.filter(concept=session.concept).values_list('id', flat=True)
-            )
-
-            atom_accuracy = {}
-            for atom_id in concept_atom_ids:
-                stats = results['by_atom'].get(atom_id, {'correct': 0, 'total': 0})
-                if stats['total'] > 0:
-                    atom_accuracy[atom_id] = stats['correct'] / stats['total']
-                else:
-                    atom_accuracy[atom_id] = 0
-
-            weak_threshold = 0.5
-            results['weak_atoms'] = [aid for aid in concept_atom_ids if atom_accuracy.get(aid, 0) < weak_threshold]
-
-            atom_sequence = sorted(
-                concept_atom_ids,
-                key=lambda aid: (atom_accuracy.get(aid, 0), aid)
-            )
-
-            # Move all atoms into teaching phase (we'll traverse weak->strong)
-            StudentProgress.objects.filter(user=request.user, atom_id__in=concept_atom_ids).update(phase='teaching')
-            
-            # Update session stats
-            session.questions_answered = results['total']
-            session.correct_answers = results['correct']
-            session.session_data = results
-            session.save()
-            
-            # Determine pacing
-            if accuracy < 0.4:
-                pacing = 'sharp_slowdown'
-            elif accuracy < 0.7:
-                pacing = 'slow_down'
-            else:
-                pacing = 'speed_up'
-            
-            return Response({
-                'accuracy': accuracy,
-                'weak_atoms': results['weak_atoms'],
-                'pacing': pacing,
-                'next_atom': atom_sequence[0] if atom_sequence else None,
-                'atom_sequence': atom_sequence,
-                'atom_accuracy': atom_accuracy
-            })
-            
-        except LearningSession.DoesNotExist:
-            return Response({'error': 'Session not found'}, status=404)
-
-class GetTeachingContentView(APIView):
-    permission_classes = [permissions.IsAuthenticated]
-    
-    def get(self, request, atom_id):
-        try:
-            atom = TeachingAtom.objects.select_related('concept').get(
-                Q(id=atom_id)
-                & (Q(concept__created_by__isnull=True) | Q(concept__created_by=request.user))
-            )
-            
-            # If no content, generate it using Groq (you'll need to implement this)
-            if not atom.explanation:
-                # Call learning engine to generate content
-                engine = AdaptiveLearningEngine()
-                content = engine.generate_teaching_content(
-                    atom.name, 
-                    atom.concept.subject, 
-                    atom.concept.name
-                )
-                
-                atom.explanation = content.get('explanation', '')
-                atom.analogy = content.get('analogy', '')
-                atom.examples = [content.get('example', ''), content.get('misconception', '')]
-                atom.save()
-            
-            return Response({
-                'id': atom.id,
-                'name': atom.name,
-                'explanation': atom.explanation,
-                'analogy': atom.analogy,
-                'examples': atom.examples
-            })
-            
-        except TeachingAtom.DoesNotExist:
-            return Response({'error': 'Atom not found'}, status=404)
-
-class GetPracticeQuestionsView(APIView):
-    permission_classes = [permissions.IsAuthenticated]
-    
-    def get(self, request, atom_id):
-        difficulty = request.query_params.get('difficulty', 'easy')
-        count = int(request.query_params.get('count', 3))
-        
-        try:
-            atom = TeachingAtom.objects.select_related('concept').get(
-                Q(id=atom_id)
-                & (Q(concept__created_by__isnull=True) | Q(concept__created_by=request.user))
-            )
-            
-            # Get questions of appropriate difficulty
-            questions = Question.objects.filter(
-                atom=atom,
-                difficulty=difficulty
-            )[:count]
-            
-            # Get student progress for adaptive hint level
-            progress = StudentProgress.objects.get(
-                user=request.user,
-                atom=atom
-            )
-            
-            questions_data = []
-            for q in questions:
-                q_dict = q.to_dict()
-                # Don't send correct index to frontend for practice
-                del q_dict['correct_index']
-                q_dict['hint_level'] = progress.hint_usage
-                questions_data.append(q_dict)
-            
-            return Response({
-                'questions': questions_data,
-                'hint_usage': progress.hint_usage,
-                'mastery_score': progress.mastery_score
-            })
-            
-        except (TeachingAtom.DoesNotExist, StudentProgress.DoesNotExist):
-            return Response({'error': 'Not found'}, status=404)
-
-class SubmitPracticeAnswerView(APIView):
-    permission_classes = [permissions.IsAuthenticated]
-    
-    def post(self, request):
-        question_id = request.data.get('question_id')
-        selected = request.data.get('selected')
-        time_taken = request.data.get('time_taken', 30)
-        hint_used = request.data.get('hint_used', False)
-        
-        try:
-            question = Question.objects.select_related('atom__concept').get(
-                Q(id=question_id)
-                & (Q(atom__concept__created_by__isnull=True) | Q(atom__concept__created_by=request.user))
-            )
-            correct = (selected == question.correct_index)
-            
-            # Get or create progress
-            progress, _ = StudentProgress.objects.get_or_create(
-                user=request.user,
-                atom=question.atom
-            )
-            
-            # Update hint usage
-            if hint_used:
-                progress.hint_usage += 1
-            
-            # Update mastery score using BKT
-            from learning_engine.knowledge_tracing import bkt_update
-            
-            old_mastery = progress.mastery_score
-            new_mastery = bkt_update(old_mastery, correct)
-            progress.mastery_score = new_mastery
-            
-            # Update streak
-            if correct:
-                progress.streak += 1
-            else:
-                progress.streak = 0
-                
-                # Track error
-                error_history = progress.error_history or []
-                error_history.append({
-                    'question_id': question_id,
-                    'time_taken': time_taken,
-                    'difficulty': question.difficulty
-                })
-                progress.error_history = error_history[-5:]
-            
-            progress.times_practiced += 1
-            progress.save()
-            
-            # Determine next difficulty
-            if new_mastery > 0.7 and progress.streak > 2:
-                next_difficulty = 'medium'
-            else:
-                next_difficulty = 'easy'
-            
-            # Check if mastery achieved
-            mastery_achieved = new_mastery >= 0.7 and progress.streak >= 2
-            
-            if mastery_achieved and progress.phase == 'practice':
-                progress.phase = 'mastery_check'
-                progress.save()
-            
-            return Response({
-                'correct': correct,
-                'mastery_score': new_mastery,
-                'mastery_achieved': mastery_achieved,
-                'next_difficulty': next_difficulty,
-                'streak': progress.streak
-            })
-            
-        except Question.DoesNotExist:
-            return Response({'error': 'Question not found'}, status=404)
-
-class GetHintView(APIView):
-    permission_classes = [permissions.IsAuthenticated]
-    
-    def post(self, request):
-        question_id = request.data.get('question_id')
-        error_count = request.data.get('error_count', 0)
-        
-        try:
-            question = Question.objects.select_related('atom__concept').get(
-                Q(id=question_id)
-                & (Q(atom__concept__created_by__isnull=True) | Q(atom__concept__created_by=request.user))
-            )
-            
-            # Progressive hint system
-            hints = [
-                "Think about what the question is asking.",
-                f"Consider how this relates to {question.atom.name}.",
-            ]
-            
-            # Add specific hints based on question content
-            q_text = question.question_text.lower()
-            
-            if "address" in q_text:
-                hints.append("With N address lines, you can access 2^N locations.")
-                hints.append("Each address line DOUBLES the possible memory size.")
-            
-            if "cache" in q_text:
-                hints.append("Cache is closer to the CPU and faster, but smaller than RAM.")
-                hints.append("Think of the hierarchy: CPU â†’ Cache â†’ RAM â†’ Disk")
-            
-            if "mapping" in q_text:
-                hints.append("Different memory types can use different address ranges.")
-                hints.append("For example: 0000-7FFF might be ROM, 8000-FFFF might be RAM.")
-            
-            hint_level = min(error_count, len(hints) - 1)
-            
-            return Response({
-                'hint': hints[hint_level],
-                'hint_level': hint_level
-            })
-            
-        except Question.DoesNotExist:
-            return Response({'error': 'Question not found'}, status=404)
-
-class GetLearningProgressView(APIView):
-    permission_classes = [permissions.IsAuthenticated]
-    
-    def get(self, request):
-        # Ensure user has a learning profile (older users may not)
-        try:
-            profile = request.user.learning_profile
-        except Exception:
-            profile, _ = LearningProfile.objects.get_or_create(user=request.user)
-
-        # Get all progress for user
-        progress = StudentProgress.objects.filter(user=request.user).select_related('atom__concept')
-        
-        # Group by concept
-        concepts = {}
-        for p in progress:
-            concept_name = p.atom.concept.name
-            if concept_name not in concepts:
-                concepts[concept_name] = {
-                    'name': concept_name,
-                    'atoms': [],
-                    'mastered_count': 0,
-                    'total_count': 0
-                }
-            
-            atom_data = {
-                'name': p.atom.name,
-                'mastery': p.mastery_score,
-                'phase': p.phase,
-                'streak': p.streak,
-                'hint_usage': p.hint_usage,
-                'retention_verified': p.retention_verified
-            }
-            
-            concepts[concept_name]['atoms'].append(atom_data)
-            concepts[concept_name]['total_count'] += 1
-            if p.phase == 'complete':
-                concepts[concept_name]['mastered_count'] += 1
-        
-        # Calculate overall mastery
-        total_atoms = len(progress)
-        if total_atoms > 0:
-            overall_mastery = sum(p.mastery_score for p in progress) / total_atoms
-        else:
-            overall_mastery = 0
-        
-        return Response({
-            'concepts': list(concepts.values()),
-            'overall_mastery': overall_mastery,
-            'total_atoms': total_atoms,
-            'learning_streak': profile.learning_streak
-        })
-        
-        
-        
-from learning_engine.question_generator import QuestionGenerator
-
-class GenerateConceptView(APIView):
-    """Generate atoms and questions for a concept"""
-    permission_classes = [permissions.IsAuthenticated]
-    
-    def post(self, request):
-        subject = request.data.get('subject')
-        concept = request.data.get('concept')
-
-        if isinstance(subject, str):
-            subject = subject.strip()
-        if isinstance(concept, str):
-            concept = concept.strip()
-        
-        if not subject or not concept:
-            return Response(
-                {'error': 'Please provide both subject and concept'},
-                status=status.HTTP_400_BAD_REQUEST
-            )
-        
-        try:
-            # Check DB first to avoid regenerating the same concept.
-            from accounts.models import Concept, TeachingAtom, Question
-
-            existing = (
-                Concept.objects.filter(
-                    name=concept,
-                    subject=subject,
-                    created_by__in=[request.user, None],
-                )
-                .order_by('-created_by')  # user-owned preferred over global
-                .first()
-            )
-
-            if existing is not None:
-                existing_atoms = list(
-                    TeachingAtom.objects.filter(concept=existing)
-                    .order_by('order', 'id')
-                    .values_list('name', flat=True)
-                )
-                if existing_atoms:
-                    return Response({
-                        'success': True,
-                        'concept_id': existing.id,
-                        'atoms': existing_atoms,
-                        'cached': True,
-                    })
-
-            # Not found (or empty) -> generate now.
-            generator = QuestionGenerator()
-            result = generator.generate_complete_concept(subject, concept)
-            
-            # Create or get concept (always save as user-owned for new generations)
-            concept_obj, _created = Concept.objects.get_or_create(
-                name=concept,
-                subject=subject,
-                created_by=request.user,
-                defaults={'difficulty': 'medium'}
-            )
-            
-            # Save atoms and questions
-            for atom_name, atom_data in result['atoms'].items():
-                atom_obj, _ = TeachingAtom.objects.get_or_create(
-                    name=atom_name,
-                    concept=concept_obj
-                )
-                
-                for q_data in atom_data['questions']:
-                    Question.objects.get_or_create(
-                        atom=atom_obj,
-                        question_text=q_data['question'],
-                        defaults={
-                            'difficulty': q_data['difficulty'],
-                            'cognitive_operation': q_data['cognitive_operation'],
-                            'estimated_time': q_data['estimated_time'],
-                            'options': q_data['options'],
-                            'correct_index': q_data['correct_index']
-                        }
-                    )
-            
-            return Response({
-                'success': True,
-                'concept_id': concept_obj.id,
-                'atoms': list(result['atoms'].keys())
-            })
-            
-        except Exception as e:
-            return Response(
-                {'error': str(e)},
-                status=status.HTTP_500_INTERNAL_SERVER_ERROR
-            )
-
-class GetAtomsView(APIView):
-    """Get atoms for a concept"""
-    permission_classes = [permissions.IsAuthenticated]
-    
-    def get(self, request, concept_id):
-        try:
-            from accounts.models import Concept, TeachingAtom
-            
-            concept = Concept.objects.get(
-                Q(id=concept_id) & (Q(created_by__isnull=True) | Q(created_by=request.user))
-            )
-            atoms = TeachingAtom.objects.filter(concept=concept).values('id', 'name', 'order')
-            
-            return Response({
-                'concept': concept.name,
-                'atoms': list(atoms)
-            })
-            
-        except Concept.DoesNotExist:
-            return Response(
-                {'error': 'Concept not found'},
-                status=status.HTTP_404_NOT_FOUND
-            )
+Error reading file with 'cp1252': 'charmap' codec can't decode byte 0x8d in position 43192: character maps to <undefined>
 
 
 ================================================
@@ -1200,6 +723,35 @@ class Migration(migrations.Migration):
         migrations.AlterUniqueTogether(
             name='concept',
             unique_together={('name', 'subject', 'created_by')},
+        ),
+    ]
+
+
+
+================================================
+FILE: backend/accounts/migrations/0003_learningsession_knowledge_level_and_more.py
+================================================
+# Generated by Django 6.0.2 on 2026-02-17 12:58
+
+from django.db import migrations, models
+
+
+class Migration(migrations.Migration):
+
+    dependencies = [
+        ('accounts', '0002_concept_created_by'),
+    ]
+
+    operations = [
+        migrations.AddField(
+            model_name='learningsession',
+            name='knowledge_level',
+            field=models.CharField(choices=[('zero', 'Zero Knowledge'), ('beginner', 'Beginner'), ('intermediate', 'Intermediate'), ('advanced', 'Advanced')], default='zero', max_length=20),
+        ),
+        migrations.AddField(
+            model_name='learningsession',
+            name='user_feedback',
+            field=models.JSONField(default=dict),
         ),
     ]
 
@@ -1436,6 +988,54 @@ GOOGLE_API_KEY = os.environ.get('GOOGLE_API_KEY', '')
 GROQ_API_KEY = os.environ.get('GROQ_API_KEY', '')
 
 
+LOGGING = {
+    'version': 1,
+    'disable_existing_loggers': False,
+    'formatters': {
+        'verbose': {
+            'format': '{levelname} {asctime} {module} {process:d} {thread:d} {message}',
+            'style': '{',
+        },
+        'simple': {
+            'format': '{levelname} {asctime} {message}',
+            'style': '{',
+        },
+    },
+    'handlers': {
+        'console': {
+            'class': 'logging.StreamHandler',
+            'formatter': 'simple',
+        },
+        'file': {
+            'class': 'logging.FileHandler',
+            'filename': os.path.join(BASE_DIR, 'debug.log'),
+            'formatter': 'verbose',
+        },
+    },
+    'root': {
+        'handlers': ['console', 'file'],
+        'level': 'INFO',
+    },
+    'loggers': {
+        'django': {
+            'handlers': ['console', 'file'],
+            'level': 'INFO',
+            'propagate': False,
+        },
+        'accounts': {
+            'handlers': ['console', 'file'],
+            'level': 'DEBUG',
+            'propagate': False,
+        },
+        'learning_engine': {
+            'handlers': ['console', 'file'],
+            'level': 'DEBUG',
+            'propagate': False,
+        },
+    },
+}
+
+
 ================================================
 FILE: backend/core/urls.py
 ================================================
@@ -1499,20 +1099,17 @@ __all__ = [
 ================================================
 FILE: backend/learning_engine/adaptive_flow.py
 ================================================
+# backend/learning_engine/adaptive_flow.py - Enhanced version
+
 import json
 import random
 from typing import Dict, List, Optional, Tuple, Any
 from django.conf import settings
 from groq import Groq
-
-from .models import TeachingAtomState, LearningPhase, PacingDecision, ErrorType
-from .knowledge_tracing import (
-    bkt_update, irt_probability, update_theta,
-    classify_behavior, update_mastery_from_behavior, classify_error_type
-)
+from .models import TeachingAtomState, LearningPhase
 
 class AdaptiveLearningEngine:
-    """Main adaptive learning engine"""
+    """Enhanced adaptive learning engine with knowledge levels"""
     
     def __init__(self):
         self.groq_client = None
@@ -1521,43 +1118,48 @@ class AdaptiveLearningEngine:
             self.groq_client = Groq(api_key=groq_key)
     
     def generate_teaching_content(self, atom_name: str, subject: str, 
-                                  concept: str) -> Dict[str, str]:
+                                  concept: str, knowledge_level: str) -> Dict[str, str]:
         """
-        Generate teaching content for an atom using Groq
+        Generate teaching content for an atom based on knowledge level
         """
         if not self.groq_client:
-            # Fallback content
-            return {
-                "explanation": f"{atom_name} is a fundamental concept in {concept}.",
-                "example": f"Example of {atom_name} in practice.",
-                "analogy": f"Think of {atom_name} like organizing information.",
-                "misconception": f"Don't confuse {atom_name} with related concepts."
-            }
+            return self._get_fallback_content(atom_name, concept, knowledge_level)
+        
+        level_descriptions = {
+            'zero': "Complete beginner - needs fundamental concepts explained from scratch",
+            'beginner': "Has basic understanding but needs clear explanations and examples",
+            'intermediate': "Knows the basics - needs deeper insights and applications",
+            'advanced': "Strong understanding - needs advanced concepts and edge cases"
+        }
         
         prompt = f"""
-        You are creating a short teaching module for a single atomic concept.
+        You are creating a personalized teaching module for a single atomic concept.
         
         Subject: {subject}
         Concept: {concept}
         Atomic Concept: {atom_name}
+        Student Knowledge Level: {level_descriptions.get(knowledge_level, 'intermediate')}
         
         Generate:
-        1. A clear, simple explanation (2-3 sentences max)
-        2. One concrete example
-        3. One analogy from everyday life
-        4. One common misconception to watch out for
+        1. A clear explanation tailored to their knowledge level (2-4 sentences)
+        2. A concrete example relevant to their level
+        3. An analogy from everyday life that matches their understanding
+        4. A common misconception to watch out for
+        5. A practical application or "why this matters"
         
         Rules:
         - ONE idea only
         - No jargon without explanation
-        - Make it memorable
+        - Make it memorable and relevant
+        - If advanced, include edge cases or limitations
         
         Return STRICT JSON:
         {{
             "explanation": "Clear explanation here",
             "example": "Concrete example here",
             "analogy": "Everyday analogy here",
-            "misconception": "Common mistake students make"
+            "misconception": "Common mistake students make",
+            "practical_application": "Why this matters in real life"
         }}
         """
         
@@ -1566,11 +1168,10 @@ class AdaptiveLearningEngine:
                 model="llama-3.3-70b-versatile",
                 messages=[{"role": "user", "content": prompt}],
                 temperature=0.3,
-                max_tokens=500,
+                max_tokens=800,
             )
             
             raw_text = response.choices[0].message.content
-            # Extract JSON from response (handle markdown code blocks)
             if "```" in raw_text:
                 raw_text = raw_text.split("```")[1]
                 if raw_text.startswith("json"):
@@ -1579,58 +1180,63 @@ class AdaptiveLearningEngine:
             return json.loads(raw_text.strip())
         except Exception as e:
             print(f"Warning: Could not generate teaching content: {e}")
+            return self._get_fallback_content(atom_name, concept, knowledge_level)
+    
+    def _get_fallback_content(self, atom_name: str, concept: str, level: str) -> Dict:
+        """Fallback content based on knowledge level"""
+        if level == 'advanced':
             return {
-                "explanation": f"{atom_name} is a key concept.",
-                "example": f"Example of {atom_name}.",
-                "analogy": f"Think of {atom_name} like a system.",
-                "misconception": f"Common mistake with {atom_name}."
+                "explanation": f"{atom_name} represents an advanced aspect of {concept} with complex interactions and edge cases.",
+                "example": f"Advanced example: In production systems, {atom_name} manifests through...",
+                "analogy": f"Think of {atom_name} like a sophisticated system where multiple components interact.",
+                "misconception": f"Even experts sometimes confuse {atom_name} with similar advanced concepts.",
+                "practical_application": f"Understanding {atom_name} helps in optimizing system performance."
+            }
+        elif level == 'intermediate':
+            return {
+                "explanation": f"{atom_name} is a key component of {concept} that builds on foundational knowledge.",
+                "example": f"Example: When working with {concept}, {atom_name} helps you...",
+                "analogy": f"Think of {atom_name} like a well-organized tool in your toolkit.",
+                "misconception": f"Don't confuse {atom_name} with its related concepts.",
+                "practical_application": f"Mastering {atom_name} improves your problem-solving efficiency."
+            }
+        else:  # zero or beginner
+            return {
+                "explanation": f"{atom_name} is a fundamental building block of {concept}. It's like learning a basic rule.",
+                "example": f"Simple example: Just like learning the alphabet before writing words, {atom_name} comes first.",
+                "analogy": f"Think of {atom_name} like learning to crawl before you walk.",
+                "misconception": f"Beginners often think {atom_name} is harder than it really is.",
+                "practical_application": f"Understanding {atom_name} opens the door to mastering {concept}."
             }
     
-    def get_adaptive_hint(self, question: Dict, error_count: int, 
-                         atom_name: str, question_text: str) -> str:
+    def determine_pacing(self, diagnostic_results: Dict, knowledge_level: str) -> str:
         """
-        Get adaptive hint based on error count and question content
-        """
-        hints = [
-            "Think about what the question is asking.",
-            f"Consider how this relates to {atom_name}.",
-        ]
-        
-        # More specific hints based on question content
-        q_text = question_text.lower()
-        
-        if "address" in q_text:
-            hints.append("With N address lines, you can access 2^N locations.")
-            hints.append("Each address line DOUBLES the possible memory size.")
-        
-        if "cache" in q_text or "ram" in q_text:
-            hints.append("Cache is closer to the CPU and faster, but smaller than RAM.")
-            hints.append("Think of the hierarchy: CPU â†’ Cache â†’ RAM â†’ Disk")
-        
-        if "rom" in q_text:
-            hints.append("ROM retains data even when power is off.")
-            hints.append("ROM typically stores the bootloader/firmware.")
-        
-        if "mapping" in q_text or "share" in q_text:
-            hints.append("Different memory types can use different address ranges.")
-            hints.append("For example: 0000-7FFF might be ROM, 8000-FFFF might be RAM.")
-        
-        # Escalate hints based on error count
-        hint_level = min(error_count, len(hints) - 1)
-        return hints[hint_level]
-    
-    def determine_pacing(self, diagnostic_results: Dict) -> str:
-        """
-        Determine learning pace based on diagnostic results
+        Determine learning pace based on diagnostic results and initial knowledge level
         """
         accuracy = diagnostic_results.get('accuracy', 0)
         
-        if accuracy < 0.4:
-            return PacingDecision.SHARP_SLOWDOWN.value
-        elif accuracy < 0.7:
-            return PacingDecision.SLOW_DOWN.value
-        else:
-            return PacingDecision.SPEED_UP.value
+        # Adjust thresholds based on knowledge level
+        if knowledge_level == 'advanced':
+            if accuracy < 0.6:
+                return 'slow_down'
+            elif accuracy < 0.8:
+                return 'stay'
+            else:
+                return 'speed_up'
+        elif knowledge_level == 'intermediate':
+            if accuracy < 0.5:
+                return 'slow_down'
+            elif accuracy < 0.75:
+                return 'stay'
+            else:
+                return 'speed_up'
+        else:  # zero or beginner
+            if accuracy < 0.4:
+                return 'sharp_slowdown'
+            elif accuracy < 0.7:
+                return 'slow_down'
+            else:
+                return 'speed_up'
     
     def get_contextual_analogy(self, atom_name: str, concept: str) -> Dict:
         """
@@ -1871,6 +1477,69 @@ def classify_error_type(question: Dict[str, Any], answer: int,
     return None
 
 
+# backend/learning_engine/knowledge_tracing.py
+
+def classify_error_type(question, answer, time_taken, atom_name):
+    """Classify error type based on question, answer, and timing"""
+    if answer == -1:  # No answer
+        return "no_answer"
+    
+    estimated = question.get('estimated_time', 60)
+    time_ratio = time_taken / estimated if estimated > 0 else 1.0
+    
+    # Fast wrong = guessing
+    if time_ratio < 0.5:
+        return "guessing"
+    
+    # Slow wrong on easy question = conceptual
+    if question.get('difficulty') == 'easy' and time_ratio > 1.3:
+        return "conceptual"
+    
+    # Check for structural errors based on question content
+    q_text = question.get('question', '').lower()
+    if any(term in q_text for term in ['compare', 'contrast', 'difference', 'relationship']):
+        return "structural"
+    
+    # Check if it's a factual error
+    if question.get('difficulty') == 'easy':
+        return "factual"
+    
+    # Default
+    return "procedural"
+
+def bkt_update(p_know, correct, p_slip=0.1, p_guess=0.2, p_learn=0.15):
+    """Bayesian Knowledge Tracing update"""
+    if correct:
+        numerator = p_know * (1 - p_slip)
+        denominator = numerator + (1 - p_know) * p_guess
+    else:
+        numerator = p_know * p_slip
+        denominator = numerator + (1 - p_know) * (1 - p_guess)
+    
+    posterior = numerator / denominator if denominator != 0 else p_know
+    
+    # Learning transition
+    updated = posterior + (1 - posterior) * p_learn
+    
+    return min(1.0, max(0.0, updated))
+
+def update_theta(theta, correct, b=0.0, a=1.0, lr=0.4):
+    """Update IRT theta parameter"""
+    import math
+    
+    # IRT probability
+    def irt_prob(theta, b, a):
+        return 1 / (1 + math.exp(-a * (theta - b)))
+    
+    predicted = irt_prob(theta, b, a)
+    actual = 1.0 if correct else 0.0
+    
+    # Gradient update
+    theta = theta + lr * (actual - predicted)
+    
+    return theta
+
+
 ================================================
 FILE: backend/learning_engine/models.py
 ================================================
@@ -1935,6 +1604,8 @@ class TeachingAtomState:
 ================================================
 FILE: backend/learning_engine/question_generator.py
 ================================================
+# backend/learning_engine/question_generator.py - Complete fixed version
+
 import json
 import os
 from typing import Dict, List, Optional
@@ -1954,7 +1625,7 @@ class QuestionGenerator:
         gemini_key = getattr(settings, 'GOOGLE_API_KEY', '')
         if gemini_key:
             genai.configure(api_key=gemini_key)
-            self.gemini_model = genai.GenerativeModel('gemini-2.5-flash')
+            self.gemini_model = genai.GenerativeModel('gemini-1.5-flash')
         else:
             self.gemini_model = None
     
@@ -1970,7 +1641,7 @@ class QuestionGenerator:
             List of atomic concept names
         """
         if not self.gemini_model:
-            # Fallback atoms if Gemini not available
+            print("Gemini model not available, using fallback atoms")
             return self._get_fallback_atoms(subject, concept)
         
         prompt = f"""
@@ -1982,21 +1653,19 @@ class QuestionGenerator:
         You must follow ALL rules strictly.
 
         STRICT RULES:
-
         1. Generate EXACTLY between 4 and 6 atoms.
         2. Each atom must be:
-        - A noun or noun phrase only.
-        - Maximum 4 words.
-        - No verbs.
-        - No full sentences.
+           - A noun or noun phrase only.
+           - Maximum 4 words.
+           - No verbs.
+           - No full sentences.
         3. All atoms must belong to the SAME abstraction level.
-        (Do NOT mix structure, mechanism, and abstraction.)
         4. Do NOT generate:
-        - Parentâ€“child pairs
-        - General-to-specific relationships
-        - Negation pairs (pre/non, with/without, static/dynamic)
-        - Overlapping concepts
-        - Duplicates
+           - Parentâ€“child pairs
+           - General-to-specific relationships
+           - Negation pairs (pre/non, with/without, static/dynamic)
+           - Overlapping concepts
+           - Duplicates
         5. Each atom must be independently assessable.
         6. Do NOT include the concept name itself.
         7. No explanations.
@@ -2005,7 +1674,6 @@ class QuestionGenerator:
         10. Output STRICT JSON only.
 
         Output format:
-
         {{
             "atoms": [
                 "Atom 1",
@@ -2034,6 +1702,7 @@ class QuestionGenerator:
             
             # Validate atom count
             if len(atoms) < 4 or len(atoms) > 6:
+                print(f"Invalid atom count: {len(atoms)}, using fallback")
                 return self._get_fallback_atoms(subject, concept)
             
             return atoms
@@ -2043,9 +1712,9 @@ class QuestionGenerator:
             return self._get_fallback_atoms(subject, concept)
     
     def generate_questions(self, subject: str, concept: str, atom: str,
-                          need_easy: int, need_medium: int) -> List[Dict]:
+                          need_easy: int, need_medium: int, knowledge_level: str = 'intermediate') -> List[Dict]:
         """
-        Generate questions for an atom using Groq
+        Generate questions for an atom based on knowledge level
         
         Args:
             subject: Subject name
@@ -2053,14 +1722,48 @@ class QuestionGenerator:
             atom: Atomic concept name
             need_easy: Number of easy questions needed
             need_medium: Number of medium questions needed
+            knowledge_level: Student's knowledge level (zero, beginner, intermediate, advanced)
         
         Returns:
             List of question dictionaries
         """
+        print(f"Generating questions for atom: {atom}, easy: {need_easy}, medium: {need_medium}, level: {knowledge_level}")
+        
         if not self.groq_client or (need_easy == 0 and need_medium == 0):
-            return self._get_fallback_questions(atom, need_easy, need_medium)
+            print("Groq client not available or no questions needed, using fallback")
+            return self._get_fallback_questions(atom, need_easy, need_medium, knowledge_level)
         
         total_needed = need_easy + need_medium
+        
+        # Adjust based on knowledge level
+        level_adjustments = {
+            'zero': {
+                'cognitive': ['recall'],
+                'time_factor': 1.5,
+                'complexity': 'very simple, foundational',
+                'hint_level': 'detailed'
+            },
+            'beginner': {
+                'cognitive': ['recall', 'apply'],
+                'time_factor': 1.2,
+                'complexity': 'straightforward',
+                'hint_level': 'clear'
+            },
+            'intermediate': {
+                'cognitive': ['recall', 'apply', 'analyze'],
+                'time_factor': 1.0,
+                'complexity': 'moderate',
+                'hint_level': 'moderate'
+            },
+            'advanced': {
+                'cognitive': ['apply', 'analyze'],
+                'time_factor': 0.8,
+                'complexity': 'challenging',
+                'hint_level': 'subtle'
+            }
+        }
+        
+        adj = level_adjustments.get(knowledge_level, level_adjustments['intermediate'])
         
         req_lines = []
         if need_easy:
@@ -2074,63 +1777,34 @@ class QuestionGenerator:
         Subject: {subject}
         Concept: {concept}
         Atomic Concept: {atom}
+        Student Level: {knowledge_level.upper()}
         
-        You MUST follow ALL rules strictly.
+        Generate EXACTLY {total_needed} questions with these characteristics:
+        - Complexity: {adj['complexity']}
+        - Cognitive levels: {', '.join(adj['cognitive'])}
+        - Hint level: {adj['hint_level']}
         
-        STRUCTURE RULES:
-        1. Generate EXACTLY {total_needed} MCQ questions.
-        2. Each question must assess ONLY the given Atomic Concept.
-        3. Each question must have EXACTLY 4 options.
-        4. EXACTLY 1 correct option per question.
-        5. Do NOT use:
-        - "All of the above"
-        - "None of the above"
-        - Multiple correct answers
-        - Tricky wording
-        6. No explanations.
-        7. No numbering.
-        8. No markdown.
-        9. Maximum 25 words per question text.
-        10. Create meaningful, clearly phrased questions using complete sentences.
-        11. Each question must be fully understandable independently.
-        12. Do NOT use vague references like:
-        - "this concept"
-        - "the above"
-        - "it"
-        - "this method"
-        13. The question must explicitly include the relevant domain term from the Atomic Concept.
-        14. Avoid ambiguous wording and incomplete fragments.
-        15. The question must make sense without any external context.
-        16. Each question must explicitly contain the name of the Atomic Concept within the question text.
-
-        DIFFICULTY REQUIREMENTS:
+        Question Distribution:
         {chr(10).join(req_lines)}
         - No hard questions
-
-        COGNITIVE DISTRIBUTION:
-        EASY (4 total):
-        - 2 recall
-        - 2 apply
-
-        MEDIUM (4 total):
-        - 2 apply
-        - 2 analyze
-
-        TIME CONSTRAINTS:
-        - recall â†’ 20â€“40 seconds
-        - apply â†’ 40â€“90 seconds
-        - analyze â†’ 90â€“150 seconds
-
+        
+        Each question must:
+        - Have exactly 4 options
+        - Be clearly worded and self-contained
+        - Test understanding, not trickery
+        - Include the atomic concept explicitly
+        - Maximum 25 words per question text
+        
         Each question MUST include:
         - "difficulty": easy | medium
         - "cognitive_operation": recall | apply | analyze
-        - "estimated_time": integer (seconds)
+        - "estimated_time": integer (seconds) - recall: 20-40, apply: 40-90, analyze: 90-150
         - "question": string
         - "options": array of exactly 4 strings
-        - "correct_index": integer (0â€“3)
-
+        - "correct_index": integer (0-3)
+        
         OUTPUT STRICT JSON ONLY:
-
+        
         {{
             "questions": [
                 {{
@@ -2148,7 +1822,7 @@ class QuestionGenerator:
                 }}
             ]
         }}
-
+        
         If constraints cannot be satisfied, return:
         {{"questions": []}}
         """
@@ -2169,11 +1843,18 @@ class QuestionGenerator:
                     raw_text = raw_text[4:]
             
             result = json.loads(raw_text.strip())
-            return result.get("questions", [])
+            questions = result.get("questions", [])
+            
+            # Adjust estimated time based on knowledge level
+            for q in questions:
+                q['estimated_time'] = int(q.get('estimated_time', 60) * adj['time_factor'])
+            
+            print(f"Generated {len(questions)} questions")
+            return questions
             
         except Exception as e:
             print(f"Error generating questions: {e}")
-            return self._get_fallback_questions(atom, need_easy, need_medium)
+            return self._get_fallback_questions(atom, need_easy, need_medium, knowledge_level)
     
     def _get_fallback_atoms(self, subject: str, concept: str) -> List[str]:
         """Provide fallback atoms when AI generation fails"""
@@ -2216,7 +1897,7 @@ class QuestionGenerator:
             f"{concept} Limitations"
         ]
     
-    def _get_fallback_questions(self, atom: str, need_easy: int, need_medium: int) -> List[Dict]:
+    def _get_fallback_questions(self, atom: str, need_easy: int, need_medium: int, level: str = 'intermediate') -> List[Dict]:
         """Provide fallback questions when AI generation fails"""
         questions = []
         
@@ -2226,7 +1907,7 @@ class QuestionGenerator:
                 "difficulty": "easy",
                 "cognitive_operation": "recall",
                 "estimated_time": 30,
-                "question": f"What is the primary function of {atom}?",
+                "question": f"What is the primary purpose of {atom}?",
                 "options": [
                     f"To manage {atom} operations",
                     "To store data permanently",
@@ -2242,12 +1923,12 @@ class QuestionGenerator:
                 "difficulty": "medium",
                 "cognitive_operation": "apply",
                 "estimated_time": 60,
-                "question": f"In a computer system, how does {atom} affect performance?",
+                "question": f"Which scenario best demonstrates the application of {atom}?",
                 "options": [
-                    f"By optimizing {atom} access",
-                    "By increasing clock speed",
-                    "By reducing power consumption",
-                    "By adding more cores"
+                    f"When implementing {atom} in a real system",
+                    "During basic operations",
+                    "In simple calculations",
+                    "At the start of processing"
                 ],
                 "correct_index": 0
             })
@@ -2265,8 +1946,11 @@ class QuestionGenerator:
         Returns:
             Dictionary with atoms and questions
         """
+        print(f"Generating complete concept for {subject} - {concept}")
+        
         # Generate atoms
         atoms = self.generate_atoms(subject, concept)
+        print(f"Generated {len(atoms)} atoms: {atoms}")
         
         result = {
             "concept": concept,
@@ -2276,14 +1960,195 @@ class QuestionGenerator:
         
         # Generate questions for each atom
         for atom in atoms:
+            print(f"Generating questions for atom: {atom}")
             # Generate 2 easy and 2 medium questions per atom
-            questions = self.generate_questions(subject, concept, atom, 2, 2)
+            questions = self.generate_questions(
+                subject=subject,
+                concept=concept,
+                atom=atom,
+                need_easy=2,
+                need_medium=2,
+                knowledge_level='intermediate'  # Default level
+            )
+            
             result["atoms"][atom] = {
                 "name": atom,
                 "questions": questions
             }
+            
+            print(f"Generated {len(questions)} questions for {atom}")
         
         return result
+    
+    
+    
+    def generate_questions_from_teaching(self, subject, concept, atom, teaching_content, 
+                                        need_easy=1, need_medium=2, need_hard=0, 
+                                        knowledge_level='intermediate'):
+        """
+        Generate questions based on the teaching content that was shown
+        
+        Args:
+            subject: Subject name
+            concept: Concept name
+            atom: Atomic concept name
+            teaching_content: Dict with explanation, analogy, examples
+            need_easy: Number of easy questions
+            need_medium: Number of medium questions
+            need_hard: Number of hard questions
+            knowledge_level: Student's knowledge level
+        
+        Returns:
+            List of question dictionaries
+        """
+        print(f"Generating questions from teaching for atom: {atom}")
+        
+        if not self.groq_client:
+            print("Groq client not available, using fallback")
+            return self._get_fallback_questions_from_teaching(atom, need_easy, need_medium, need_hard)
+        
+        total_needed = need_easy + need_medium + need_hard
+        
+        # Extract teaching content
+        explanation = teaching_content.get('explanation', '')
+        analogy = teaching_content.get('analogy', '')
+        examples = teaching_content.get('examples', [])
+        
+        examples_text = "\n".join([f"- {ex}" for ex in examples if ex])
+        
+        prompt = f"""
+        You are generating assessment questions based on specific teaching content that was just shown to a student.
+        
+        Subject: {subject}
+        Concept: {concept}
+        Atomic Concept: {atom}
+        Student Level: {knowledge_level.upper()}
+        
+        TEACHING CONTENT SHOWN TO STUDENT:
+        
+        Explanation:
+        {explanation}
+        
+        Analogy:
+        {analogy}
+        
+        Examples/Applications:
+        {examples_text}
+        
+        TASK:
+        Generate EXACTLY {total_needed} multiple-choice questions that test understanding of the teaching content above.
+        
+        Question Distribution:
+        - Easy: {need_easy} question(s) - Direct recall from the explanation
+        - Medium: {need_medium} question(s) - Apply the concept to new situations
+        - Hard: {need_hard} question(s) - Analyze relationships or troubleshoot
+        
+        RULES:
+        1. Each question must be answerable based SOLELY on the teaching content provided
+        2. Test genuine understanding, not trickery
+        3. Questions should build upon what was taught
+        4. Include the analogy or examples where appropriate
+        5. Each question must have exactly 4 options
+        6. One clearly correct answer, three plausible distractors
+        
+        OUTPUT STRICT JSON ONLY:
+        
+        {{
+            "questions": [
+                {{
+                    "difficulty": "easy",
+                    "cognitive_operation": "recall",
+                    "estimated_time": 30,
+                    "question": "Based on the explanation, what is the main purpose of {atom}?",
+                    "options": [
+                        "Option A based on teaching",
+                        "Option B based on teaching", 
+                        "Option C based on teaching",
+                        "Option D based on teaching"
+                    ],
+                    "correct_index": 0
+                }}
+            ]
+        }}
+        """
+        
+        try:
+            response = self.groq_client.chat.completions.create(
+                model="llama-3.3-70b-versatile",
+                messages=[{"role": "user", "content": prompt}],
+                temperature=0.3,
+                max_tokens=1024,
+            )
+            
+            raw_text = response.choices[0].message.content
+            if "```" in raw_text:
+                raw_text = raw_text.split("```")[1]
+                if raw_text.startswith("json"):
+                    raw_text = raw_text[4:]
+            
+            result = json.loads(raw_text.strip())
+            questions = result.get("questions", [])
+            
+            print(f"Generated {len(questions)} questions from teaching")
+            return questions
+            
+        except Exception as e:
+            print(f"Error generating questions from teaching: {e}")
+            return self._get_fallback_questions_from_teaching(atom, need_easy, need_medium, need_hard)
+
+    def _get_fallback_questions_from_teaching(self, atom, need_easy, need_medium, need_hard):
+        """Fallback questions based on teaching content"""
+        questions = []
+        
+        # Easy questions
+        for i in range(need_easy):
+            questions.append({
+                "difficulty": "easy",
+                "cognitive_operation": "recall",
+                "estimated_time": 30,
+                "question": f"What is the main purpose of {atom}?",
+                "options": [
+                    f"To {atom.lower()} efficiently",
+                    "To store data permanently",
+                    "To execute instructions",
+                    "To control peripherals"
+                ],
+                "correct_index": 0
+            })
+        
+        # Medium questions
+        for i in range(need_medium):
+            questions.append({
+                "difficulty": "medium",
+                "cognitive_operation": "apply",
+                "estimated_time": 60,
+                "question": f"Which scenario best demonstrates the application of {atom}?",
+                "options": [
+                    f"When implementing {atom} in a real system",
+                    "During basic operations",
+                    "In simple calculations",
+                    "At the start of processing"
+                ],
+                "correct_index": 0
+            })
+        
+        # Hard questions
+        for i in range(need_hard):
+            questions.append({
+                "difficulty": "hard",
+                "cognitive_operation": "analyze",
+                "estimated_time": 90,
+                "question": f"What would happen if {atom} was implemented incorrectly?",
+                "options": [
+                    "System performance would degrade",
+                    "Nothing would change",
+                    "The system would run faster",
+                    "Data would be more secure"
+                ],
+                "correct_index": 0
+            })
+        
+        return questions
 
 
 ================================================
@@ -2552,6 +2417,7 @@ FILE: frontend/src/App.css
 ================================================
 FILE: frontend/src/App.jsx
 ================================================
+// In App.jsx - Make sure your route is exactly like this:
 import React from 'react';
 import { BrowserRouter as Router, Routes, Route } from 'react-router-dom';
 import { AuthProvider } from './context/AuthContext';
@@ -2562,7 +2428,6 @@ import Dashboard from './components/Dashboard';
 import ProtectedRoute from './components/ProtectedRoute';
 import LearningRoute from './components/Learning/LearningRoute';
 import StartAnyConceptSessionRoute from './components/Learning/StartAnyConceptSessionRoute';
-
 
 function App() {
     return (
@@ -2582,16 +2447,9 @@ function App() {
                         }
                     />
 
+                    {/* This is the important route - note the :conceptId parameter */}
                     <Route
-                        path="/learn"
-                        element={
-                            <ProtectedRoute>
-                                <LearningRoute />
-                            </ProtectedRoute>
-                        }
-                    />
-                    <Route
-                        path="/learn/:subject"
+                        path="/learn/:conceptId"
                         element={
                             <ProtectedRoute>
                                 <LearningRoute />
@@ -2631,21 +2489,62 @@ const axiosInstance = axios.create({
 // Add token to requests if it exists
 axiosInstance.interceptors.request.use(
     (config) => {
-        const url = config.url || '';
-        const isAuthEndpoint =
-            url.includes('/auth/api/login/') ||
-            url.includes('/auth/api/register/') ||
-            url.includes('/api/token/refresh/');
-
-        if (!isAuthEndpoint) {
-            const token = localStorage.getItem('access_token');
-            if (token) {
-                config.headers.Authorization = `Bearer ${token}`;
-            }
+        const token = localStorage.getItem('access_token');
+        console.log("Axios Request:", {
+            url: config.url,
+            method: config.method,
+            hasToken: !!token,
+            token: token ? `${token.substring(0, 20)}...` : 'none'
+        });
+        
+        if (token) {
+            config.headers.Authorization = `Bearer ${token}`;
         }
         return config;
     },
     (error) => {
+        return Promise.reject(error);
+    }
+);
+
+// Add response interceptor to handle 401 errors
+axiosInstance.interceptors.response.use(
+    (response) => response,
+    async (error) => {
+        const originalRequest = error.config;
+        
+        console.log("Axios Response Error:", {
+            status: error.response?.status,
+            url: originalRequest?.url,
+            message: error.response?.data?.error || error.message
+        });
+        
+        // If error is 401 and we haven't tried to refresh token yet
+        if (error.response?.status === 401 && !originalRequest._retry) {
+            originalRequest._retry = true;
+            
+            try {
+                const refreshToken = localStorage.getItem('refresh_token');
+                if (refreshToken) {
+                    const response = await axios.post('http://localhost:8000/api/token/refresh/', {
+                        refresh: refreshToken
+                    });
+                    
+                    if (response.data.access) {
+                        localStorage.setItem('access_token', response.data.access);
+                        originalRequest.headers.Authorization = `Bearer ${response.data.access}`;
+                        return axiosInstance(originalRequest);
+                    }
+                }
+            } catch (refreshError) {
+                console.error("Token refresh failed:", refreshError);
+                // Clear tokens and redirect to login
+                localStorage.removeItem('access_token');
+                localStorage.removeItem('refresh_token');
+                window.location.href = '/login';
+            }
+        }
+        
         return Promise.reject(error);
     }
 );
@@ -2659,6 +2558,46 @@ FILE: frontend/src/index.css
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
+
+
+@keyframes bounce {
+    0%, 100% { transform: translateY(0); }
+    50% { transform: translateY(-10px); }
+}
+
+.animate-bounce {
+    animation: bounce 1s infinite;
+}
+
+@keyframes pulse {
+    0%, 100% { transform: scale(1); }
+    50% { transform: scale(1.05); }
+}
+
+.animate-pulse-slow {
+    animation: pulse 2s infinite;
+}
+
+/* Progress bar animations */
+.progress-bar-striped {
+    background-image: linear-gradient(
+        45deg,
+        rgba(255, 255, 255, 0.15) 25%,
+        transparent 25%,
+        transparent 50%,
+        rgba(255, 255, 255, 0.15) 50%,
+        rgba(255, 255, 255, 0.15) 75%,
+        transparent 75%,
+        transparent
+    );
+    background-size: 1rem 1rem;
+    animation: progress-bar-stripes 1s linear infinite;
+}
+
+@keyframes progress-bar-stripes {
+    0% { background-position: 1rem 0; }
+    100% { background-position: 0 0; }
+}
 
 
 ================================================
@@ -2686,9 +2625,11 @@ import axios from '../axiosConfig';
 
 const Dashboard = () => {
     const [dashboardData, setDashboardData] = useState(null);
+    const [concepts, setConcepts] = useState([]);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState('');
-    
+    const [selectedSubject, setSelectedSubject] = useState('');
+    const [subjects, setSubjects] = useState([]);
     
     const { user, logout } = useAuth();
     const navigate = useNavigate();
@@ -2697,10 +2638,8 @@ const Dashboard = () => {
         try {
             const response = await axios.get('/auth/api/dashboard/');
             setDashboardData(response.data);
-            setLoading(false);
         } catch (err) {
             setError('Failed to fetch dashboard data');
-            setLoading(false);
             
             if (err.response?.status === 401) {
                 logout();
@@ -2709,14 +2648,47 @@ const Dashboard = () => {
         }
     }, [logout, navigate]);
 
+    const fetchConcepts = useCallback(async () => {
+        try {
+            const response = await axios.get('/auth/api/concepts/');
+            setConcepts(response.data);
+            
+            // Extract unique subjects
+            const uniqueSubjects = [...new Set(response.data.map(c => c.subject))];
+            setSubjects(uniqueSubjects);
+        } catch (err) {
+            console.error('Failed to fetch concepts:', err);
+        } finally {
+            setLoading(false);
+        }
+    }, []);
+
     useEffect(() => {
         fetchDashboardData();
-    }, [fetchDashboardData]);
+        fetchConcepts();
+    }, [fetchDashboardData, fetchConcepts]);
 
     const handleLogout = () => {
         logout();
         navigate('/login');
     };
+
+    const handleStartLearning = (conceptId) => {
+        // Navigate to the teaching-first flow with concept ID
+        navigate(`/learn/${conceptId}`);
+    };
+
+    const handleStartAnyConcept = () => {
+        navigate('/learn/start');
+    };
+
+    const handleViewProgress = () => {
+        navigate('/progress');
+    };
+
+    const filteredConcepts = selectedSubject
+        ? concepts.filter(c => c.subject === selectedSubject)
+        : concepts;
 
     if (loading) {
         return (
@@ -2749,12 +2721,6 @@ const Dashboard = () => {
                                 Welcome, {user?.first_name}!
                             </span>
                             <button
-                                onClick={() => navigate('/learn')}
-                                className="bg-green-500 hover:bg-green-700 text-white font-bold py-2 px-4 rounded"
-                            >
-                                Start Learning
-                            </button>
-                            <button
                                 onClick={handleLogout}
                                 className="bg-red-500 hover:bg-red-700 text-white font-bold py-2 px-4 rounded"
                             >
@@ -2767,117 +2733,228 @@ const Dashboard = () => {
 
             <main className="max-w-7xl mx-auto py-6 sm:px-6 lg:px-8">
                 <div className="px-4 py-6 sm:px-0">
-                    <div className="border-4 border-dashed border-gray-200 rounded-lg p-6">
-                        <h2 className="text-2xl font-bold mb-4">
-                            {dashboardData?.message}
+                    {/* Welcome Message */}
+                    <div className="bg-white rounded-lg shadow-lg p-6 mb-6">
+                        <h2 className="text-2xl font-bold mb-2">
+                            {dashboardData?.message || `Welcome back, ${user?.first_name}!`}
                         </h2>
+                        <p className="text-gray-600">
+                            Continue your learning journey with our adaptive teaching system.
+                        </p>
+                    </div>
+
+                    {/* Stats Cards */}
+                    <div className="grid grid-cols-1 gap-5 sm:grid-cols-2 lg:grid-cols-4 mb-6">
+                        <div className="bg-white overflow-hidden shadow rounded-lg">
+                            <div className="px-4 py-5 sm:p-6">
+                                <dt className="text-sm font-medium text-gray-500 truncate">
+                                    Total Courses
+                                </dt>
+                                <dd className="mt-1 text-3xl font-semibold text-gray-900">
+                                    {concepts.length}
+                                </dd>
+                            </div>
+                        </div>
+
+                        <div className="bg-white overflow-hidden shadow rounded-lg">
+                            <div className="px-4 py-5 sm:p-6">
+                                <dt className="text-sm font-medium text-gray-500 truncate">
+                                    Subjects
+                                </dt>
+                                <dd className="mt-1 text-3xl font-semibold text-gray-900">
+                                    {subjects.length}
+                                </dd>
+                            </div>
+                        </div>
+
+                        <div className="bg-white overflow-hidden shadow rounded-lg">
+                            <div className="px-4 py-5 sm:p-6">
+                                <dt className="text-sm font-medium text-gray-500 truncate">
+                                    Learning Streak
+                                </dt>
+                                <dd className="mt-1 text-3xl font-semibold text-gray-900">
+                                    {dashboardData?.dashboard_data?.learning_streak || 0} ðŸ”¥
+                                </dd>
+                            </div>
+                        </div>
+
+                        <div className="bg-white overflow-hidden shadow rounded-lg">
+                            <div className="px-4 py-5 sm:p-6">
+                                <dt className="text-sm font-medium text-gray-500 truncate">
+                                    Time Spent
+                                </dt>
+                                <dd className="mt-1 text-3xl font-semibold text-gray-900">
+                                    {dashboardData?.dashboard_data?.total_time_spent || 0}m
+                                </dd>
+                            </div>
+                        </div>
+                    </div>
+
+                    {/* Quick Actions */}
+                    <div className="bg-white shadow overflow-hidden sm:rounded-lg mb-6">
+                        <div className="px-4 py-5 sm:px-6">
+                            <h3 className="text-lg leading-6 font-medium text-gray-900">
+                                Quick Actions
+                            </h3>
+                        </div>
+                        <div className="border-t border-gray-200 px-4 py-5 sm:px-6">
+                            <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+                                <button
+                                    onClick={handleStartAnyConcept}
+                                    className="bg-green-600 hover:bg-green-700 text-white font-bold py-3 px-4 rounded-lg text-center transition"
+                                >
+                                    â–¶ Start New Session
+                                </button>
+
+                                <button
+                                    onClick={handleViewProgress}
+                                    className="bg-purple-600 hover:bg-purple-700 text-white font-bold py-3 px-4 rounded-lg text-center transition"
+                                >
+                                    ðŸ“Š View Progress
+                                </button>
+
+                                <button
+                                    onClick={() => window.location.reload()}
+                                    className="bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 px-4 rounded-lg text-center transition"
+                                >
+                                    ðŸ”„ Refresh
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+
+                    {/* Concepts Section */}
+                    <div className="bg-white shadow overflow-hidden sm:rounded-lg">
+                        <div className="px-4 py-5 sm:px-6 flex justify-between items-center">
+                            <div>
+                                <h3 className="text-lg leading-6 font-medium text-gray-900">
+                                    Available Concepts
+                                </h3>
+                                <p className="mt-1 text-sm text-gray-500">
+                                    Select a concept to start learning with our teaching-first approach
+                                </p>
+                            </div>
+                            
+                            {/* Subject Filter */}
+                            <div className="w-64">
+                                <select
+                                    value={selectedSubject}
+                                    onChange={(e) => setSelectedSubject(e.target.value)}
+                                    className="mt-1 block w-full pl-3 pr-10 py-2 text-base border-gray-300 focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm rounded-md"
+                                >
+                                    <option value="">All Subjects</option>
+                                    {subjects.map(subject => (
+                                        <option key={subject} value={subject}>
+                                            {subject}
+                                        </option>
+                                    ))}
+                                </select>
+                            </div>
+                        </div>
                         
-                        <div className="grid grid-cols-1 gap-5 sm:grid-cols-2 lg:grid-cols-3">
-                            <div className="bg-white overflow-hidden shadow rounded-lg">
-                                <div className="px-4 py-5 sm:p-6">
-                                    <dt className="text-sm font-medium text-gray-500 truncate">
-                                        Total Courses
-                                    </dt>
-                                    <dd className="mt-1 text-3xl font-semibold text-gray-900">
-                                        {dashboardData?.dashboard_data?.total_courses}
-                                    </dd>
+                        <div className="border-t border-gray-200">
+                            {filteredConcepts.length === 0 ? (
+                                <div className="text-center py-12">
+                                    <p className="text-gray-500">No concepts available.</p>
+                                    <p className="text-sm text-gray-400 mt-2">
+                                        Try generating a new concept or check back later.
+                                    </p>
                                 </div>
-                            </div>
-
-                            <div className="bg-white overflow-hidden shadow rounded-lg">
-                                <div className="px-4 py-5 sm:p-6">
-                                    <dt className="text-sm font-medium text-gray-500 truncate">
-                                        Completed Assignments
-                                    </dt>
-                                    <dd className="mt-1 text-3xl font-semibold text-gray-900">
-                                        {dashboardData?.dashboard_data?.completed_assignments}
-                                    </dd>
-                                </div>
-                            </div>
-
-                            <div className="bg-white overflow-hidden shadow rounded-lg">
-                                <div className="px-4 py-5 sm:p-6">
-                                    <dt className="text-sm font-medium text-gray-500 truncate">
-                                        Upcoming Events
-                                    </dt>
-                                    <dd className="mt-1 text-3xl font-semibold text-gray-900">
-                                        {dashboardData?.dashboard_data?.upcoming_events}
-                                    </dd>
-                                </div>
-                            </div>
+                            ) : (
+                                <ul className="divide-y divide-gray-200">
+                                    {filteredConcepts.map((concept) => (
+                                        <li key={concept.id} className="px-4 py-4 sm:px-6 hover:bg-gray-50">
+                                            <div className="flex items-center justify-between">
+                                                <div className="flex-1 min-w-0">
+                                                    <p className="text-sm font-medium text-blue-600 truncate">
+                                                        {concept.name}
+                                                    </p>
+                                                    <div className="mt-2 flex items-center text-sm text-gray-500">
+                                                        <span className="truncate">{concept.subject}</span>
+                                                        <span className="mx-2">â€¢</span>
+                                                        <span className="capitalize">Difficulty: {concept.difficulty}</span>
+                                                        {concept.description && (
+                                                            <>
+                                                                <span className="mx-2">â€¢</span>
+                                                                <span className="truncate">{concept.description}</span>
+                                                            </>
+                                                        )}
+                                                    </div>
+                                                </div>
+                                                <div className="ml-4 flex-shrink-0">
+                                                    <button
+                                                        onClick={() => handleStartLearning(concept.id)}
+                                                        className="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500"
+                                                    >
+                                                        Start Learning
+                                                    </button>
+                                                </div>
+                                            </div>
+                                        </li>
+                                    ))}
+                                </ul>
+                            )}
                         </div>
+                    </div>
 
-                        <div className="mt-8 bg-white shadow overflow-hidden sm:rounded-lg">
-                            <div className="px-4 py-5 sm:px-6">
-                                <h3 className="text-lg leading-6 font-medium text-gray-900">
-                                    Quick Actions
-                                </h3>
-                            </div>
-                            <div className="border-t border-gray-200 px-4 py-5 sm:px-6">
-                                <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-                                    <button
-                                        onClick={() => navigate('/learn')}
-                                        className="bg-blue-500 hover:bg-blue-700 text-white font-bold py-3 px-4 rounded-lg text-center"
-                                    >
-                                        ðŸŽ¯ Start Adaptive Learning
-                                    </button>
-
-                                    <button
-                                        onClick={() => navigate('/learn/start')}
-                                        className="bg-green-600 hover:bg-green-700 text-white font-bold py-3 px-4 rounded-lg text-center"
-                                    >
-                                        â–¶ Start Session (Any Concept)
-                                    </button>
-                                    <button
-                                        className="bg-purple-500 hover:bg-purple-700 text-white font-bold py-3 px-4 rounded-lg text-center"
-                                    >
-                                        ðŸ“Š View Progress
-                                    </button>
-                                </div>
-                            </div>
+                    {/* User Information */}
+                    <div className="mt-6 bg-white shadow overflow-hidden sm:rounded-lg">
+                        <div className="px-4 py-5 sm:px-6">
+                            <h3 className="text-lg leading-6 font-medium text-gray-900">
+                                Your Information
+                            </h3>
                         </div>
+                        <div className="border-t border-gray-200 px-4 py-5 sm:px-6">
+                            <dl className="grid grid-cols-1 gap-x-4 gap-y-8 sm:grid-cols-2">
+                                <div className="sm:col-span-1">
+                                    <dt className="text-sm font-medium text-gray-500">
+                                        Username
+                                    </dt>
+                                    <dd className="mt-1 text-sm text-gray-900">
+                                        {user?.username}
+                                    </dd>
+                                </div>
+                                <div className="sm:col-span-1">
+                                    <dt className="text-sm font-medium text-gray-500">
+                                        Email
+                                    </dt>
+                                    <dd className="mt-1 text-sm text-gray-900">
+                                        {user?.email}
+                                    </dd>
+                                </div>
+                                <div className="sm:col-span-1">
+                                    <dt className="text-sm font-medium text-gray-500">
+                                        Full Name
+                                    </dt>
+                                    <dd className="mt-1 text-sm text-gray-900">
+                                        {user?.first_name} {user?.last_name}
+                                    </dd>
+                                </div>
+                                <div className="sm:col-span-1">
+                                    <dt className="text-sm font-medium text-gray-500">
+                                        Member Since
+                                    </dt>
+                                    <dd className="mt-1 text-sm text-gray-900">
+                                        {new Date().toLocaleDateString()} {/* You might want to get this from user data */}
+                                    </dd>
+                                </div>
+                            </dl>
+                        </div>
+                    </div>
 
-                        <div className="mt-8 bg-white shadow overflow-hidden sm:rounded-lg">
-                            <div className="px-4 py-5 sm:px-6">
-                                <h3 className="text-lg leading-6 font-medium text-gray-900">
-                                    User Information
-                                </h3>
+                    {/* Learning Tips */}
+                    <div className="mt-6 bg-blue-50 border-l-4 border-blue-400 p-4 rounded">
+                        <div className="flex">
+                            <div className="flex-shrink-0">
+                                <svg className="h-5 w-5 text-blue-400" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor">
+                                    <path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clipRule="evenodd" />
+                                </svg>
                             </div>
-                            <div className="border-t border-gray-200 px-4 py-5 sm:px-6">
-                                <dl className="grid grid-cols-1 gap-x-4 gap-y-8 sm:grid-cols-2">
-                                    <div className="sm:col-span-1">
-                                        <dt className="text-sm font-medium text-gray-500">
-                                            Username
-                                        </dt>
-                                        <dd className="mt-1 text-sm text-gray-900">
-                                            {user?.username}
-                                        </dd>
-                                    </div>
-                                    <div className="sm:col-span-1">
-                                        <dt className="text-sm font-medium text-gray-500">
-                                            Email
-                                        </dt>
-                                        <dd className="mt-1 text-sm text-gray-900">
-                                            {user?.email}
-                                        </dd>
-                                    </div>
-                                    <div className="sm:col-span-1">
-                                        <dt className="text-sm font-medium text-gray-500">
-                                            First Name
-                                        </dt>
-                                        <dd className="mt-1 text-sm text-gray-900">
-                                            {user?.first_name}
-                                        </dd>
-                                    </div>
-                                    <div className="sm:col-span-1">
-                                        <dt className="text-sm font-medium text-gray-500">
-                                            Last Name
-                                        </dt>
-                                        <dd className="mt-1 text-sm text-gray-900">
-                                            {user?.last_name}
-                                        </dd>
-                                    </div>
-                                </dl>
+                            <div className="ml-3">
+                                <p className="text-sm text-blue-700">
+                                    <strong>Learning Tip:</strong> Our teaching-first approach shows you concepts first, 
+                                    then generates questions based on what you learned. Take your time with each concept!
+                                </p>
                             </div>
                         </div>
                     </div>
@@ -3010,11 +3087,14 @@ export default Login;
 FILE: frontend/src/components/ProtectedRoute.jsx
 ================================================
 import React from 'react';
-import { Navigate } from 'react-router-dom';
+import { Navigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 
 const ProtectedRoute = ({ children }) => {
     const { user, loading } = useAuth();
+    const location = useLocation();
+
+    console.log("ProtectedRoute - Auth state:", { user: !!user, loading });
 
     if (loading) {
         return (
@@ -3025,7 +3105,8 @@ const ProtectedRoute = ({ children }) => {
     }
 
     if (!user) {
-        return <Navigate to="/login" replace />;
+        // Save the location they were trying to go to
+        return <Navigate to="/login" state={{ from: location.pathname }} replace />;
     }
 
     return children;
@@ -3223,15 +3304,104 @@ export default Register;
 
 
 ================================================
-FILE: frontend/src/components/Learning/AdaptiveLearning.jsx
+FILE: frontend/src/components/Learning/AtomComplete.jsx
 ================================================
-Error reading file with 'cp1252': 'charmap' codec can't decode byte 0x90 in position 5485: character maps to <undefined>
+Error reading file with 'cp1252': 'charmap' codec can't decode byte 0x8f in position 6682: character maps to <undefined>
 
 
 ================================================
-FILE: frontend/src/components/Learning/DiagnosticQuiz.jsx
+FILE: frontend/src/components/Learning/AtomList.jsx
 ================================================
-Error reading file with 'cp1252': 'charmap' codec can't decode byte 0x9d in position 5508: character maps to <undefined>
+import React from 'react';
+
+const AtomList = ({ atoms, onStartAtom, conceptName, completedCount }) => {
+    const getPhaseIcon = (phase) => {
+        const icons = {
+            'complete': '✅',
+            'teaching': '📚',
+            'diagnostic': '📝',
+            'reinforcement': '🔄',
+            'not_started': '⭕'
+        };
+        return icons[phase] || '📌';
+    };
+
+    const getPhaseColor = (phase) => {
+        const colors = {
+            'complete': 'text-green-600',
+            'teaching': 'text-blue-600',
+            'diagnostic': 'text-purple-600',
+            'reinforcement': 'text-orange-600',
+            'not_started': 'text-gray-400'
+        };
+        return colors[phase] || 'text-gray-600';
+    };
+
+    return (
+        <div className="bg-white rounded-lg shadow-lg p-8">
+            <h2 className="text-2xl font-bold mb-2">{conceptName}</h2>
+            <p className="text-gray-600 mb-6">
+                Completed {completedCount} of {atoms.length} concepts
+            </p>
+
+            <div className="space-y-3 mb-8">
+                {atoms.map((atom, index) => (
+                    <div
+                        key={atom.id}
+                        className={`flex items-center justify-between p-4 rounded-lg border ${
+                            atom.phase === 'not_started'
+                                ? 'border-gray-200 bg-gray-50'
+                                : atom.phase === 'complete'
+                                ? 'border-green-200 bg-green-50'
+                                : 'border-blue-200 bg-blue-50'
+                        }`}
+                    >
+                        <div className="flex items-center">
+                            <span className="text-2xl mr-4">{getPhaseIcon(atom.phase)}</span>
+                            <div>
+                                <p className="font-medium text-lg">{atom.name}</p>
+                                <p className={`text-sm ${getPhaseColor(atom.phase)}`}>
+                                    {atom.phase === 'complete' && '✓ Mastered'}
+                                    {atom.phase === 'teaching' && '📖 Learning in progress'}
+                                    {atom.phase === 'diagnostic' && '📝 Questions ready'}
+                                    {atom.phase === 'not_started' && '⏳ Not started'}
+                                </p>
+                            </div>
+                        </div>
+                        
+                        {atom.phase === 'not_started' && (
+                            <button
+                                onClick={() => onStartAtom(atom)}
+                                className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
+                            >
+                                Start Learning
+                            </button>
+                        )}
+                        
+                        {atom.phase === 'teaching' && (
+                            <span className="text-blue-600 font-medium">In Progress</span>
+                        )}
+                        
+                        {atom.phase === 'diagnostic' && (
+                            <button
+                                onClick={() => onStartAtom(atom)}
+                                className="px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700"
+                            >
+                                Continue
+                            </button>
+                        )}
+                        
+                        {atom.phase === 'complete' && (
+                            <span className="text-green-600 font-medium">✓ Completed</span>
+                        )}
+                    </div>
+                ))}
+            </div>
+        </div>
+    );
+};
+
+export default AtomList;
 
 
 ================================================
@@ -3406,16 +3576,65 @@ export default LearningProgress;
 FILE: frontend/src/components/Learning/LearningRoute.jsx
 ================================================
 import React from 'react';
-import { useParams } from 'react-router-dom';
+import { useParams, useLocation, useNavigate } from 'react-router-dom';
 import { LearningProvider } from '../../context/LearningContext';
-import AdaptiveLearning from './AdaptiveLearning';
+import TeachingFirstFlow from './TeachingFirstFlow';
 
 const LearningRoute = () => {
-    const { subject } = useParams();
+    const params = useParams();
+    const location = useLocation();
+    const navigate = useNavigate();
+    
+    // Log everything
+    console.log("=== LearningRoute Debug ===");
+    console.log("Full params object:", params);
+    console.log("Location pathname:", location.pathname);
+    console.log("Location search:", location.search);
+    console.log("Location state:", location.state);
+    console.log("conceptId from params:", params.conceptId);
+    
+    // Try to get conceptId from different sources
+    let conceptId = params.conceptId;
+    
+    // If not in params, try to get from state
+    if (!conceptId && location.state?.conceptId) {
+        conceptId = location.state.conceptId;
+        console.log("Got conceptId from state:", conceptId);
+    }
+    
+    // If still no conceptId, try to extract from pathname
+    if (!conceptId) {
+        const pathParts = location.pathname.split('/');
+        const lastPart = pathParts[pathParts.length - 1];
+        if (lastPart && lastPart !== 'learn' && !isNaN(parseInt(lastPart))) {
+            conceptId = lastPart;
+            console.log("Extracted conceptId from pathname:", conceptId);
+        }
+    }
+    
+    console.log("Final conceptId:", conceptId);
+    
+    if (conceptId) {
+        return (
+            <LearningProvider>
+                <TeachingFirstFlow conceptId={parseInt(conceptId)} />
+            </LearningProvider>
+        );
+    }
 
     return (
         <LearningProvider>
-            <AdaptiveLearning subject={subject} />
+            <div className="text-center py-12">
+                <p className="text-red-600">No concept selected. Please go back and try again.</p>
+                <p className="text-gray-500 mt-2">URL: {location.pathname}</p>
+                <p className="text-gray-500">Params: {JSON.stringify(params)}</p>
+                <button 
+                    onClick={() => navigate('/dashboard')}
+                    className="mt-4 px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700"
+                >
+                    Go to Dashboard
+                </button>
+            </div>
         </LearningProvider>
     );
 };
@@ -3423,156 +3642,16 @@ const LearningRoute = () => {
 export default LearningRoute;
 
 
-
 ================================================
-FILE: frontend/src/components/Learning/MasteryCheck.jsx
+FILE: frontend/src/components/Learning/QuestionsFromTeaching.jsx
 ================================================
-import React, { useCallback, useEffect, useState } from 'react';
-import { useLearning } from '../../context/LearningContext';
-
-const MasteryCheck = ({ atomId, onComplete }) => {
-    const [questions, setQuestions] = useState([]);
-    const [currentIndex, setCurrentIndex] = useState(0);
-    const [answers, setAnswers] = useState([]);
-    const [showResults, setShowResults] = useState(false);
-
-    const { getPracticeQuestions, submitPracticeAnswer } = useLearning();
-
-    const loadMasteryQuestions = useCallback(async () => {
-        // Get mixed difficulty questions for mastery check
-        const easyResult = await getPracticeQuestions(atomId, 'easy', 1);
-        const mediumResult = await getPracticeQuestions(atomId, 'medium', 1);
-        
-        const allQuestions = [
-            ...(easyResult.success ? easyResult.data.questions : []),
-            ...(mediumResult.success ? mediumResult.data.questions : [])
-        ];
-        
-        setQuestions(allQuestions);
-    }, [atomId, getPracticeQuestions]);
-
-    useEffect(() => {
-        setQuestions([]);
-        setCurrentIndex(0);
-        setAnswers([]);
-        setShowResults(false);
-        loadMasteryQuestions();
-    }, [loadMasteryQuestions]);
-
-    const handleAnswer = async (selected, timeTaken) => {
-        const result = await submitPracticeAnswer(
-            questions[currentIndex].id,
-            selected,
-            timeTaken,
-            false
-        );
-
-        const newAnswers = [...answers, {
-            question_id: questions[currentIndex].id,
-            correct: result.success ? result.data.correct : false,
-            selected: selected
-        }];
-        setAnswers(newAnswers);
-
-        if (currentIndex < questions.length - 1) {
-            setCurrentIndex(currentIndex + 1);
-        } else {
-            setShowResults(true);
-        }
-    };
-
-    if (questions.length === 0) {
-        return (
-            <div className="text-center py-12">
-                <p className="text-gray-600">Loading mastery check...</p>
-            </div>
-        );
-    }
-
-    if (showResults) {
-        const correctCount = answers.filter(a => a.correct).length;
-        const passed = correctCount >= 2; // Pass if at least 2 correct
-
-        return (
-            <div className="max-w-2xl mx-auto text-center">
-                <h2 className="text-3xl font-bold mb-6">Mastery Check Complete</h2>
-                
-                <div className="bg-white rounded-lg shadow-lg p-8 mb-8">
-                    <p className="text-xl mb-4">
-                        You got {correctCount} out of {questions.length} correct
-                    </p>
-                    
-                    {passed ? (
-                        <div>
-                            <div className="text-6xl mb-4">ðŸŽ‰</div>
-                            <p className="text-lg text-green-600 mb-4">
-                                Congratulations! You've mastered this concept!
-                            </p>
-                        </div>
-                    ) : (
-                        <div>
-                            <div className="text-6xl mb-4">ðŸ“š</div>
-                            <p className="text-lg text-orange-600 mb-4">
-                                Let's do a bit more practice to solidify your understanding.
-                            </p>
-                        </div>
-                    )}
-                </div>
-
-                <button
-                    onClick={() => onComplete(passed)}
-                    className="bg-blue-600 text-white px-8 py-3 rounded-lg font-semibold hover:bg-blue-700"
-                >
-                    {passed ? 'Continue to Next Concept' : 'Continue Practice'}
-                </button>
-            </div>
-        );
-    }
-
-    const currentQuestion = questions[currentIndex];
-
-    return (
-        <div className="max-w-3xl mx-auto">
-            <h2 className="text-2xl font-bold mb-2">Mastery Check</h2>
-            <p className="text-gray-600 mb-8">
-                Question {currentIndex + 1} of {questions.length}
-            </p>
-
-            <div className="bg-white rounded-lg shadow-lg p-8">
-                <h3 className="text-xl mb-6">{currentQuestion.question}</h3>
-
-                <div className="space-y-3">
-                    {currentQuestion.options.map((option, idx) => (
-                        <button
-                            key={idx}
-                            onClick={() => handleAnswer(idx, 30)} // Simplified time tracking
-                            className="w-full text-left p-4 rounded-lg border border-gray-200 hover:border-blue-500 hover:bg-blue-50 transition"
-                        >
-                            <span className="font-medium mr-3">
-                                {String.fromCharCode(65 + idx)}.
-                            </span>
-                            {option}
-                        </button>
-                    ))}
-                </div>
-            </div>
-        </div>
-    );
-};
-
-export default MasteryCheck;
-
-
-================================================
-FILE: frontend/src/components/Learning/PracticeSession.jsx
-================================================
-Error reading file with 'cp1252': 'charmap' codec can't decode byte 0x9d in position 7602: character maps to <undefined>
+Error reading file with 'cp1252': 'charmap' codec can't decode byte 0x9d in position 1995: character maps to <undefined>
 
 
 ================================================
 FILE: frontend/src/components/Learning/StartAnyConceptSession.jsx
 ================================================
-Error reading file with 'cp1252': 'charmap' codec can't decode byte 0x90 in position 8609: character maps to <undefined>
+Error reading file with 'cp1252': 'charmap' codec can't decode byte 0x90 in position 11320: character maps to <undefined>
 
 
 ================================================
@@ -3595,128 +3674,54 @@ export default StartAnyConceptSessionRoute;
 
 
 ================================================
+FILE: frontend/src/components/Learning/TeachingFirstFlow.jsx
+================================================
+Error reading file with 'cp1252': 'charmap' codec can't decode byte 0x90 in position 8808: character maps to <undefined>
+
+
+================================================
 FILE: frontend/src/components/Learning/TeachingModule.jsx
 ================================================
-import React, { useCallback, useEffect, useState } from 'react';
-import { useLearning } from '../../context/LearningContext';
-
-const TeachingModule = ({ atomId, onComplete }) => {
-    const [content, setContent] = useState(null);
-    const [error, setError] = useState('');
-    const [showExample, setShowExample] = useState(false);
-    const [showAnalogy, setShowAnalogy] = useState(false);
-    
-    const { getTeachingContent, loading } = useLearning();
-
-    const loadContent = useCallback(async () => {
-        const result = await getTeachingContent(atomId);
-        if (result.success) {
-            setContent(result.data);
-        } else {
-            setError(result.error || 'Failed to load content.');
-        }
-    }, [atomId, getTeachingContent]);
-
-    useEffect(() => {
-        setContent(null);
-        setError('');
-        setShowExample(false);
-        setShowAnalogy(false);
-
-        if (atomId === null || atomId === undefined) {
-            setError('No teaching atom selected. Please restart this learning step.');
-            return;
-        }
-
-        loadContent();
-    }, [atomId, loadContent]);
-
-    const handleContinue = () => {
-        onComplete(atomId);
-    };
-
-    if (loading && !content) {
-        return (
-            <div className="text-center py-12">
-                <p className="text-gray-600">Loading teaching content...</p>
-            </div>
-        );
-    }
-
-    if (!content) {
-        return (
-            <div className="text-center py-12">
-                <p className="text-red-600">{error || 'Failed to load content.'}</p>
-            </div>
-        );
-    }
-
-    return (
-        <div className="max-w-3xl mx-auto">
-            <h2 className="text-3xl font-bold mb-2">{content.name}</h2>
-            
-            <div className="bg-white rounded-lg shadow-lg p-8 mb-6">
-                <div className="prose max-w-none">
-                    <p className="text-lg mb-6">{content.explanation}</p>
-                    
-                    <div className="border-t pt-6">
-                        <button
-                            onClick={() => setShowExample(!showExample)}
-                            className="text-blue-600 hover:text-blue-800 font-medium mb-2"
-                        >
-                            {showExample ? 'Hide' : 'Show'} Example
-                        </button>
-                        
-                        {showExample && (
-                            <div className="bg-blue-50 p-4 rounded-lg mb-4">
-                                <p className="text-gray-800">{content.examples?.[0]}</p>
-                            </div>
-                        )}
-                    </div>
-                    
-                    <div className="border-t pt-6">
-                        <button
-                            onClick={() => setShowAnalogy(!showAnalogy)}
-                            className="text-blue-600 hover:text-blue-800 font-medium mb-2"
-                        >
-                            {showAnalogy ? 'Hide' : 'Show'} Analogy
-                        </button>
-                        
-                        {showAnalogy && (
-                            <div className="bg-purple-50 p-4 rounded-lg">
-                                <p className="text-gray-800 italic">
-                                    ðŸ’¡ {content.analogy}
-                                </p>
-                            </div>
-                        )}
-                    </div>
-                </div>
-            </div>
-
-            <button
-                onClick={handleContinue}
-                className="w-full bg-green-600 text-white py-3 rounded-lg font-semibold hover:bg-green-700"
-            >
-                Got it! Let's Practice â†’
-            </button>
-        </div>
-    );
-};
-
-export default TeachingModule;
+Error reading file with 'cp1252': 'charmap' codec can't decode byte 0x8f in position 3115: character maps to <undefined>
 
 
 ================================================
 FILE: frontend/src/context/AuthContext.jsx
 ================================================
-import React, { createContext, useState, useContext } from 'react';
+import React, { createContext, useState, useContext, useEffect } from 'react';
 import axios from '../axiosConfig';
+import { useNavigate } from 'react-router-dom';
 
 const AuthContext = createContext(null);
 
 export const AuthProvider = ({ children }) => {
     const [user, setUser] = useState(null);
-    const [loading] = useState(false);
+    const [loading, setLoading] = useState(true);
+    const navigate = useNavigate();
+
+    // Check for existing token on mount
+    useEffect(() => {
+        const token = localStorage.getItem('access_token');
+        if (token) {
+            // Verify token by fetching user data
+            fetchUser();
+        } else {
+            setLoading(false);
+        }
+    }, []);
+
+    const fetchUser = async () => {
+        try {
+            const response = await axios.get('/auth/api/dashboard/');
+            setUser(response.data.user);
+        } catch (error) {
+            console.error("Failed to fetch user:", error);
+            localStorage.removeItem('access_token');
+            localStorage.removeItem('refresh_token');
+        } finally {
+            setLoading(false);
+        }
+    };
 
     const login = async (username, password) => {
         try {
@@ -3756,6 +3761,7 @@ export const AuthProvider = ({ children }) => {
         localStorage.removeItem('access_token');
         localStorage.removeItem('refresh_token');
         setUser(null);
+        navigate('/login');
     };
 
     const value = {
@@ -3796,6 +3802,9 @@ export const LearningProvider = ({ children }) => {
     const [currentAtom, setCurrentAtom] = useState(null);
     const [learningProgress, setLearningProgress] = useState(null);
     const [loading, setLoading] = useState(false);
+    const [knowledgeLevel, setKnowledgeLevel] = useState('intermediate');
+    const [learningPace, setLearningPace] = useState('normal');
+    const [masteryData, setMasteryData] = useState({});
 
     const normalizePositiveInt = (value) => {
         const num = typeof value === 'string' ? Number(value) : value;
@@ -3803,40 +3812,77 @@ export const LearningProvider = ({ children }) => {
         return num;
     };
 
-    const startLearningSession = useCallback(async (conceptId) => {
-        setLoading(true);
-        try {
-            const response = await axios.post('/auth/api/start-session/', {
-                concept_id: conceptId
-            });
-            setCurrentSession(response.data);
-            return { success: true, data: response.data };
-        } catch (error) {
-            return {
-                success: false,
-                error: error.response?.data?.error || 'Failed to start session'
-            };
-        } finally {
-            setLoading(false);
-        }
-    }, []);
+    // NEW TEACHING-FIRST FLOW METHODS
 
-    const submitDiagnostic = useCallback(async (sessionId, answers) => {
-        setLoading(true);
+    const generateConcept = useCallback(async (subject, concept, knowledgeLevel = 'intermediate') => {
+    setLoading(true);
+    try {
+        const response = await axios.post('/auth/api/generate-concept/', {
+            subject: subject,
+            concept: concept,
+            knowledge_level: knowledgeLevel
+        });
+        return { success: true, data: response.data };
+    } catch (error) {
+        return {
+            success: false,
+            error: error.response?.data?.error || 'Failed to generate concept'
+        };
+    } finally {
+        setLoading(false);
+    }
+}, []);
+
+    // In LearningContext.jsx, add logging to each API call
+const startTeachingSession = useCallback(async (conceptId, level = 'intermediate') => {
+    setLoading(true);
+    setKnowledgeLevel(level);
+    try {
+        console.log("Making API call to start-teaching-session with:", { conceptId, level });
+        
+        // Check token before making request
+        const token = localStorage.getItem('access_token');
+        console.log("Token present:", !!token);
+        
+        const response = await axios.post('/auth/api/start-teaching-session/', {
+            concept_id: conceptId,
+            knowledge_level: level
+        });
+        
+        console.log("API Response - startTeachingSession:", response.data);
+        setCurrentSession(response.data);
+        return { success: true, data: response.data };
+    } catch (error) {
+        console.error("API Error - startTeachingSession:", {
+            status: error.response?.status,
+            data: error.response?.data,
+            message: error.message
+        });
+        
+        // If 401, token might be expired
+        if (error.response?.status === 401) {
+            // Clear tokens and redirect will happen via interceptor
+            console.log("Received 401 - token may be expired");
+        }
+        
+        return {
+            success: false,
+            error: error.response?.data?.error || 'Failed to start session'
+        };
+    } finally {
+        setLoading(false);
+    }
+}, []);
+
+    const getAtomList = useCallback(async (conceptId) => {
         try {
-            const response = await axios.post('/auth/api/submit-diagnostic/', {
-                session_id: sessionId,
-                answers: answers
-            });
-            setDiagnosticResults(response.data);
+            const response = await axios.get(`/auth/api/concepts/${conceptId}/atoms-list/`);
             return { success: true, data: response.data };
         } catch (error) {
             return {
                 success: false,
-                error: error.response?.data?.error || 'Failed to submit diagnostic'
+                error: error.response?.data?.error || 'Failed to get atoms'
             };
-        } finally {
-            setLoading(false);
         }
     }, []);
 
@@ -3864,6 +3910,65 @@ export const LearningProvider = ({ children }) => {
         }
     }, []);
 
+    const generateQuestionsFromTeaching = useCallback(async (sessionId, atomId) => {
+        setLoading(true);
+        try {
+            const response = await axios.post('/auth/api/generate-questions-from-teaching/', {
+                session_id: sessionId,
+                atom_id: atomId
+            });
+            return { success: true, data: response.data };
+        } catch (error) {
+            return {
+                success: false,
+                error: error.response?.data?.error || 'Failed to generate questions'
+            };
+        } finally {
+            setLoading(false);
+        }
+    }, []);
+
+    const submitAtomAnswer = useCallback(async (sessionId, atomId, questionIndex, selected, timeTaken) => {
+        try {
+            const response = await axios.post('/auth/api/submit-atom-answer/', {
+                session_id: sessionId,
+                atom_id: atomId,
+                question_index: questionIndex,
+                selected: selected,
+                time_taken: timeTaken
+            });
+            return { success: true, data: response.data };
+        } catch (error) {
+            return {
+                success: false,
+                error: error.response?.data?.error || 'Failed to submit answer'
+            };
+        }
+    }, []);
+
+    // In LearningContext.jsx
+const completeAtom = useCallback(async (sessionId, atomId, continueLearning) => {
+    try {
+        console.log("Calling completeAtom with:", { sessionId, atomId, continueLearning });
+        
+        const response = await axios.post('/auth/api/complete-atom/', {
+            session_id: sessionId,
+            atom_id: atomId,
+            continue_learning: continueLearning
+        });
+        
+        console.log("completeAtom response:", response.data);
+        return { success: true, data: response.data };
+    } catch (error) {
+        console.error("completeAtom error:", error.response?.data || error.message);
+        return {
+            success: false,
+            error: error.response?.data?.error || 'Failed to complete atom'
+        };
+    }
+}, []);
+
+    // Practice methods (keep these for reinforcement)
     const getPracticeQuestions = useCallback(async (atomId, difficulty = 'easy', count = 3) => {
         setLoading(true);
         try {
@@ -3929,32 +4034,70 @@ export const LearningProvider = ({ children }) => {
         }
     }, []);
 
+    const getMasteryRecommendation = useCallback((atomId) => {
+        const data = masteryData[atomId];
+        if (!data) return { action: 'proceed', confidence: 'high' };
+        
+        if (data.status === 'needs_attention' && data.attempts > 2) {
+            return { action: 'review', confidence: 'low' };
+        }
+        
+        return { action: 'proceed', confidence: 'medium' };
+    }, [masteryData]);
+
     const value = useMemo(() => ({
+        // State
         currentSession,
         diagnosticResults,
         currentAtom,
         learningProgress,
         loading,
-        startLearningSession,
-        submitDiagnostic,
+        knowledgeLevel,
+        learningPace,
+        masteryData,
+        
+        // Setters
+        setKnowledgeLevel,
+        
+        // Teaching-first flow methods
+        generateConcept,
+        startTeachingSession,
+        getAtomList,
         getTeachingContent,
+        generateQuestionsFromTeaching,
+        submitAtomAnswer,
+        completeAtom,
+        
+        // Practice methods
         getPracticeQuestions,
         submitPracticeAnswer,
         getHint,
-        loadLearningProgress
+        loadLearningProgress,
+        getMasteryRecommendation
     }), [
+        // State dependencies
         currentSession,
         diagnosticResults,
         currentAtom,
         learningProgress,
         loading,
-        startLearningSession,
-        submitDiagnostic,
+        knowledgeLevel,
+        learningPace,
+        masteryData,
+        
+        // Method dependencies
+        generateConcept,    
+        startTeachingSession,
+        getAtomList,
         getTeachingContent,
+        generateQuestionsFromTeaching,
+        submitAtomAnswer,
+        completeAtom,
         getPracticeQuestions,
         submitPracticeAnswer,
         getHint,
-        loadLearningProgress
+        loadLearningProgress,
+        getMasteryRecommendation
     ]);
 
     return (

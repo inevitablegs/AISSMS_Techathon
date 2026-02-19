@@ -5,23 +5,41 @@ const LearningContext = createContext(null);
 
 export const LearningProvider = ({ children }) => {
     const [currentSession, setCurrentSession] = useState(null);
-    const [diagnosticResults, setDiagnosticResults] = useState(null);
     const [currentAtom, setCurrentAtom] = useState(null);
     const [learningProgress, setLearningProgress] = useState(null);
     const [loading, setLoading] = useState(false);
     const [knowledgeLevel, setKnowledgeLevel] = useState('intermediate');
-    const [learningPace, setLearningPace] = useState('normal');
-    const [masteryData, setMasteryData] = useState({});
 
+    // Generate atoms for a concept (no questions)
+    const generateConcept = useCallback(async (subject, concept, knowledgeLevel = 'intermediate') => {
+        setLoading(true);
+        try {
+            const response = await axios.post('/auth/api/generate-concept/', {
+                subject: subject,
+                concept: concept,
+                knowledge_level: knowledgeLevel
+            });
+            return { success: true, data: response.data };
+        } catch (error) {
+            return {
+                success: false,
+                error: error.response?.data?.error || 'Failed to generate concept'
+            };
+        } finally {
+            setLoading(false);
+        }
+    }, []);
 
-    const startLearningSession = useCallback(async (conceptId, level = 'intermediate') => {
+    // Start teaching session for a concept
+    const startTeachingSession = useCallback(async (conceptId, level = 'intermediate') => {
         setLoading(true);
         setKnowledgeLevel(level);
         try {
-            const response = await axios.post('/auth/api/start-session/', {
+            const response = await axios.post('/auth/api/start-teaching-session/', {
                 concept_id: conceptId,
                 knowledge_level: level
             });
+            
             setCurrentSession(response.data);
             return { success: true, data: response.data };
         } catch (error) {
@@ -34,123 +52,17 @@ export const LearningProvider = ({ children }) => {
         }
     }, []);
 
-    const submitDiagnostic = useCallback(async (sessionId, answers) => {
+    // Get teaching content for an atom
+    const getTeachingContent = useCallback(async ({ session_id, atom_id }) => {
         setLoading(true);
         try {
-            const response = await axios.post('/auth/api/submit-diagnostic/', {
-                session_id: sessionId,
-                answers: answers
+            const response = await axios.post('/auth/api/teaching-content/', {
+                session_id: session_id,
+                atom_id: atom_id
             });
-            setDiagnosticResults(response.data);
-            setLearningPace(response.data.pacing || 'normal');
             
-            // Track weak atoms for mastery management
-            if (response.data.weak_atoms) {
-                const weakMap = {};
-                response.data.weak_atoms.forEach(id => {
-                    weakMap[id] = { status: 'needs_attention', attempts: 0 };
-                });
-                setMasteryData(weakMap);
-            }
-            
-            return { success: true, data: response.data };
-        } catch (error) {
-            return {
-                success: false,
-                error: error.response?.data?.error || 'Failed to submit diagnostic'
-            };
-        } finally {
-            setLoading(false);
-        }
-    }, []);
-
-    const getMasteryRecommendation = useCallback((atomId) => {
-        const data = masteryData[atomId];
-        if (!data) return { action: 'proceed', confidence: 'high' };
-        
-        if (data.status === 'needs_attention' && data.attempts > 2) {
-            return { action: 'review', confidence: 'low' };
-        }
-        
-        return { action: 'proceed', confidence: 'medium' };
-    }, [masteryData]);
-    
-
-    const normalizePositiveInt = (value) => {
-        const num = typeof value === 'string' ? Number(value) : value;
-        if (!Number.isInteger(num) || num <= 0) return null;
-        return num;
-    };
-
-    const markAtomTaught = useCallback(async (atomId, timeSpent) => {
-        try {
-            const response = await axios.post('/auth/api/mark-atom-taught/', {
-                atom_id: atomId,
-                time_spent: timeSpent
-            });
-            return { success: true, data: response.data };
-        } catch (error) {
-            return {
-                success: false,
-                error: error.response?.data?.error || 'Failed to mark atom as taught'
-            };
-        }
-    }, []);
-
-    const getDiagnosticQuestions = useCallback(async (atomId) => {
-        try {
-            const response = await axios.get(`/auth/api/diagnostic-questions/${atomId}/`);
-            return { success: true, data: response.data };
-        } catch (error) {
-            return {
-                success: false,
-                error: error.response?.data?.error || 'Failed to get diagnostic questions'
-            };
-        }
-    }, []);
-
-    const submitDiagnosticAnswer = useCallback(async (questionId, selected, timeTaken) => {
-        try {
-            const response = await axios.post('/auth/api/submit-diagnostic-answer/', {
-                question_id: questionId,
-                selected: selected,
-                time_taken: timeTaken
-            });
-            return { success: true, data: response.data };
-        } catch (error) {
-            return {
-                success: false,
-                error: error.response?.data?.error || 'Failed to submit answer'
-            };
-        }
-    }, []);
-
-    const completeDiagnostic = useCallback(async (atomId, answers) => {
-        try {
-            const response = await axios.post('/auth/api/complete-diagnostic/', {
-                atom_id: atomId,
-                answers: answers
-            });
-            return { success: true, data: response.data };
-        } catch (error) {
-            return {
-                success: false,
-                error: error.response?.data?.error || 'Failed to complete diagnostic'
-            };
-        }
-    }, []);
-
-    const getTeachingContent = useCallback(async (atomId) => {
-        const normalizedAtomId = normalizePositiveInt(atomId);
-        if (normalizedAtomId === null) {
-            return { success: false, error: 'Invalid atom id. Please restart the session step.' };
-        }
-
-        setLoading(true);
-        try {
-            const response = await axios.get(`/auth/api/teaching/${normalizedAtomId}/`);
             setCurrentAtom({
-                id: normalizedAtomId,
+                id: atom_id,
                 ...response.data
             });
             return { success: true, data: response.data };
@@ -164,30 +76,34 @@ export const LearningProvider = ({ children }) => {
         }
     }, []);
 
-    const getPracticeQuestions = useCallback(async (atomId, difficulty = 'easy', count = 3) => {
+    // Generate questions based on teaching content
+    const generateQuestionsFromTeaching = useCallback(async ({ session_id, atom_id }) => {
         setLoading(true);
         try {
-            const response = await axios.get(
-                `/auth/api/practice/${atomId}/?difficulty=${difficulty}&count=${count}`
-            );
+            const response = await axios.post('/auth/api/generate-questions-from-teaching/', {
+                session_id: session_id,
+                atom_id: atom_id
+            });
             return { success: true, data: response.data };
         } catch (error) {
             return {
                 success: false,
-                error: error.response?.data?.error || 'Failed to get practice questions'
+                error: error.response?.data?.error || 'Failed to generate questions'
             };
         } finally {
             setLoading(false);
         }
     }, []);
 
-    const submitPracticeAnswer = useCallback(async (questionId, selected, timeTaken, hintUsed = false) => {
+    // Submit answer for an atom question
+    const submitAtomAnswer = useCallback(async ({ session_id, atom_id, question_index, selected, time_taken }) => {
         try {
-            const response = await axios.post('/auth/api/submit-answer/', {
-                question_id: questionId,
+            const response = await axios.post('/auth/api/submit-atom-answer/', {
+                session_id: session_id,
+                atom_id: atom_id,
+                question_index: question_index,
                 selected: selected,
-                time_taken: timeTaken,
-                hint_used: hintUsed
+                time_taken: time_taken
             });
             return { success: true, data: response.data };
         } catch (error) {
@@ -198,21 +114,25 @@ export const LearningProvider = ({ children }) => {
         }
     }, []);
 
-    const getHint = useCallback(async (questionId, errorCount = 0) => {
+    // Complete atom and determine next action
+    const completeAtom = useCallback(async ({ session_id, atom_id, continue_learning }) => {
         try {
-            const response = await axios.post('/auth/api/get-hint/', {
-                question_id: questionId,
-                error_count: errorCount
+            const response = await axios.post('/auth/api/complete-atom/', {
+                session_id: session_id,
+                atom_id: atom_id,
+                continue_learning: continue_learning
             });
+            
             return { success: true, data: response.data };
         } catch (error) {
             return {
                 success: false,
-                error: error.response?.data?.error || 'Failed to get hint'
+                error: error.response?.data?.error || 'Failed to complete atom'
             };
         }
     }, []);
 
+    // Load learning progress
     const loadLearningProgress = useCallback(async () => {
         setLoading(true);
         try {
@@ -230,52 +150,38 @@ export const LearningProvider = ({ children }) => {
     }, []);
 
     const value = useMemo(() => ({
+        // State
         currentSession,
-        diagnosticResults,
         currentAtom,
         learningProgress,
         loading,
-        startLearningSession,
-        submitDiagnostic,
-        getTeachingContent,
-        getPracticeQuestions,
-        submitPracticeAnswer,
-        getHint,
-        loadLearningProgress,
         knowledgeLevel,
-        learningPace,
-        masteryData,
+        
+        // Setters
         setKnowledgeLevel,
-        startLearningSession,
-        submitDiagnostic,
-        getMasteryRecommendation,
-        markAtomTaught,
-        getDiagnosticQuestions,
-        submitDiagnosticAnswer,
-        completeDiagnostic
+        
+        // Core methods
+        generateConcept,
+        startTeachingSession,
+        getTeachingContent,
+        generateQuestionsFromTeaching,
+        submitAtomAnswer,
+        completeAtom,
+        loadLearningProgress
+        
     }), [
         currentSession,
-        diagnosticResults,
         currentAtom,
         learningProgress,
         loading,
-        startLearningSession,
-        submitDiagnostic,
-        getTeachingContent,
-        getPracticeQuestions,
-        submitPracticeAnswer,
-        getHint,
-        loadLearningProgress,
         knowledgeLevel,
-        learningPace,
-        masteryData,
-        startLearningSession,
-        submitDiagnostic,
-        getMasteryRecommendation,
-        markAtomTaught,
-        getDiagnosticQuestions,
-        submitDiagnosticAnswer,
-        completeDiagnostic
+        generateConcept,
+        startTeachingSession,
+        getTeachingContent,
+        generateQuestionsFromTeaching,
+        submitAtomAnswer,
+        completeAtom,
+        loadLearningProgress
     ]);
 
     return (

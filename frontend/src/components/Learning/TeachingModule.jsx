@@ -1,231 +1,208 @@
-// frontend/src/components/Learning/TeachingModule.jsx - Enhanced version
-
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useLearning } from '../../context/LearningContext';
 
-const TeachingModule = ({ atomId, onComplete }) => {
-    const [content, setContent] = useState(null);
+const TeachingModule = ({ atom, sessionId, onFinish, loading, pacing }) => {
+    const [teachingContent, setTeachingContent] = useState(null);
+    const [contentLoading, setContentLoading] = useState(true);
     const [error, setError] = useState('');
-    const [showSections, setShowSections] = useState({
-        example: false,
-        analogy: false,
-        application: false
-    });
-    const [timeSpent, setTimeSpent] = useState(0);
+    const [showAnalogy, setShowAnalogy] = useState(false);
+    const [showMisconception, setShowMisconception] = useState(false);
     
-    const { getTeachingContent, loading } = useLearning();
+    const { getTeachingContent } = useLearning();
 
     useEffect(() => {
-        const timer = setInterval(() => {
-            setTimeSpent(prev => prev + 1);
-        }, 1000);
-        
-        return () => clearInterval(timer);
-    }, []);
-
-    const loadContent = useCallback(async () => {
-        const result = await getTeachingContent(atomId);
-        if (result.success) {
-            setContent(result.data);
-        } else {
-            setError(result.error || 'Failed to load content.');
-        }
-    }, [atomId, getTeachingContent]);
-
-    const [startTime] = useState(Date.now());
-
-    const handleContinue = () => {
-        const timeSpent = Math.floor((Date.now() - startTime) / 1000);
-        onComplete(atomId, timeSpent);
-    };
-
-    useEffect(() => {
-        setContent(null);
-        setError('');
-        setShowSections({ example: false, analogy: false, application: false });
-        setTimeSpent(0);
-
-        if (atomId === null || atomId === undefined) {
-            setError('No teaching atom selected. Please restart this learning step.');
-            return;
-        }
-
-        loadContent();
-    }, [atomId, loadContent]);
-
-    const toggleSection = (section) => {
-        setShowSections(prev => ({
-            ...prev,
-            [section]: !prev[section]
-        }));
-    };
-
-    
-
-    if (loading && !content) {
-        return (
-            <div className="text-center py-12">
-                <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto mb-4"></div>
-                <p className="text-gray-600">Loading teaching content...</p>
-            </div>
-        );
-    }
-
-    if (!content) {
-        return (
-            <div className="text-center py-12">
-                <p className="text-red-600">{error || 'Failed to load content.'}</p>
-                <button
-                    onClick={loadContent}
-                    className="mt-4 bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700"
-                >
-                    Try Again
-                </button>
-            </div>
-        );
-    }
-
-    const getLevelBadge = () => {
-        const badges = {
-            zero: { text: '🌱 Beginner Friendly', class: 'bg-green-100 text-green-800' },
-            beginner: { text: '🌿 Building Foundation', class: 'bg-blue-100 text-blue-800' },
-            intermediate: { text: '🌳 Deepening Understanding', class: 'bg-purple-100 text-purple-800' },
-            advanced: { text: '🏆 Advanced Concepts', class: 'bg-orange-100 text-orange-800' }
+        const loadTeachingContent = async () => {
+            if (!atom || !sessionId) return;
+            
+            setContentLoading(true);
+            const result = await getTeachingContent({
+                session_id: sessionId,
+                atom_id: atom.id
+            });
+            
+            if (result.success) {
+                setTeachingContent(result.data.teaching_content);
+            } else {
+                setError(result.error || 'Failed to load teaching content');
+            }
+            setContentLoading(false);
         };
-        return badges[content.knowledge_level] || badges.intermediate;
+
+        loadTeachingContent();
+    }, [atom, sessionId, getTeachingContent]);
+
+    // Get pacing-based styling
+    const getPacingMessage = () => {
+        const messages = {
+            'sharp_slowdown': 'Take your time with this - focus on understanding each part',
+            'slow_down': 'Read carefully, don\'t rush',
+            'stay': 'Learn at your normal pace',
+            'speed_up': 'You can move through this quickly'
+        };
+        return messages[pacing] || 'Learn at your own pace';
     };
 
-    const levelBadge = getLevelBadge();
+    const getPacingColor = () => {
+        const colors = {
+            'sharp_slowdown': 'bg-red-50 border-red-200 text-red-700',
+            'slow_down': 'bg-orange-50 border-orange-200 text-orange-700',
+            'stay': 'bg-blue-50 border-blue-200 text-blue-700',
+            'speed_up': 'bg-green-50 border-green-200 text-green-700'
+        };
+        return colors[pacing] || 'bg-gray-50 border-gray-200 text-gray-700';
+    };
+
+    if (contentLoading || loading) {
+        return (
+            <div className="bg-white rounded-lg shadow-lg p-8 text-center">
+                <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto mb-4"></div>
+                <p className="text-gray-600">Preparing your learning material...</p>
+            </div>
+        );
+    }
+
+    if (error) {
+        return (
+            <div className="bg-white rounded-lg shadow-lg p-8">
+                <div className="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded">
+                    {error}
+                </div>
+            </div>
+        );
+    }
+
+    if (!teachingContent) {
+        return (
+            <div className="bg-white rounded-lg shadow-lg p-8 text-center">
+                <p className="text-gray-600">No teaching content available.</p>
+            </div>
+        );
+    }
 
     return (
-        <div className="max-w-4xl mx-auto">
-            <div className="mb-4 flex justify-between items-center">
-                <div>
-                    <span className={`px-3 py-1 rounded-full text-sm font-semibold ${levelBadge.class}`}>
-                        {levelBadge.text}
+        <div className="bg-white rounded-lg shadow-lg overflow-hidden">
+            {/* Header with pacing */}
+            <div className="bg-gradient-to-r from-blue-600 to-blue-800 px-6 py-4">
+                <div className="flex justify-between items-center">
+                    <h2 className="text-xl font-bold text-white">{atom.name}</h2>
+                    <span className={`px-3 py-1 rounded-full text-xs font-medium ${getPacingColor()}`}>
+                        {getPacingMessage()}
                     </span>
                 </div>
-                <span className="text-sm text-gray-500">
-                    ⏱️ {Math.floor(timeSpent / 60)}:{(timeSpent % 60).toString().padStart(2, '0')}
-                </span>
             </div>
 
-            <div className="bg-white rounded-lg shadow-lg overflow-hidden">
-                {/* Header */}
-                <div className="bg-gradient-to-r from-blue-600 to-indigo-600 px-8 py-6">
-                    <h2 className="text-3xl font-bold text-white mb-2">{content.name}</h2>
-                    {content.progress_hint && (
-                        <p className="text-blue-100">{content.progress_hint}</p>
-                    )}
+            {/* Content */}
+            <div className="p-6 space-y-6">
+                {/* Explanation */}
+                <div>
+                    <h3 className="text-lg font-semibold text-gray-800 mb-3 flex items-center">
+                        <span className="bg-blue-100 text-blue-800 p-2 rounded-full mr-2">📚</span>
+                        Explanation
+                    </h3>
+                    <p className="text-gray-700 leading-relaxed pl-10">
+                        {teachingContent.explanation}
+                    </p>
                 </div>
 
-                {/* Main Content */}
-                <div className="p-8">
-                    {/* Core Explanation */}
-                    <div className="mb-8">
-                        <h3 className="text-xl font-semibold mb-4 flex items-center">
-                            <span className="bg-blue-100 text-blue-800 p-2 rounded-full mr-3">📚</span>
-                            Core Concept
+                {/* Example */}
+                {teachingContent.examples && teachingContent.examples.length > 0 && (
+                    <div>
+                        <h3 className="text-lg font-semibold text-gray-800 mb-3 flex items-center">
+                            <span className="bg-green-100 text-green-800 p-2 rounded-full mr-2">💡</span>
+                            Example
                         </h3>
-                        <p className="text-lg text-gray-700 leading-relaxed">{content.explanation}</p>
-                    </div>
-
-                    {/* Interactive Sections */}
-                    <div className="space-y-4">
-                        {/* Example Section */}
-                        <div className="border rounded-lg overflow-hidden">
-                            <button
-                                onClick={() => toggleSection('example')}
-                                className="w-full px-6 py-4 bg-gray-50 hover:bg-gray-100 flex justify-between items-center text-left"
-                            >
-                                <span className="font-semibold flex items-center">
-                                    <span className="text-2xl mr-3">💡</span>
-                                    See Example
-                                </span>
-                                <span className="text-2xl">{showSections.example ? '▼' : '▶'}</span>
-                            </button>
-                            {showSections.example && (
-                                <div className="p-6 bg-blue-50">
-                                    <p className="text-gray-800">{content.examples?.[0]}</p>
-                                </div>
-                            )}
-                        </div>
-
-                        {/* Analogy Section */}
-                        <div className="border rounded-lg overflow-hidden">
-                            <button
-                                onClick={() => toggleSection('analogy')}
-                                className="w-full px-6 py-4 bg-gray-50 hover:bg-gray-100 flex justify-between items-center text-left"
-                            >
-                                <span className="font-semibold flex items-center">
-                                    <span className="text-2xl mr-3">🔄</span>
-                                    Real-World Analogy
-                                </span>
-                                <span className="text-2xl">{showSections.analogy ? '▼' : '▶'}</span>
-                            </button>
-                            {showSections.analogy && (
-                                <div className="p-6 bg-purple-50">
-                                    <p className="text-gray-800 italic">"{content.analogy}"</p>
-                                </div>
-                            )}
-                        </div>
-
-                        {/* Practical Application */}
-                        {content.examples?.[1] && (
-                            <div className="border rounded-lg overflow-hidden">
-                                <button
-                                    onClick={() => toggleSection('application')}
-                                    className="w-full px-6 py-4 bg-gray-50 hover:bg-gray-100 flex justify-between items-center text-left"
-                                >
-                                    <span className="font-semibold flex items-center">
-                                        <span className="text-2xl mr-3">🎯</span>
-                                        Why This Matters
-                                    </span>
-                                    <span className="text-2xl">{showSections.application ? '▼' : '▶'}</span>
-                                </button>
-                                {showSections.application && (
-                                    <div className="p-6 bg-green-50">
-                                        <p className="text-gray-800">{content.examples[1]}</p>
-                                    </div>
-                                )}
-                            </div>
-                        )}
-
-                        {/* Common Misconception */}
-                        {content.examples?.[2] && (
-                            <div className="mt-6 p-4 bg-yellow-50 border border-yellow-200 rounded-lg">
-                                <h4 className="font-semibold text-yellow-800 mb-2 flex items-center">
-                                    <span className="text-xl mr-2">⚠️</span>
-                                    Watch Out!
-                                </h4>
-                                <p className="text-gray-700">{content.examples[2]}</p>
-                            </div>
-                        )}
-                    </div>
-
-                    {/* Comprehension Check */}
-                    <div className="mt-8 p-4 bg-gray-50 rounded-lg">
-                        <h4 className="font-semibold mb-2">Quick Check:</h4>
-                        <p className="text-gray-700">
-                            Can you explain {content.name} in your own words?
+                        <p className="text-gray-700 leading-relaxed pl-10 bg-green-50 p-4 rounded-lg">
+                            {teachingContent.examples[0]}
                         </p>
                     </div>
+                )}
 
-                    {/* Continue Button */}
+                {/* Analogy (toggle) */}
+                {teachingContent.analogy && (
+                    <div>
+                        <button
+                            onClick={() => setShowAnalogy(!showAnalogy)}
+                            className="flex items-center text-gray-600 hover:text-blue-600 transition-colors"
+                        >
+                            <span className="bg-purple-100 text-purple-800 p-2 rounded-full mr-2">
+                                🔄
+                            </span>
+                            <span className="font-medium">
+                                {showAnalogy ? 'Hide Analogy' : 'Show Analogy'}
+                            </span>
+                        </button>
+                        
+                        {showAnalogy && (
+                            <div className="mt-3 pl-10 bg-purple-50 p-4 rounded-lg">
+                                <p className="text-gray-700 italic">
+                                    {teachingContent.analogy}
+                                </p>
+                            </div>
+                        )}
+                    </div>
+                )}
+
+                {/* Misconception (toggle) */}
+                {teachingContent.misconception && (
+                    <div>
+                        <button
+                            onClick={() => setShowMisconception(!showMisconception)}
+                            className="flex items-center text-gray-600 hover:text-blue-600 transition-colors"
+                        >
+                            <span className="bg-red-100 text-red-800 p-2 rounded-full mr-2">
+                                ⚠️
+                            </span>
+                            <span className="font-medium">
+                                {showMisconception ? 'Hide Common Mistake' : 'Show Common Mistake'}
+                            </span>
+                        </button>
+                        
+                        {showMisconception && (
+                            <div className="mt-3 pl-10 bg-red-50 p-4 rounded-lg border border-red-200">
+                                <p className="text-red-700">
+                                    {teachingContent.misconception}
+                                </p>
+                            </div>
+                        )}
+                    </div>
+                )}
+
+                {/* Practical Application */}
+                {teachingContent.practical_application && (
+                    <div className="bg-yellow-50 p-4 rounded-lg">
+                        <h3 className="font-semibold text-yellow-800 mb-2 flex items-center">
+                            <span className="mr-2">✨</span>
+                            Why This Matters
+                        </h3>
+                        <p className="text-yellow-700">
+                            {teachingContent.practical_application}
+                        </p>
+                    </div>
+                )}
+
+                {/* Take Assessment Button */}
+                <div className="pt-6 border-t border-gray-200">
                     <button
-                        onClick={handleContinue}
-                        className="w-full mt-8 bg-green-600 text-white py-4 rounded-lg font-semibold text-lg hover:bg-green-700 transition flex items-center justify-center"
+                        onClick={onFinish}
+                        disabled={loading}
+                        className={`w-full font-bold py-3 px-4 rounded-lg transition disabled:opacity-50 disabled:cursor-not-allowed ${
+                            pacing === 'sharp_slowdown' 
+                                ? 'bg-orange-600 hover:bg-orange-700 text-white'
+                                : pacing === 'speed_up'
+                                ? 'bg-green-600 hover:bg-green-700 text-white'
+                                : 'bg-blue-600 hover:bg-blue-700 text-white'
+                        }`}
                     >
-                        I Understand, Let's Practice 
-                        <span className="ml-2">→</span>
+                        {loading ? 'Preparing assessment...' : 'I Understand - Take Assessment'}
                     </button>
-
-                    {/* Progress Tip */}
-                    {timeSpent > 120 && (
-                        <p className="mt-4 text-sm text-gray-500 text-center">
-                            💡 Take your time - understanding now saves time later!
-                        </p>
-                    )}
+                    
+                    {/* Pacing tip */}
+                    <p className="text-sm text-gray-500 text-center mt-3">
+                        {pacing === 'sharp_slowdown' && '💡 Take your time with the questions'}
+                        {pacing === 'slow_down' && '⏸️ Read each question carefully'}
+                        {pacing === 'stay' && '📝 Answer at your normal pace'}
+                        {pacing === 'speed_up' && '⚡ Challenge yourself to answer quickly'}
+                    </p>
                 </div>
             </div>
         </div>

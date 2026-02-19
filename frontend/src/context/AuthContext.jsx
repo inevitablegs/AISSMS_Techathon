@@ -1,11 +1,36 @@
-import React, { createContext, useState, useContext } from 'react';
+import React, { createContext, useState, useContext, useEffect } from 'react';
 import axios from '../axiosConfig';
+import { useNavigate } from 'react-router-dom';
 
 const AuthContext = createContext(null);
 
 export const AuthProvider = ({ children }) => {
     const [user, setUser] = useState(null);
-    const [loading] = useState(false);
+    const [loading, setLoading] = useState(true);
+    const navigate = useNavigate();
+
+    // Check for existing token on mount
+    useEffect(() => {
+        const token = localStorage.getItem('access_token');
+        if (token) {
+            fetchUser();
+        } else {
+            setLoading(false);
+        }
+    }, []);
+
+    const fetchUser = async () => {
+        try {
+            const response = await axios.get('/auth/api/dashboard/');
+            setUser(response.data.user);
+        } catch (error) {
+            console.error("Failed to fetch user:", error);
+            localStorage.removeItem('access_token');
+            localStorage.removeItem('refresh_token');
+        } finally {
+            setLoading(false);
+        }
+    };
 
     const login = async (username, password) => {
         try {
@@ -45,6 +70,7 @@ export const AuthProvider = ({ children }) => {
         localStorage.removeItem('access_token');
         localStorage.removeItem('refresh_token');
         setUser(null);
+        navigate('/login');
     };
 
     const value = {

@@ -10,24 +10,20 @@ const LearningProgress = ({ onContinue }) => {
 
     const getPhaseIcon = (phase) => {
         const icons = {
-            complete: '✅',
-            mastery_check: '🔄',
-            practice: '📝',
-            teaching: '📚',
-            reinforcement: '⚠️',
-            diagnostic: '⏳'
+            'complete': '✅',
+            'teaching': '📚',
+            'diagnostic': '📝',
+            'not_started': '⭕'
         };
         return icons[phase] || '📌';
     };
 
     const getPhaseColor = (phase) => {
         const colors = {
-            complete: 'text-green-600',
-            mastery_check: 'text-blue-600',
-            practice: 'text-purple-600',
-            teaching: 'text-orange-600',
-            reinforcement: 'text-red-600',
-            diagnostic: 'text-gray-600'
+            'complete': 'text-green-600',
+            'teaching': 'text-blue-600',
+            'diagnostic': 'text-purple-600',
+            'not_started': 'text-gray-400'
         };
         return colors[phase] || 'text-gray-600';
     };
@@ -52,64 +48,43 @@ const LearningProgress = ({ onContinue }) => {
         <div className="max-w-4xl mx-auto">
             <h2 className="text-3xl font-bold mb-8">Your Learning Progress</h2>
 
+            {/* Stats Cards */}
             <div className="bg-white rounded-lg shadow-lg p-8 mb-8">
-                <div className="grid grid-cols-2 gap-8 mb-8">
-                    <div className="text-center">
-                        <p className="text-gray-600 mb-2">Overall Mastery</p>
-                        <div className="relative pt-1">
-                            <div className="flex mb-2 items-center justify-between">
-                                <div>
-                                    <span className="text-xs font-semibold inline-block py-1 px-2 uppercase rounded-full text-green-600 bg-green-200">
-                                        Progress
-                                    </span>
-                                </div>
-                                <div className="text-right">
-                                    <span className="text-xs font-semibold inline-block text-green-600">
-                                        {Math.round(learningProgress.overall_mastery * 100)}%
-                                    </span>
-                                </div>
-                            </div>
-                            <div className="overflow-hidden h-2 mb-4 text-xs flex rounded bg-green-200">
-                                <div
-                                    style={{ width: `${learningProgress.overall_mastery * 100}%` }}
-                                    className="shadow-none flex flex-col text-center whitespace-nowrap text-white justify-center bg-green-500"
-                                ></div>
-                            </div>
-                        </div>
-                    </div>
-                    
-                    <div className="text-center">
-                        <p className="text-gray-600 mb-2">Learning Streak</p>
-                        <p className="text-3xl font-bold text-orange-500">
-                            {learningProgress.learning_streak || 0} 🔥
-                        </p>
-                    </div>
-                </div>
-
-                <div className="grid grid-cols-3 gap-4 mb-8">
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
                     <div className="bg-blue-50 p-4 rounded-lg text-center">
                         <p className="text-2xl font-bold text-blue-600">
+                            {Math.round(learningProgress.overall_mastery * 100)}%
+                        </p>
+                        <p className="text-sm text-gray-600">Overall Mastery</p>
+                    </div>
+                    
+                    <div className="bg-green-50 p-4 rounded-lg text-center">
+                        <p className="text-2xl font-bold text-green-600">
                             {learningProgress.total_atoms || 0}
                         </p>
                         <p className="text-sm text-gray-600">Total Atoms</p>
                     </div>
                     
-                    <div className="bg-green-50 p-4 rounded-lg text-center">
-                        <p className="text-2xl font-bold text-green-600">
-                            {learningProgress.concepts?.reduce((acc, c) => acc + c.mastered_count, 0) || 0}
+                    <div className="bg-orange-50 p-4 rounded-lg text-center">
+                        <p className="text-2xl font-bold text-orange-600">
+                            {learningProgress.learning_streak || 0} 🔥
                         </p>
-                        <p className="text-sm text-gray-600">Mastered</p>
+                        <p className="text-sm text-gray-600">Learning Streak</p>
                     </div>
-                    
-                    <div className="bg-purple-50 p-4 rounded-lg text-center">
-                        <p className="text-2xl font-bold text-purple-600">
-                            {learningProgress.concepts?.length || 0}
-                        </p>
-                        <p className="text-sm text-gray-600">Concepts</p>
+                </div>
+
+                {/* Theta Score */}
+                <div className="border-t pt-6">
+                    <div className="flex justify-between items-center">
+                        <span className="text-gray-700 font-medium">Ability (θ):</span>
+                        <span className="text-lg font-semibold text-purple-600">
+                            {learningProgress.overall_theta?.toFixed(2) || '0.00'}
+                        </span>
                     </div>
                 </div>
             </div>
 
+            {/* Concepts */}
             <h3 className="text-xl font-bold mb-4">Concepts</h3>
             
             {learningProgress.concepts?.map((concept, idx) => (
@@ -131,12 +106,13 @@ const LearningProgress = ({ onContinue }) => {
                                         <p className="text-xs text-gray-500">
                                             Mastery: {Math.round(atom.mastery * 100)}%
                                             {atom.streak > 0 && ` • Streak: ${atom.streak}`}
-                                            {atom.hint_usage > 0 && ` • Hints: ${atom.hint_usage}`}
                                         </p>
                                     </div>
                                 </div>
                                 <span className={`text-sm font-medium ${getPhaseColor(atom.phase)}`}>
-                                    {atom.phase.replace('_', ' ')}
+                                    {atom.phase === 'complete' ? 'Mastered' : 
+                                     atom.phase === 'teaching' ? 'Learning' :
+                                     atom.phase === 'diagnostic' ? 'In Progress' : 'Not Started'}
                                 </span>
                             </div>
                         ))}
@@ -151,10 +127,6 @@ const LearningProgress = ({ onContinue }) => {
                 >
                     Continue Learning
                 </button>
-            </div>
-
-            <div className="mt-6 text-sm text-gray-500 text-center">
-                <p>ℹ️ Keep practicing to maintain retention and build streaks!</p>
             </div>
         </div>
     );

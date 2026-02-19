@@ -39,6 +39,11 @@ class RegisterSerializer(serializers.ModelSerializer):
         )
         user.set_password(validated_data['password'])
         user.save()
+        
+        # Create learning profile for the user
+        from .models import LearningProfile
+        LearningProfile.objects.create(user=user)
+        
         return user
 
 class UserSerializer(serializers.ModelSerializer):

@@ -1,3 +1,4 @@
+// In App.jsx - Make sure your route is exactly like this:
 import React from 'react';
 import { BrowserRouter as Router, Routes, Route } from 'react-router-dom';
 import { AuthProvider } from './context/AuthContext';
@@ -8,7 +9,6 @@ import Dashboard from './components/Dashboard';
 import ProtectedRoute from './components/ProtectedRoute';
 import LearningRoute from './components/Learning/LearningRoute';
 import StartAnyConceptSessionRoute from './components/Learning/StartAnyConceptSessionRoute';
-
 
 function App() {
     return (
@@ -28,16 +28,9 @@ function App() {
                         }
                     />
 
+                    {/* This is the important route - note the :conceptId parameter */}
                     <Route
-                        path="/learn"
-                        element={
-                            <ProtectedRoute>
-                                <LearningRoute />
-                            </ProtectedRoute>
-                        }
-                    />
-                    <Route
-                        path="/learn/:subject"
+                        path="/learn/:conceptId"
                         element={
                             <ProtectedRoute>
                                 <LearningRoute />
