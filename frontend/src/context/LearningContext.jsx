@@ -121,12 +121,13 @@ export const LearningProvider = ({ children }) => {
     }, []);
 
     // Generate questions based on teaching content
-    const generateQuestionsFromTeaching = useCallback(async ({ session_id, atom_id }) => {
+    const generateQuestionsFromTeaching = useCallback(async ({ session_id, atom_id, force_new = false }) => {
         setLoading(true);
         try {
             const response = await axios.post('/auth/api/generate-questions-from-teaching/', {
                 session_id: session_id,
-                atom_id: atom_id
+                atom_id: atom_id,
+                force_new: force_new
             });
             
             setCurrentQuestions(response.data.questions || []);

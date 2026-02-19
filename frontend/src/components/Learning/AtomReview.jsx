@@ -1,7 +1,6 @@
-import React, { useState } from 'react';
+import React from 'react';
 
 const AtomReview = ({ atom, metrics, onComplete, onSkip }) => {
-    const [reviewMode, setReviewMode] = useState('summary');
 
     return (
         <div className="bg-white rounded-lg shadow-lg p-6">
@@ -70,13 +69,13 @@ const AtomReview = ({ atom, metrics, onComplete, onSkip }) => {
             {/* Review Options */}
             <div className="space-y-3">
                 <button
-                    onClick={() => setReviewMode('teaching')}
+                    onClick={() => onComplete('reteach')}
                     className="w-full bg-blue-600 text-white py-3 rounded-lg hover:bg-blue-700"
                 >
                     Review Teaching Material
                 </button>
                 <button
-                    onClick={() => setReviewMode('practice')}
+                    onClick={() => onComplete('practice')}
                     className="w-full bg-green-600 text-white py-3 rounded-lg hover:bg-green-700"
                 >
                     Practice with New Questions

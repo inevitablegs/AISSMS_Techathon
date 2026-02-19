@@ -275,6 +275,8 @@ class GetTeachingContentView(APIView):
     def post(self, request):
         session_id = request.data.get('session_id')
         atom_id = request.data.get('atom_id')
+        force_new = bool(request.data.get('force_new', False))
+        
         
         try:
             session = LearningSession.objects.get(id=session_id, user=request.user)
@@ -367,6 +369,7 @@ class GenerateQuestionsFromTeachingView(APIView):
     def post(self, request):
         session_id = request.data.get('session_id')
         atom_id = request.data.get('atom_id')
+        force_new = bool(request.data.get('force_new', False))
         
         try:
             session = LearningSession.objects.get(id=session_id, user=request.user)
@@ -392,7 +395,7 @@ class GenerateQuestionsFromTeachingView(APIView):
         # Check if questions already exist
         questions = Question.objects.filter(atom=atom)
         
-        if not questions.exists():
+        if force_new or not questions.exists():
             # Generate questions based on knowledge level AND pacing
             generator = QuestionGenerator()
             
@@ -416,41 +419,70 @@ class GenerateQuestionsFromTeachingView(APIView):
                 )
                 generated.extend(batch)
             
-            # Save questions to database
-            for q_data in generated:
-                Question.objects.create(
-                    atom=atom,
-                    difficulty=q_data['difficulty'],
-                    cognitive_operation=q_data['cognitive_operation'],
-                    estimated_time=self._adjust_time_for_pacing(
-                        q_data['estimated_time'], 
-                        current_pacing
-                    ),
-                    question_text=q_data['question'],
-                    options=q_data['options'],
-                    correct_index=q_data['correct_index']
-                )
-            
-            questions = Question.objects.filter(atom=atom)
+            if not force_new:
+                # Save questions to database
+                for q_data in generated:
+                    Question.objects.create(
+                        atom=atom,
+                        difficulty=q_data['difficulty'],
+                        cognitive_operation=q_data['cognitive_operation'],
+                        estimated_time=self._adjust_time_for_pacing(
+                            q_data['estimated_time'], 
+                            current_pacing
+                        ),
+                        question_text=q_data['question'],
+                        options=q_data['options'],
+                        correct_index=q_data['correct_index']
+                    )
+
+                questions = Question.objects.filter(atom=atom)
+            else:
+                # Use generated batch directly without persisting
+                questions = []
         
         # Prepare response
         questions_data = []
         full_questions = []
-        for q in questions:
-            q_dict = q.to_dict()
-            # Remove correct index for client
-            q_dict.pop('correct_index', None)
-            questions_data.append(q_dict)
+        if questions:
+            for q in questions:
+                q_dict = q.to_dict()
+                # Remove correct index for client
+                q_dict.pop('correct_index', None)
+                questions_data.append(q_dict)
 
-            # Store full question for grading in session (includes correct_index)
-            full_questions.append({
-                'difficulty': q.difficulty,
-                'cognitive_operation': q.cognitive_operation,
-                'estimated_time': q.estimated_time,
-                'question': q.question_text,
-                'options': q.options,
-                'correct_index': q.correct_index,
-            })
+                # Store full question for grading in session (includes correct_index)
+                full_questions.append({
+                    'difficulty': q.difficulty,
+                    'cognitive_operation': q.cognitive_operation,
+                    'estimated_time': q.estimated_time,
+                    'question': q.question_text,
+                    'options': q.options,
+                    'correct_index': q.correct_index,
+                })
+        else:
+            for q_data in generated:
+                questions_data.append({
+                    'difficulty': q_data['difficulty'],
+                    'cognitive_operation': q_data['cognitive_operation'],
+                    'estimated_time': self._adjust_time_for_pacing(
+                        q_data['estimated_time'],
+                        current_pacing
+                    ),
+                    'question': q_data['question'],
+                    'options': q_data['options']
+                })
+
+                full_questions.append({
+                    'difficulty': q_data['difficulty'],
+                    'cognitive_operation': q_data['cognitive_operation'],
+                    'estimated_time': self._adjust_time_for_pacing(
+                        q_data['estimated_time'],
+                        current_pacing
+                    ),
+                    'question': q_data['question'],
+                    'options': q_data['options'],
+                    'correct_index': q_data['correct_index']
+                })
         
         # Update session
         session_data['current_phase'] = 'questions'

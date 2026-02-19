@@ -220,7 +220,14 @@ const TeachingFirstFlow = ({ conceptId }) => {
                 return;
             }
 
-            if (data.next_action?.action === 'review_current') {
+            const action = data.next_action?.action;
+            const reviewActions = new Set([
+                'review_current',
+                'recommend_review',
+                'recommend_practice'
+            ]);
+
+            if (reviewActions.has(action)) {
                 // Build review metrics from latest answers
                 const totalAnswers = answers.length;
                 const correctCount = answers.filter(a => a.correct).length;
@@ -298,7 +305,8 @@ const TeachingFirstFlow = ({ conceptId }) => {
             try {
                 await generateQuestionsFromTeaching({
                     session_id: currentSession.session_id,
-                    atom_id: currentAtomData.id
+                    atom_id: currentAtomData.id,
+                    force_new: true
                 });
                 setFlowState('questions');
             } catch (err) {
