@@ -58,12 +58,8 @@ export const TeacherProvider = ({ children }) => {
     const teacherRegister = async (userData) => {
         try {
             const response = await axios.post('/auth/api/teacher/register/', userData);
-            const { access, refresh } = response.data;
-
-            localStorage.setItem('teacher_access_token', access);
-            localStorage.setItem('teacher_refresh_token', refresh);
-
-            return { success: true, data: response.data };
+            // No tokens — account needs admin approval first
+            return { success: true, pendingApproval: true, data: response.data };
         } catch (error) {
             return {
                 success: false,

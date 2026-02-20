@@ -2509,13 +2509,9 @@ class TeacherRegisterView(APIView):
         serializer = TeacherRegisterSerializer(data=request.data)
         if serializer.is_valid():
             user = serializer.save()
-            refresh = RefreshToken.for_user(user)
             return Response({
-                'access': str(refresh.access_token),
-                'refresh': str(refresh),
-                'user': UserSerializer(user).data,
-                'is_teacher': True,
-                'message': 'Teacher account created successfully'
+                'pending_approval': True,
+                'message': 'Teacher account created successfully. Your account is pending admin approval. You will be able to login once approved.'
             }, status=status.HTTP_201_CREATED)
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
@@ -2532,6 +2528,17 @@ class TeacherLoginView(APIView):
             if not IsTeacher.check(user):
                 return Response({'error': 'This account is not a teacher account'},
                                 status=status.HTTP_403_FORBIDDEN)
+            # Check if teacher is approved by admin
+            try:
+                profile = user.teacher_profile
+                if not profile.is_active:
+                    return Response({
+                        'error': 'Your account is pending admin approval. Please wait for an administrator to activate your account.',
+                        'pending_approval': True
+                    }, status=status.HTTP_403_FORBIDDEN)
+            except Exception:
+                return Response({'error': 'Teacher profile not found'}, status=status.HTTP_403_FORBIDDEN)
+
             refresh = RefreshToken.for_user(user)
             return Response({
                 'access': str(refresh.access_token),

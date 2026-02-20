@@ -16,6 +16,8 @@ const TeacherRegister = () => {
         setFormData({ ...formData, [e.target.name]: e.target.value });
     };
 
+    const [pendingApproval, setPendingApproval] = useState(false);
+
     const handleSubmit = async (e) => {
         e.preventDefault();
         setError('');
@@ -23,7 +25,7 @@ const TeacherRegister = () => {
 
         const result = await teacherRegister(formData);
         if (result.success) {
-            navigate('/teacher/dashboard');
+            setPendingApproval(true);
         } else {
             const errData = result.error;
             if (typeof errData === 'object') {
@@ -48,6 +50,25 @@ const TeacherRegister = () => {
                 </div>
 
                 <div className="bg-surface rounded-theme-xl shadow-theme border border-theme-border p-8">
+                    {pendingApproval ? (
+                        <div className="text-center py-8">
+                            <div className="w-20 h-20 bg-amber-500/10 border-2 border-amber-500/30 rounded-full flex items-center justify-center mx-auto mb-5">
+                                <svg className="w-10 h-10 text-amber-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+                                </svg>
+                            </div>
+                            <h2 className="text-2xl font-bold text-theme-text mb-3">Account Pending Approval</h2>
+                            <p className="text-theme-text-secondary mb-2">
+                                Your teacher account has been created successfully!
+                            </p>
+                            <p className="text-theme-text-secondary mb-6">
+                                An administrator will review and approve your account. You will be able to log in once approved.
+                            </p>
+                            <Link to="/teacher/login" className="inline-block px-6 py-2.5 bg-gradient-to-r from-emerald-500 to-teal-600 text-white font-medium rounded-lg hover:shadow-lg transition-all">
+                                Go to Login
+                            </Link>
+                        </div>
+                    ) : (<>
                     {error && (
                         <div className="mb-4 p-3 rounded-lg bg-error/10 border border-error/20 text-error text-sm">
                             {error}
@@ -113,6 +134,7 @@ const TeacherRegister = () => {
                             <Link to="/teacher/login" className="text-emerald-500 hover:underline font-medium">Sign in</Link>
                         </p>
                     </div>
+                    </>)}
                 </div>
             </div>
         </div>
