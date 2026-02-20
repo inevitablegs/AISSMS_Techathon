@@ -303,56 +303,122 @@ const StudentAnalytics = () => {
                                     </div>
                                 )}
 
-                                {/* Progress Table */}
+                                {/* Progress Table - Grouped by Subject */}
                                 <div className="bg-surface rounded-theme-xl shadow-theme border border-theme-border overflow-hidden">
                                     <div className="px-6 py-4 border-b border-theme-border">
                                         <h3 className="font-bold text-theme-text">📊 Mastery Per Atom</h3>
+                                        <p className="text-xs text-theme-text-muted mt-1">Grouped by subject — click to expand</p>
                                     </div>
-                                    <div className="overflow-x-auto">
-                                        <table className="w-full text-sm">
-                                            <thead>
-                                                <tr className="bg-surface-alt">
-                                                    <th className="text-left px-4 py-3 font-medium text-theme-text-muted">Atom</th>
-                                                    <th className="text-left px-4 py-3 font-medium text-theme-text-muted">Concept</th>
-                                                    <th className="text-left px-4 py-3 font-medium text-theme-text-muted">Phase</th>
-                                                    <th className="text-left px-4 py-3 font-medium text-theme-text-muted">Mastery</th>
-                                                    <th className="text-left px-4 py-3 font-medium text-theme-text-muted">Streak</th>
-                                                </tr>
-                                            </thead>
-                                            <tbody className="divide-y divide-theme-border">
-                                                {studentDetail.student.progress?.map((p, i) => (
-                                                    <tr key={i} className="hover:bg-surface-alt/50">
-                                                        <td className="px-4 py-3 text-theme-text font-medium">{p.atom_name}</td>
-                                                        <td className="px-4 py-3 text-theme-text-muted">{p.concept_name}</td>
-                                                        <td className="px-4 py-3">
-                                                            <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${
-                                                                p.phase === 'complete' ? 'bg-emerald-500/10 text-emerald-500' :
-                                                                p.phase === 'mastery_check' ? 'bg-blue-500/10 text-blue-500' :
-                                                                'bg-amber-500/10 text-amber-500'
-                                                            }`}>
-                                                                {p.phase}
-                                                            </span>
-                                                        </td>
-                                                        <td className="px-4 py-3">
-                                                            <div className="flex items-center gap-2">
-                                                                <div className="w-16 bg-surface-alt rounded-full h-2">
-                                                                    <div
-                                                                        className={`h-2 rounded-full ${
-                                                                            p.mastery_score >= 0.7 ? 'bg-emerald-500' :
-                                                                            p.mastery_score >= 0.4 ? 'bg-amber-500' : 'bg-error'
-                                                                        }`}
-                                                                        style={{ width: `${Math.max(p.mastery_score * 100, 4)}%` }}
-                                                                    />
+                                    {(() => {
+                                        const progress = studentDetail.student.progress || [];
+                                        // Group by subject → concept → atoms
+                                        const grouped = {};
+                                        progress.forEach(p => {
+                                            const subj = p.subject || 'Uncategorized';
+                                            const concept = p.concept_name || 'Unknown';
+                                            if (!grouped[subj]) grouped[subj] = {};
+                                            if (!grouped[subj][concept]) grouped[subj][concept] = [];
+                                            grouped[subj][concept].push(p);
+                                        });
+
+                                        const subjects = Object.keys(grouped).sort();
+                                        if (subjects.length === 0) {
+                                            return (
+                                                <div className="p-8 text-center text-theme-text-muted text-sm">No progress data yet</div>
+                                            );
+                                        }
+
+                                        return (
+                                            <div className="divide-y divide-theme-border">
+                                                {subjects.map(subject => {
+                                                    const concepts = grouped[subject];
+                                                    const allAtoms = Object.values(concepts).flat();
+                                                    const avgMastery = allAtoms.reduce((s, p) => s + p.mastery_score, 0) / allAtoms.length;
+                                                    const completedCount = allAtoms.filter(p => p.phase === 'complete').length;
+
+                                                    return (
+                                                        <details key={subject} className="group">
+                                                            <summary className="px-6 py-4 cursor-pointer hover:bg-surface-alt/50 transition-colors list-none flex items-center justify-between">
+                                                                <div className="flex items-center gap-3">
+                                                                    <div className={`w-10 h-10 rounded-xl flex items-center justify-center text-white text-sm font-bold ${
+                                                                        avgMastery >= 0.7 ? 'bg-emerald-500' : avgMastery >= 0.4 ? 'bg-amber-500' : 'bg-error'
+                                                                    }`}>
+                                                                        {(avgMastery * 100).toFixed(0)}%
+                                                                    </div>
+                                                                    <div>
+                                                                        <h4 className="font-semibold text-theme-text text-sm">{subject}</h4>
+                                                                        <p className="text-xs text-theme-text-muted">
+                                                                            {Object.keys(concepts).length} concept{Object.keys(concepts).length !== 1 ? 's' : ''} · {allAtoms.length} atom{allAtoms.length !== 1 ? 's' : ''} · {completedCount} completed
+                                                                        </p>
+                                                                    </div>
                                                                 </div>
-                                                                <span className="text-theme-text font-medium">{(p.mastery_score * 100).toFixed(0)}%</span>
+                                                                <div className="flex items-center gap-3">
+                                                                    <div className="w-24 bg-surface-alt rounded-full h-2 hidden sm:block">
+                                                                        <div className={`h-2 rounded-full ${
+                                                                            avgMastery >= 0.7 ? 'bg-emerald-500' : avgMastery >= 0.4 ? 'bg-amber-500' : 'bg-error'
+                                                                        }`} style={{ width: `${Math.max(avgMastery * 100, 4)}%` }} />
+                                                                    </div>
+                                                                    <svg className="w-4 h-4 text-theme-text-muted transition-transform group-open:rotate-180" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                                                                    </svg>
+                                                                </div>
+                                                            </summary>
+                                                            <div className="border-t border-theme-border">
+                                                                {Object.entries(concepts).map(([conceptName, atoms]) => (
+                                                                    <div key={conceptName}>
+                                                                        <div className="px-6 py-2 bg-surface-alt/40 flex items-center gap-2">
+                                                                            <span className="text-xs font-semibold text-theme-text-secondary">📘 {conceptName}</span>
+                                                                            <span className="text-xs text-theme-text-muted">({atoms.length} atom{atoms.length !== 1 ? 's' : ''})</span>
+                                                                        </div>
+                                                                        <div className="overflow-x-auto">
+                                                                            <table className="w-full text-sm">
+                                                                                <thead>
+                                                                                    <tr className="bg-surface-alt/20">
+                                                                                        <th className="text-left px-6 py-2 font-medium text-theme-text-muted text-xs">Atom</th>
+                                                                                        <th className="text-left px-4 py-2 font-medium text-theme-text-muted text-xs">Phase</th>
+                                                                                        <th className="text-left px-4 py-2 font-medium text-theme-text-muted text-xs">Mastery</th>
+                                                                                        <th className="text-left px-4 py-2 font-medium text-theme-text-muted text-xs">Streak</th>
+                                                                                    </tr>
+                                                                                </thead>
+                                                                                <tbody className="divide-y divide-theme-border/50">
+                                                                                    {atoms.map((p, i) => (
+                                                                                        <tr key={i} className="hover:bg-surface-alt/30">
+                                                                                            <td className="px-6 py-2.5 text-theme-text font-medium text-sm">{p.atom_name}</td>
+                                                                                            <td className="px-4 py-2.5">
+                                                                                                <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${
+                                                                                                    p.phase === 'complete' ? 'bg-emerald-500/10 text-emerald-500' :
+                                                                                                    p.phase === 'mastery_check' ? 'bg-blue-500/10 text-blue-500' :
+                                                                                                    'bg-amber-500/10 text-amber-500'
+                                                                                                }`}>
+                                                                                                    {p.phase}
+                                                                                                </span>
+                                                                                            </td>
+                                                                                            <td className="px-4 py-2.5">
+                                                                                                <div className="flex items-center gap-2">
+                                                                                                    <div className="w-16 bg-surface-alt rounded-full h-2">
+                                                                                                        <div className={`h-2 rounded-full ${
+                                                                                                            p.mastery_score >= 0.7 ? 'bg-emerald-500' :
+                                                                                                            p.mastery_score >= 0.4 ? 'bg-amber-500' : 'bg-error'
+                                                                                                        }`} style={{ width: `${Math.max(p.mastery_score * 100, 4)}%` }} />
+                                                                                                    </div>
+                                                                                                    <span className="text-theme-text font-medium text-xs">{(p.mastery_score * 100).toFixed(0)}%</span>
+                                                                                                </div>
+                                                                                            </td>
+                                                                                            <td className="px-4 py-2.5 text-theme-text text-sm">{p.streak}</td>
+                                                                                        </tr>
+                                                                                    ))}
+                                                                                </tbody>
+                                                                            </table>
+                                                                        </div>
+                                                                    </div>
+                                                                ))}
                                                             </div>
-                                                        </td>
-                                                        <td className="px-4 py-3 text-theme-text">{p.streak}</td>
-                                                    </tr>
-                                                ))}
-                                            </tbody>
-                                        </table>
-                                    </div>
+                                                        </details>
+                                                    );
+                                                })}
+                                            </div>
+                                        );
+                                    })()}
                                 </div>
 
                                 {/* Recent Sessions */}

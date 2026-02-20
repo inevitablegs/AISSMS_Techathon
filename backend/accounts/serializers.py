@@ -78,12 +78,15 @@ class QuestionSerializer(serializers.ModelSerializer):
 
 class StudentProgressSerializer(serializers.ModelSerializer):
     atom_name = serializers.CharField(source='atom.name', read_only=True)
+    atom_id = serializers.IntegerField(source='atom.id', read_only=True)
     concept_name = serializers.CharField(source='atom.concept.name', read_only=True)
+    concept_id = serializers.IntegerField(source='atom.concept.id', read_only=True)
+    subject = serializers.CharField(source='atom.concept.subject', read_only=True)
     
     class Meta:
         model = StudentProgress
-        fields = ['id', 'atom_name', 'concept_name', 'mastery_score', 'phase', 
-                 'streak', 'hint_usage', 'retention_verified']
+        fields = ['id', 'atom_id', 'atom_name', 'concept_id', 'concept_name', 'subject',
+                 'mastery_score', 'phase', 'streak', 'hint_usage', 'retention_verified']
 
 class LearningSessionSerializer(serializers.ModelSerializer):
     class Meta:

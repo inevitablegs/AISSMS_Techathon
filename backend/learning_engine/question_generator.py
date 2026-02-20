@@ -66,46 +66,84 @@ class QuestionGenerator:
             return self._get_fallback_atoms(subject, concept)
         
         prompt = f"""
-        You are generating atomic sub-concepts for curriculum design.
+        You are a master curriculum designer and senior educator with over 30 years of classroom teaching experience, specializing in breaking down subjects into precise, teachable, and assessable atomic learning units.
+
+        Your task is to generate atomic sub-concepts ("atoms") for curriculum design.
 
         Subject: {subject}
         Concept: {concept}
 
-        You must follow ALL rules strictly.
+        Your atoms must reflect how an expert teacher would naturally divide this concept for step-by-step teaching, assessment, and mastery tracking in a real classroom.
 
-        STRICT RULES:
-        1. Generate EXACTLY between 4 and 6 atoms.
-        2. Each atom must be:
-           - A noun or noun phrase only.
-           - Maximum 4 words.
-           - No verbs.
-           - No full sentences.
-        3. All atoms must belong to the SAME abstraction level.
-        4. Do NOT generate:
-           - Parent–child pairs
-           - General-to-specific relationships
-           - Negation pairs (pre/non, with/without, static/dynamic)
-           - Overlapping concepts
-           - Duplicates
-        5. Each atom must be independently assessable.
-        6. Do NOT include the concept name itself.
-        7. No explanations.
-        8. No numbering.
-        9. No markdown.
+        PEDAGOGICAL REQUIREMENTS:
+
+        1. Each atom must represent ONE distinct, teachable knowledge unit that can be:
+
+        * Explained independently
+        * Taught in a short lesson (5–15 minutes)
+        * Assessed with 1–3 focused questions
+
+        2. All atoms must be at the SAME pedagogical level:
+
+        * Do NOT mix beginner and advanced units
+        * Do NOT mix theory and applications
+        * Do NOT mix definition-level and mastery-level units
+
+        3. Atoms must be mutually exclusive:
+
+        * No overlap
+        * No redundancy
+        * No containment relationships
+        * No parent–child relationships
+
+        4. Together, atoms should cover the core structural understanding of the concept,
+        as expected in a standard academic curriculum.
+
+        STRUCTURAL RULES:
+
+        5. Generate EXACTLY 4 to 6 atoms.
+
+        6. Each atom must be:
+
+        * A noun or noun phrase
+        * Maximum 4 words
+        * No verbs
+        * No full sentences
+
+        7. Do NOT include:
+
+        * The concept name itself
+        * Examples
+        * Applications
+        * Real-world use cases
+        * Problem-solving techniques
+        * Compound multi-idea phrases
+
+        8. Prefer academically standard terminology used in textbooks.
+
+        9. Avoid artificial fragmentation. Each atom must feel natural to a teacher.
+
+        OUTPUT RULES:
+
         10. Output STRICT JSON only.
 
-        Output format:
-        {{
-            "atoms": [
-                "Atom 1",
-                "Atom 2",
-                "Atom 3",
-                "Atom 4"
-            ]
-        }}
+        11. Do NOT include explanations.
 
-        If rules cannot be satisfied, return:
-        {{"atoms": []}}
+        Output format:
+
+        {
+        "atoms": [
+        "Atom 1",
+        "Atom 2",
+        "Atom 3",
+        "Atom 4"
+        ]
+        }
+
+        If proper pedagogically valid atoms cannot be generated, return:
+
+        {"atoms": []}
+
         """
         
         try:

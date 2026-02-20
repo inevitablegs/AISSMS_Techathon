@@ -2561,10 +2561,8 @@ class TeacherDashboardView(APIView):
         # Student count
         total_students = all_students.count()
 
-        # Get all concepts (created by this teacher or in their subject)
-        teacher_concepts = Concept.objects.filter(
-            models.Q(created_by=teacher) | models.Q(subject__icontains=profile.subject)
-        ).distinct() if profile.subject else Concept.objects.filter(created_by=teacher)
+        # Get all concepts (teacher should see full class data)
+        teacher_concepts = Concept.objects.all().order_by('subject', 'order')
 
         # Class-level analytics: average mastery per concept
         class_analytics = []
@@ -2829,6 +2827,7 @@ class TeacherQuestionListView(APIView):
                 'atom_id': q.atom.id,
                 'concept_name': q.atom.concept.name,
                 'concept_id': q.atom.concept.id,
+                'subject': q.atom.concept.subject,
                 'approval_status': approval.status if approval else 'pending',
                 'approval_feedback': approval.feedback if approval else '',
             })
@@ -3113,10 +3112,8 @@ class TeacherClassAnalyticsView(APIView):
         teacher = request.user
         profile = teacher.teacher_profile
 
-        # Get concepts
-        concepts = Concept.objects.filter(
-            Q(created_by=teacher) | Q(subject__icontains=profile.subject)
-        ).distinct() if profile.subject else Concept.objects.filter(created_by=teacher)
+        # Get all concepts (teacher should see full class analytics)
+        concepts = Concept.objects.all().order_by('subject', 'order')
 
         # Per-concept breakdown
         concept_analytics = []
