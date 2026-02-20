@@ -22,6 +22,33 @@ class QuestionGenerator:
             self.gemini_model = genai.GenerativeModel('gemini-2.5-flash')
         else:
             self.gemini_model = None
+
+    @staticmethod
+    def _validate_questions(questions: list) -> list:
+        """
+        Validate and sanitise AI-generated questions.
+        - Ensures correct_index is an int within [0, len(options)-1]
+        - Ensures options is a list of exactly 4 strings
+        - Drops any malformed question instead of passing it through
+        """
+        validated = []
+        for q in questions:
+            opts = q.get('options')
+            if not isinstance(opts, list) or len(opts) != 4:
+                continue  # Skip malformed question
+
+            ci = q.get('correct_index')
+            try:
+                ci = int(ci)
+            except (TypeError, ValueError):
+                ci = 0  # Fallback to first option
+
+            if ci < 0 or ci >= len(opts):
+                ci = 0  # Clamp to safe default
+
+            q['correct_index'] = ci
+            validated.append(q)
+        return validated
     
     def generate_atoms(self, subject: str, concept: str) -> List[str]:
         """
@@ -282,7 +309,7 @@ class QuestionGenerator:
                 model="llama-3.3-70b-versatile",
                 messages=[{"role": "user", "content": prompt}],
                 temperature=0.3,
-                max_tokens=1024,
+                max_tokens=2048,
             )
             
             raw_text = response.choices[0].message.content
@@ -293,6 +320,9 @@ class QuestionGenerator:
             
             result = json.loads(raw_text.strip())
             questions = result.get("questions", [])
+
+            # Validate correct_index and options for every question
+            questions = self._validate_questions(questions)
             
             # Adjust estimated time based on knowledge level
             for q in questions:
@@ -628,7 +658,7 @@ class QuestionGenerator:
                 model="llama-3.3-70b-versatile",
                 messages=[{"role": "user", "content": prompt}],
                 temperature=0.3,
-                max_tokens=1024,
+                max_tokens=2048,
             )
             
             raw_text = response.choices[0].message.content
@@ -639,6 +669,9 @@ class QuestionGenerator:
             
             result = json.loads(raw_text.strip())
             questions = result.get("questions", [])
+
+            # Validate correct_index and options for every question
+            questions = self._validate_questions(questions)
             
             print(f"Generated {len(questions)} questions from teaching")
             return questions

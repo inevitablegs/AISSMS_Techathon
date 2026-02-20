@@ -137,7 +137,7 @@ class ConceptListView(APIView):
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
-        concepts = Concept.objects.all()
+        concepts = Concept.objects.filter(created_by=request.user)
         serializer = ConceptSerializer(concepts, many=True)
         return Response(serializer.data)
 
@@ -388,7 +388,19 @@ class SubmitInitialQuizAnswerView(APIView):
             return Response({'error': 'Invalid question index'}, status=400)
 
         question = questions[question_index]
-        correct = (selected == question.get('correct_index'))
+
+        # Type-safe comparison: ensure both are ints
+        try:
+            selected_int = int(selected) if selected is not None else None
+        except (TypeError, ValueError):
+            selected_int = None
+        stored_correct = question.get('correct_index')
+        try:
+            correct_index_int = int(stored_correct) if stored_correct is not None else None
+        except (TypeError, ValueError):
+            correct_index_int = None
+
+        correct = (selected_int is not None and selected_int == correct_index_int)
 
         # Store answer
         answers = session.session_data.get('initial_quiz_answers', [])
@@ -396,15 +408,15 @@ class SubmitInitialQuizAnswerView(APIView):
             'question_index': question_index,
             'correct': correct,
             'time_taken': time_taken,
-            'selected': selected
+            'selected': selected_int
         })
         session.session_data['initial_quiz_answers'] = answers
         session.save()
 
         explanation = ''
         if not correct:
-            correct_index = question.get('correct_index')
-            correct_option = question.get('options', [None])[correct_index] if correct_index is not None else None
+            correct_index = correct_index_int
+            correct_option = question.get('options', [None])[correct_index] if correct_index is not None and 0 <= correct_index < len(question.get('options', [])) else None
             explanation = f"Correct answer: {correct_option}. It best matches the question focus." if correct_option else "Review the concept and try again."
 
         return Response({
@@ -774,9 +786,15 @@ class SubmitAtomAnswerView(APIView):
             session_id = data.get('session_id')
             atom_id = data.get('atom_id')
             question_index = data.get('question_index')
-            selected = data.get('selected')
+            raw_selected = data.get('selected')
             time_taken = data.get('time_taken', 30)
             question_set = data.get('question_set', 'teaching')
+
+            # Type-safe: ensure selected is an int
+            try:
+                selected = int(raw_selected) if raw_selected is not None else None
+            except (TypeError, ValueError):
+                return Response({'error': 'Invalid selected option'}, status=400)
             
             # Get session and progress
             from accounts.models import LearningSession, StudentProgress, TeachingAtom
@@ -2203,8 +2221,19 @@ class SubmitConceptFinalAnswerView(APIView):
             return Response({'error': 'Invalid question index'}, status=400)
 
         question = questions[question_index]
-        correct_index = question.get('correct_index')
-        is_correct = (selected == correct_index)
+
+        # Type-safe comparison: ensure both are ints
+        try:
+            selected_int = int(selected) if selected is not None else None
+        except (TypeError, ValueError):
+            selected_int = None
+        stored_correct = question.get('correct_index')
+        try:
+            correct_index = int(stored_correct) if stored_correct is not None else None
+        except (TypeError, ValueError):
+            correct_index = None
+
+        is_correct = (selected_int is not None and selected_int == correct_index)
 
         # Award XP for correct answer
         if is_correct:
@@ -2219,7 +2248,7 @@ class SubmitConceptFinalAnswerView(APIView):
             session.session_data['concept_final_answers'] = []
         session.session_data['concept_final_answers'].append({
             'question_index': question_index,
-            'selected': selected,
+            'selected': selected_int,
             'correct': is_correct,
             'correct_index': correct_index,
             'time_taken': time_taken,
