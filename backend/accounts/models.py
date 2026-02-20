@@ -188,3 +188,135 @@ class UserXP(models.Model):
         elif category == 'concepts':
             self.concepts_xp += amount
         self.save()
+
+
+# ==================== TEACHER MODELS ====================
+
+class TeacherProfile(models.Model):
+    """Teacher profile linked to a User"""
+    user = models.OneToOneField(User, on_delete=models.CASCADE, related_name='teacher_profile')
+    subject = models.CharField(max_length=200, blank=True)
+    bio = models.TextField(blank=True)
+    is_active = models.BooleanField(default=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = 'teacher_profile'
+
+    def __str__(self):
+        return f"Teacher: {self.user.username} ({self.subject})"
+
+
+class TeacherContent(models.Model):
+    """Custom teaching content created by teachers for specific atoms"""
+    STATUS_CHOICES = [
+        ('draft', 'Draft'),
+        ('published', 'Published'),
+        ('archived', 'Archived'),
+    ]
+
+    teacher = models.ForeignKey(User, on_delete=models.CASCADE, related_name='teacher_contents')
+    atom = models.ForeignKey(TeachingAtom, on_delete=models.CASCADE, related_name='teacher_contents')
+    explanation = models.TextField(blank=True, help_text='Custom explanation for the atom')
+    analogy = models.TextField(blank=True, help_text='Custom analogy')
+    examples = models.JSONField(default=list, help_text='Custom examples')
+    tips = models.TextField(blank=True, help_text='Teaching tips for students')
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='published')
+    priority = models.BooleanField(default=True, help_text='If true, shown before AI content')
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = 'teacher_content'
+        unique_together = ['teacher', 'atom']
+        ordering = ['-priority', '-updated_at']
+
+    def __str__(self):
+        return f"Content by {self.teacher.username} for {self.atom.name}"
+
+
+class QuestionApproval(models.Model):
+    """Track teacher approval/rejection of AI-generated questions"""
+    STATUS_CHOICES = [
+        ('pending', 'Pending Review'),
+        ('approved', 'Approved'),
+        ('rejected', 'Rejected'),
+        ('edited', 'Edited & Approved'),
+        ('disabled', 'Disabled'),
+    ]
+
+    question = models.OneToOneField(Question, on_delete=models.CASCADE, related_name='approval')
+    teacher = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, related_name='question_approvals')
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='pending')
+    feedback = models.TextField(blank=True, help_text='Teacher feedback on the question')
+    edited_question_text = models.TextField(blank=True)
+    edited_options = models.JSONField(default=list, blank=True)
+    edited_correct_index = models.IntegerField(null=True, blank=True)
+    reviewed_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = 'question_approval'
+        ordering = ['-created_at']
+
+    def __str__(self):
+        return f"Q#{self.question.id} - {self.status}"
+
+
+class TeacherOverride(models.Model):
+    """Teacher interventions on student progress"""
+    ACTION_CHOICES = [
+        ('reset_mastery', 'Reset Mastery'),
+        ('assign_atom', 'Assign Specific Atom'),
+        ('force_review', 'Force Review'),
+        ('set_mastery', 'Set Mastery Level'),
+        ('assign_remedial', 'Assign Remedial Content'),
+        ('skip_atom', 'Skip Atom'),
+    ]
+
+    teacher = models.ForeignKey(User, on_delete=models.CASCADE, related_name='teacher_overrides')
+    student = models.ForeignKey(User, on_delete=models.CASCADE, related_name='received_overrides')
+    atom = models.ForeignKey(TeachingAtom, on_delete=models.CASCADE, related_name='overrides', null=True, blank=True)
+    concept = models.ForeignKey(Concept, on_delete=models.CASCADE, related_name='overrides', null=True, blank=True)
+    action = models.CharField(max_length=30, choices=ACTION_CHOICES)
+    parameters = models.JSONField(default=dict, help_text='Action parameters (e.g., mastery value)')
+    reason = models.TextField(blank=True, help_text='Why the teacher is intervening')
+    is_active = models.BooleanField(default=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = 'teacher_override'
+        ordering = ['-created_at']
+
+    def __str__(self):
+        return f"Override: {self.teacher.username} → {self.student.username} ({self.action})"
+
+
+class TeacherGoal(models.Model):
+    """Goals/deadlines set by teachers for students"""
+    STATUS_CHOICES = [
+        ('active', 'Active'),
+        ('completed', 'Completed'),
+        ('overdue', 'Overdue'),
+        ('cancelled', 'Cancelled'),
+    ]
+
+    teacher = models.ForeignKey(User, on_delete=models.CASCADE, related_name='set_goals')
+    student = models.ForeignKey(User, on_delete=models.CASCADE, related_name='assigned_goals', null=True, blank=True)
+    concept = models.ForeignKey(Concept, on_delete=models.CASCADE, related_name='goals', null=True, blank=True)
+    title = models.CharField(max_length=300)
+    description = models.TextField(blank=True)
+    deadline = models.DateTimeField(null=True, blank=True)
+    target_mastery = models.FloatField(default=0.8)
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='active')
+    is_class_wide = models.BooleanField(default=False, help_text='If true, applies to all students')
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = 'teacher_goal'
+        ordering = ['-created_at']
+
+    def __str__(self):
+        target = 'All Students' if self.is_class_wide else self.student.username if self.student else 'N/A'
+        return f"Goal: {self.title} → {target}"

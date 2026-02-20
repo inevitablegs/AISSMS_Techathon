@@ -23,6 +23,17 @@ from .views import (
     # Concept final challenge views
     GenerateConceptFinalChallengeView, SubmitConceptFinalAnswerView,
     CompleteConceptFinalChallengeView,
+
+    # Teacher views
+    TeacherRegisterView, TeacherLoginView, TeacherDashboardView,
+    TeacherStudentListView, TeacherStudentDetailView,
+    TeacherContentListView, TeacherContentDetailView,
+    TeacherQuestionListView, TeacherQuestionApproveView, TeacherAddQuestionView,
+    TeacherOverrideListView, TeacherOverrideDeactivateView,
+    TeacherGoalListView, TeacherGoalUpdateView,
+    TeacherClassAnalyticsView,
+    TeacherConceptManageView, TeacherAtomManageView,
+    CheckTeacherView,
 )
 
 urlpatterns = [
@@ -67,4 +78,38 @@ urlpatterns = [
     path('api/concept-final-challenge/', GenerateConceptFinalChallengeView.as_view(), name='generate_concept_final_challenge'),
     path('api/submit-concept-final-answer/', SubmitConceptFinalAnswerView.as_view(), name='submit_concept_final_answer'),
     path('api/complete-concept-final-challenge/', CompleteConceptFinalChallengeView.as_view(), name='complete_concept_final_challenge'),
+
+    # ==================== TEACHER ENDPOINTS ====================
+    path('api/teacher/register/', TeacherRegisterView.as_view(), name='teacher_register'),
+    path('api/teacher/login/', TeacherLoginView.as_view(), name='teacher_login'),
+    path('api/teacher/dashboard/', TeacherDashboardView.as_view(), name='teacher_dashboard'),
+    path('api/teacher/check/', CheckTeacherView.as_view(), name='check_teacher'),
+
+    # Student analytics
+    path('api/teacher/students/', TeacherStudentListView.as_view(), name='teacher_students'),
+    path('api/teacher/student-detail/', TeacherStudentDetailView.as_view(), name='teacher_student_detail'),
+
+    # Content management
+    path('api/teacher/content/', TeacherContentListView.as_view(), name='teacher_content'),
+    path('api/teacher/content-detail/', TeacherContentDetailView.as_view(), name='teacher_content_detail'),
+
+    # Question management
+    path('api/teacher/questions/', TeacherQuestionListView.as_view(), name='teacher_questions'),
+    path('api/teacher/question-approve/', TeacherQuestionApproveView.as_view(), name='teacher_question_approve'),
+    path('api/teacher/question-add/', TeacherAddQuestionView.as_view(), name='teacher_add_question'),
+
+    # Student intervention
+    path('api/teacher/overrides/', TeacherOverrideListView.as_view(), name='teacher_overrides'),
+    path('api/teacher/override-deactivate/', TeacherOverrideDeactivateView.as_view(), name='teacher_override_deactivate'),
+
+    # Goals & deadlines
+    path('api/teacher/goals/', TeacherGoalListView.as_view(), name='teacher_goals'),
+    path('api/teacher/goal-update/', TeacherGoalUpdateView.as_view(), name='teacher_goal_update'),
+
+    # Class analytics
+    path('api/teacher/class-analytics/', TeacherClassAnalyticsView.as_view(), name='teacher_class_analytics'),
+
+    # Knowledge graph management
+    path('api/teacher/concepts/', TeacherConceptManageView.as_view(), name='teacher_concepts'),
+    path('api/teacher/atoms/', TeacherAtomManageView.as_view(), name='teacher_atoms'),
 ]
