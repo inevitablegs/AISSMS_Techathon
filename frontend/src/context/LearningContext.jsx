@@ -193,7 +193,18 @@ export const LearningProvider = ({ children }) => {
                 selected,
                 time_taken
             });
-            return { success: true, data: response.data };
+
+            const data = response.data;
+
+            // Real-time mastery & theta update from initial quiz
+            if (data.updated_mastery !== undefined) {
+                setAtomMastery(data.updated_mastery);
+            }
+            if (data.updated_theta !== undefined) {
+                setCurrentTheta(data.updated_theta);
+            }
+
+            return { success: true, data };
         } catch (error) {
             return {
                 success: false,

@@ -129,6 +129,160 @@ class AdaptiveLearningEngine:
             'reasoning': result.reasoning,
         }
     
+    def evaluate_initial_quiz(
+        self,
+        quiz_questions: List[Dict],
+        quiz_answers: List[Dict],
+        knowledge_level: str,
+        current_theta: float = 0.0,
+    ) -> Dict[str, Any]:
+        """
+        Evaluate the initial diagnostic quiz using full adaptive flow.
+
+        Processes every answer through IRT theta updates, BKT mastery updates,
+        and error classification to produce a seeded mastery score, updated
+        theta, error analysis, and an adaptive next-action recommendation.
+
+        Returns a rich dict consumed by CompleteInitialQuizView.
+        """
+        from .knowledge_tracing import (
+            calculate_updated_mastery, classify_error_type, update_theta,
+            bkt_update, classify_behavior,
+        )
+
+        theta = current_theta
+        mastery = 0.3  # Starting prior
+        streak = 0
+        error_types: List[str] = []
+        correct_count = 0
+        total_time = 0.0
+        per_question_metrics: List[Dict] = []
+
+        for ans in quiz_answers:
+            idx = ans.get('question_index', 0)
+            if idx < 0 or idx >= len(quiz_questions):
+                continue
+            question = quiz_questions[idx]
+            selected = ans.get('selected')
+            time_taken = float(ans.get('time_taken', 30))
+            total_time += time_taken
+
+            correct = ans.get('correct', False)
+
+            # Classify error if wrong
+            error_type = None
+            if not correct and selected is not None:
+                error_type = classify_error_type(
+                    question, selected, time_taken,
+                    atom_name='initial_quiz'
+                )
+                if error_type:
+                    error_types.append(error_type)
+
+            # Real-time mastery + theta update through the full pipeline
+            new_mastery, new_theta, metrics = calculate_updated_mastery(
+                current_mastery=mastery,
+                current_theta=theta,
+                question=question,
+                correct=correct,
+                time_taken=time_taken,
+                error_type=error_type,
+            )
+
+            mastery = new_mastery
+            theta = new_theta
+
+            if correct:
+                correct_count += 1
+                streak = max(streak + 1, 1)
+            else:
+                streak = min(streak - 1, -1)
+
+            per_question_metrics.append({
+                'question_index': idx,
+                'correct': correct,
+                'error_type': error_type,
+                'mastery_after': round(mastery, 4),
+                'theta_after': round(theta, 4),
+                'time_taken': time_taken,
+                'confidence': metrics.get('confidence', 0),
+            })
+
+        total = len(quiz_answers) or 1
+        accuracy = correct_count / total
+        avg_time = total_time / total if total else 30
+
+        # ── Error analysis ──
+        from collections import Counter
+        error_counter = Counter(error_types)
+        dominant_error = error_counter.most_common(1)[0][0] if error_counter else None
+
+        # ── Full pacing decision (10-feature) ──
+        pacing_context = PacingContext(
+            accuracy=accuracy,
+            mastery_score=mastery,
+            streak=streak,
+            error_types=error_types[-5:],
+            theta=theta,
+            questions_answered=total,
+            knowledge_level=knowledge_level,
+            phase='initial_quiz',
+            avg_response_time=avg_time,
+            expected_response_time=60.0,
+            time_per_question_history=[m['time_taken'] for m in per_question_metrics],
+            diagnostic_accuracy=accuracy,
+        )
+
+        pacing_result: PacingResult = self.pacing_engine.decide_pacing(pacing_context)
+
+        # ── Determine adaptive next-step ──
+        if mastery >= 0.65 and accuracy >= 0.8:
+            next_step = 'skip_to_practice'
+            next_step_message = "Great diagnostic! You already know the basics — let's jump to practice questions."
+        elif mastery >= 0.45 and accuracy >= 0.6:
+            next_step = 'normal_teaching'
+            next_step_message = "Good foundation. Let's reinforce with focused teaching."
+        elif mastery >= 0.3 and accuracy >= 0.4:
+            next_step = 'detailed_teaching'
+            next_step_message = "Some gaps found. We'll go through the material step by step."
+        else:
+            next_step = 'foundational_teaching'
+            next_step_message = "Let's build from the ground up with detailed explanations."
+
+        # ── Knowledge-level adjustment ──
+        if accuracy >= 0.8 and knowledge_level in ('beginner', 'zero'):
+            adjusted_level = 'intermediate'
+        elif accuracy < 0.3 and knowledge_level in ('advanced', 'intermediate'):
+            adjusted_level = 'beginner'
+        elif accuracy < 0.5 and knowledge_level == 'advanced':
+            adjusted_level = 'intermediate'
+        else:
+            adjusted_level = knowledge_level
+
+        return {
+            'accuracy': round(accuracy, 4),
+            'mastery': round(mastery, 4),
+            'theta': round(theta, 4),
+            'streak': streak,
+            'error_types': error_types,
+            'error_analysis': {
+                'dominant_error': dominant_error,
+                'error_counts': dict(error_counter),
+                'total_errors': len(error_types),
+            },
+            'per_question_metrics': per_question_metrics,
+            'pacing': pacing_result.decision.value if hasattr(pacing_result.decision, 'value') else pacing_result.decision,
+            'next_action': pacing_result.next_action.value if hasattr(pacing_result.next_action, 'value') else pacing_result.next_action,
+            'fatigue': pacing_result.fatigue.value if hasattr(pacing_result.fatigue, 'value') else str(pacing_result.fatigue),
+            'recommended_difficulty': pacing_result.recommended_difficulty,
+            'mastery_verdict': pacing_result.mastery_verdict,
+            'reasoning': pacing_result.reasoning,
+            'next_step': next_step,
+            'next_step_message': next_step_message,
+            'adjusted_knowledge_level': adjusted_level,
+            'avg_response_time': round(avg_time, 2),
+        }
+
     def process_answer(self, 
                       atom_state: TeachingAtomState,
                       theta: float,
@@ -380,9 +534,16 @@ class AdaptiveLearningEngine:
     
     def generate_teaching_content(self, atom_name: str, subject: str, 
                                   concept: str, knowledge_level: str,
-                                  error_history: List[str] = None) -> Dict[str, str]:
+                                  error_history: List[str] = None,
+                                  mastery_score: float = None) -> Dict[str, str]:
         """
-        Generate personalized teaching content based on knowledge level and error history
+        Generate personalized teaching content based on knowledge level,
+        error history, AND quiz mastery score.
+
+        mastery_score drives the depth of teaching:
+          - low  (<0.35): teach from absolute basics, ground-up
+          - moderate (0.35-0.65): normal, balanced teaching
+          - high (>0.65): go deep — advanced insights, edge cases
         """
         # If reteaching due to errors, focus on problem areas
         if error_history and len(error_history) > 0:
@@ -400,6 +561,40 @@ class AdaptiveLearningEngine:
             'intermediate': "Knows the basics - needs deeper insights and applications",
             'advanced': "Strong understanding - needs advanced concepts and edge cases"
         }
+
+        # ── Mastery-driven depth instruction ──
+        mastery_depth_instruction = ""
+        if mastery_score is not None:
+            if mastery_score < 0.35:
+                mastery_depth_instruction = f"""
+**IMPORTANT — MASTERY-BASED DEPTH (mastery = {mastery_score:.0%}):**
+The student scored VERY LOW on the diagnostic quiz. They have little to no prior understanding.
+- Teach from ABSOLUTE BASICS. Assume zero prior knowledge of this specific topic.
+- Use the simplest language possible. Define every term.
+- Give extremely concrete, step-by-step explanations.
+- Use very relatable, everyday analogies — nothing abstract.
+- Reinforce the core idea multiple times in different ways.
+- Do NOT skip foundational steps or assume any background.
+"""
+            elif mastery_score < 0.65:
+                mastery_depth_instruction = f"""
+**MASTERY-BASED DEPTH (mastery = {mastery_score:.0%}):**
+The student has a MODERATE understanding from the diagnostic quiz.
+- Teach at a standard level — cover the core idea clearly.
+- Include practical examples and applications.
+- Don't over-simplify, but don't assume deep expertise either.
+- Balance foundational clarity with useful insights.
+"""
+            else:
+                mastery_depth_instruction = f"""
+**MASTERY-BASED DEPTH (mastery = {mastery_score:.0%}):**
+The student scored HIGH on the diagnostic quiz — they already know the basics well.
+- Go DEEP into the concept. Skip trivial basics.
+- Focus on edge cases, subtle nuances, and common pitfalls at an advanced level.
+- Include implementation details, performance considerations, or real-world gotchas.
+- Challenge their understanding with non-obvious insights.
+- Connect the concept to related advanced ideas.
+"""
         
         error_context = ""
         if error_focus:
@@ -418,6 +613,8 @@ Subject: {subject}
 Concept: {concept}  
 Atomic Concept: {atom_name}  
 Student Knowledge Level: {level_descriptions.get(knowledge_level, 'intermediate')}  
+
+{mastery_depth_instruction}
 
 {error_context}
 
@@ -445,7 +642,8 @@ Rules to follow:
 - Focus on ONE atomic idea only.  
 - No unexplained jargon.  
 - Make the content memorable and directly relevant to the student’s level.  
-- If the student is advanced, include edge cases, limitations, or deeper insights.  
+- If the student is advanced or has high mastery, include edge cases, limitations, or deeper insights.  
+- If the student is a beginner or has low mastery, focus on fundamentals and simple explanations.  
 - If this is a reteach (due to a previous error), explain the concept in a completely different way from before.  
 
 Return the result as a strict JSON object with exactly these keys:  

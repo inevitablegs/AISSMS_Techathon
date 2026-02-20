@@ -84,6 +84,8 @@ useEffect(() => {
     }
 }, [currentSession]);
 
+    const [quizEvaluation, setQuizEvaluation] = useState(null);
+    
     // Refs for tracking
     const sessionIdRef = useRef(null);
     const conceptIdRef = useRef(conceptId);
@@ -221,7 +223,31 @@ useEffect(() => {
             return;
         }
 
-        // After initial quiz, load teaching content
+        const evalData = result.data;
+        setQuizEvaluation(evalData);
+
+        console.log('Quiz evaluation:', evalData);
+
+        // Adaptive routing based on quiz mastery
+        const nextStep = evalData.next_step || 'normal_teaching';
+
+        if (nextStep === 'skip_to_practice') {
+            // High mastery — skip teaching, go directly to practice questions
+            try {
+                const qResult = await generateQuestionsFromTeaching({
+                    session_id: currentSession.session_id,
+                    atom_id: currentAtomData.id
+                });
+                if (qResult.success && qResult.data.questions?.length > 0) {
+                    setFlowState('questions');
+                    return;
+                }
+            } catch (err) {
+                console.warn('Skip-to-practice failed, falling back to teaching:', err);
+            }
+        }
+
+        // Default: load teaching content (adapted by backend based on mastery/pacing)
         const contentResult = await getTeachingContent({
             session_id: currentSession.session_id,
             atom_id: currentAtomData.id
@@ -233,7 +259,7 @@ useEffect(() => {
             setError(contentResult.error || 'Failed to load teaching content');
             setFlowState('error');
         }
-    }, [currentSession, currentAtomData, completeInitialQuiz, getTeachingContent]);
+    }, [currentSession, currentAtomData, completeInitialQuiz, getTeachingContent, generateQuestionsFromTeaching]);
 
     // Handle back to teaching
     const handleBackToTeaching = useCallback(() => {
@@ -601,6 +627,7 @@ useEffect(() => {
                                 {currentSession.concept_name || 'Learning Session'}
                             </h1>
                             <p className="text-sm text-theme-text-muted">
+                                {flowState === 'initial_quiz' && '📝 Diagnostic Quiz'}
                                 {flowState === 'teaching' && '📖 Learning new concept'}
                                 {flowState === 'questions' && '✍️ Answering questions'}
                                 {flowState === 'review' && '🔄 Reviewing material'}
@@ -693,6 +720,70 @@ useEffect(() => {
                             onSubmitAnswer={submitInitialQuizAnswer}
                             showMetrics={false}
                         />
+                    )}
+
+                    {/* Quiz Evaluation Summary (shows above teaching/questions after quiz) */}
+                    {quizEvaluation && (flowState === 'teaching' || flowState === 'questions') && (
+                        <div className="mb-4 bg-surface rounded-theme-xl shadow-theme border border-theme-border p-4">
+                            <div className="flex items-center justify-between mb-3">
+                                <h3 className="text-sm font-semibold text-theme-text">
+                                    📊 Diagnostic Quiz Results
+                                </h3>
+                                <button
+                                    onClick={() => setQuizEvaluation(null)}
+                                    className="text-xs text-theme-text-muted hover:text-theme-text"
+                                >
+                                    Dismiss
+                                </button>
+                            </div>
+                            <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-center">
+                                <div>
+                                    <div className="text-xs text-theme-text-muted">Accuracy</div>
+                                    <div className={`text-lg font-bold ${
+                                        quizEvaluation.accuracy >= 0.7 ? 'text-emerald-500' :
+                                        quizEvaluation.accuracy >= 0.4 ? 'text-amber-500' : 'text-error'
+                                    }`}>
+                                        {Math.round((quizEvaluation.accuracy || 0) * 100)}%
+                                    </div>
+                                </div>
+                                <div>
+                                    <div className="text-xs text-theme-text-muted">Mastery</div>
+                                    <div className="text-lg font-bold text-primary">
+                                        {Math.round((quizEvaluation.mastery || 0) * 100)}%
+                                    </div>
+                                </div>
+                                <div>
+                                    <div className="text-xs text-theme-text-muted">Ability</div>
+                                    <div className="text-lg font-bold text-violet-500">
+                                        {(quizEvaluation.theta || 0).toFixed(2)}
+                                    </div>
+                                </div>
+                                <div>
+                                    <div className="text-xs text-theme-text-muted">Pace</div>
+                                    <div className={`text-sm font-bold ${
+                                        quizEvaluation.initial_pacing === 'speed_up' ? 'text-emerald-500' :
+                                        quizEvaluation.initial_pacing === 'slow_down' ? 'text-amber-500' :
+                                        quizEvaluation.initial_pacing === 'sharp_slowdown' ? 'text-error' :
+                                        'text-theme-text'
+                                    }`}>
+                                        {quizEvaluation.initial_pacing === 'speed_up' && '⚡ Speed Up'}
+                                        {quizEvaluation.initial_pacing === 'slow_down' && '🐢 Slow Down'}
+                                        {quizEvaluation.initial_pacing === 'sharp_slowdown' && '⚠️ Careful'}
+                                        {quizEvaluation.initial_pacing === 'stay' && '➡️ Steady'}
+                                    </div>
+                                </div>
+                            </div>
+                            {quizEvaluation.next_step_message && (
+                                <p className="mt-3 text-sm text-center text-theme-text-muted italic">
+                                    {quizEvaluation.next_step_message}
+                                </p>
+                            )}
+                            {quizEvaluation.error_analysis?.dominant_error && (
+                                <p className="mt-1 text-xs text-center text-amber-500">
+                                    Focus area: {quizEvaluation.error_analysis.dominant_error} errors detected
+                                </p>
+                            )}
+                        </div>
                     )}
 
                     {/* Teaching Module */}

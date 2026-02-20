@@ -186,7 +186,7 @@ LEARNING_ENGINE = {
 }
 
 # API Keys (set these in environment variables)
-GOOGLE_API_KEY = os.environ.get('GOOGLE_API_KEY', '')
+GOOGLE_API_KEY = os.getenv('GOOGLE_API_KEY', '')
 GROQ_API_KEY = os.environ.get('GROQ_API_KEY', '')
 
 

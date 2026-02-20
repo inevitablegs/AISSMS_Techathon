@@ -364,10 +364,12 @@ class GenerateInitialQuizView(APIView):
 
 
 class SubmitInitialQuizAnswerView(APIView):
-    """Submit answer for initial diagnostic quiz."""
+    """Submit answer for initial diagnostic quiz — with real-time mastery update per question."""
     permission_classes = [IsAuthenticated]
 
     def post(self, request):
+        from learning_engine.knowledge_tracing import calculate_updated_mastery, classify_error_type
+
         session_id = request.data.get('session_id')
         question_index = request.data.get('question_index')
         selected = request.data.get('selected')
@@ -402,13 +404,73 @@ class SubmitInitialQuizAnswerView(APIView):
 
         correct = (selected_int is not None and selected_int == correct_index_int)
 
+        # ── Real-time mastery update per question ──
+        # Retrieve running mastery & theta from session data (or defaults)
+        running = session.session_data.get('quiz_running_state', {
+            'mastery': 0.3,
+            'theta': 0.0,
+            'streak': 0,
+            'error_types': []
+        })
+        current_mastery = float(running.get('mastery', 0.3))
+        current_theta = float(running.get('theta', 0.0))
+
+        # Get user profile theta if this is the first question
+        if question_index == 0 and current_theta == 0.0:
+            try:
+                profile = request.user.learning_profile
+                current_theta = float(profile.overall_theta)
+            except LearningProfile.DoesNotExist:
+                pass
+
+        # Classify error if wrong
+        error_type = None
+        if not correct and selected_int is not None:
+            error_type = classify_error_type(
+                question, selected_int, float(time_taken),
+                atom_name='initial_quiz'
+            )
+
+        # Calculate updated mastery & theta
+        new_mastery, new_theta, mastery_metrics = calculate_updated_mastery(
+            current_mastery=current_mastery,
+            current_theta=current_theta,
+            question=question,
+            correct=correct,
+            time_taken=float(time_taken),
+            error_type=error_type,
+        )
+
+        # Update streak
+        streak = int(running.get('streak', 0))
+        if correct:
+            streak = max(streak + 1, 1)
+        else:
+            streak = min(streak - 1, -1)
+
+        # Accumulate error types
+        error_types = running.get('error_types', [])
+        if error_type:
+            error_types.append(error_type)
+
+        # Persist running state in session data
+        session.session_data['quiz_running_state'] = {
+            'mastery': round(new_mastery, 4),
+            'theta': round(new_theta, 4),
+            'streak': streak,
+            'error_types': error_types
+        }
+
         # Store answer
         answers = session.session_data.get('initial_quiz_answers', [])
         answers.append({
             'question_index': question_index,
             'correct': correct,
             'time_taken': time_taken,
-            'selected': selected_int
+            'selected': selected_int,
+            'mastery_after': round(new_mastery, 4),
+            'theta_after': round(new_theta, 4),
+            'error_type': error_type
         })
         session.session_data['initial_quiz_answers'] = answers
         session.save()
@@ -422,12 +484,18 @@ class SubmitInitialQuizAnswerView(APIView):
         return Response({
             'correct': correct,
             'correct_index': question.get('correct_index') if not correct else None,
-            'explanation': explanation
+            'explanation': explanation,
+            'updated_mastery': round(new_mastery, 4),
+            'updated_theta': round(new_theta, 4),
+            'error_type': error_type,
+            'streak': streak,
+            'mastery_change': round(mastery_metrics.get('mastery_change', 0), 4),
+            'theta_change': round(mastery_metrics.get('theta_change', 0), 4),
         })
 
 
 class CompleteInitialQuizView(APIView):
-    """Finalize initial quiz to set pacing recommendation."""
+    """Finalize initial quiz with full adaptive flow — mastery seeding, theta update, error analysis."""
     permission_classes = [IsAuthenticated]
 
     def post(self, request):
@@ -439,52 +507,89 @@ class CompleteInitialQuizView(APIView):
             return Response({'error': 'Session not found'}, status=404)
 
         answers = session.session_data.get('initial_quiz_answers', [])
+        questions = session.session_data.get('initial_quiz_questions', [])
         if not answers:
             return Response({'error': 'No initial quiz answers'}, status=400)
 
-        correct_count = sum(1 for a in answers if a.get('correct'))
-        accuracy = correct_count / len(answers)
-
+        # ── Get or create learning profile ──
         try:
             profile = request.user.learning_profile
         except LearningProfile.DoesNotExist:
             profile = LearningProfile.objects.create(user=request.user)
 
-        pacing_engine = PacingEngine()
-        context = PacingContext(
-            accuracy=accuracy,
-            mastery_score=0.3,
-            streak=0,
-            error_types=[],
-            theta=profile.overall_theta,
-            questions_answered=len(answers),
+        # ── Run full adaptive evaluation ──
+        engine = AdaptiveLearningEngine()
+        evaluation = engine.evaluate_initial_quiz(
+            quiz_questions=questions,
+            quiz_answers=answers,
             knowledge_level=session.knowledge_level,
-            phase='initial_quiz'
+            current_theta=profile.overall_theta,
         )
-        pacing_result = pacing_engine.decide_pacing(context)
-        pacing = pacing_result.decision
-        next_action = pacing_result.next_action
-        reasoning = pacing_result.reasoning
 
-        session.session_data['pacing_history'] = session.session_data.get('pacing_history', []) + [{
+        seeded_mastery = evaluation['mastery']
+        updated_theta = evaluation['theta']
+        pacing = evaluation['pacing']
+        next_step = evaluation['next_step']
+        adjusted_level = evaluation['adjusted_knowledge_level']
+
+        # ── Update LearningProfile theta ──
+        profile.overall_theta = updated_theta
+        profile.save()
+
+        # ── Seed mastery on every atom's StudentProgress ──
+        concept = session.concept
+        atoms = TeachingAtom.objects.filter(concept=concept).order_by('order')
+        for atom in atoms:
+            progress, _ = StudentProgress.objects.get_or_create(
+                user=request.user,
+                atom=atom,
+                defaults={'phase': 'diagnostic'}
+            )
+            progress.mastery_score = seeded_mastery
+            progress.error_history = evaluation.get('error_types', [])
+            progress.save()
+
+        # ── Update session knowledge level if adjusted ──
+        if adjusted_level != session.knowledge_level:
+            session.knowledge_level = adjusted_level
+
+        # ── Store pacing + evaluation in session data ──
+        session_data = session.session_data or {}
+        session_data['pacing_history'] = session_data.get('pacing_history', []) + [{
             'phase': 'initial_quiz',
-            'pacing': pacing.value if hasattr(pacing, 'value') else pacing,
-            'accuracy': accuracy,
-            'timestamp': str(timezone.now())
+            'pacing': pacing,
+            'accuracy': evaluation['accuracy'],
+            'mastery': seeded_mastery,
+            'theta': updated_theta,
+            'next_step': next_step,
+            'timestamp': str(timezone.now()),
         }]
+        session_data['initial_quiz_evaluation'] = evaluation
+        session_data['current_phase'] = 'teaching'
+        session.session_data = session_data
         session.save()
 
+        # ── Friendly recommendation ──
         friendly = {
             'speed_up': 'Great start! You can move faster.',
             'stay': 'Good start. Keep a steady pace.',
             'slow_down': 'Take it slowly and build confidence.',
-            'sharp_slowdown': 'Focus on basics first; go step by step.'
+            'sharp_slowdown': 'Focus on basics first; go step by step.',
         }
 
         return Response({
-            'accuracy': accuracy,
-            'initial_pacing': pacing.value if hasattr(pacing, 'value') else pacing,
-            'recommendation': friendly.get(pacing.value if hasattr(pacing, 'value') else pacing, 'Learn at your own pace')
+            'accuracy': evaluation['accuracy'],
+            'mastery': seeded_mastery,
+            'theta': updated_theta,
+            'initial_pacing': pacing,
+            'next_step': next_step,
+            'next_step_message': evaluation['next_step_message'],
+            'adjusted_knowledge_level': adjusted_level,
+            'error_analysis': evaluation['error_analysis'],
+            'mastery_verdict': evaluation.get('mastery_verdict', ''),
+            'recommended_difficulty': evaluation.get('recommended_difficulty', 'medium'),
+            'reasoning': evaluation.get('reasoning', ''),
+            'recommendation': friendly.get(pacing, 'Learn at your own pace'),
         })
     
     def _get_pacing_message(self, pacing):
@@ -525,8 +630,15 @@ class GetTeachingContentView(APIView):
         pacing_history = session_data.get('pacing_history', [])
         current_pacing = _normalize_pacing_value(pacing_history[-1], 'stay') if pacing_history else 'stay'
         
-        # Generate teaching content if not already cached
-        if not atom.explanation:
+        # ── Derive quiz mastery for teaching depth adaptation ──
+        quiz_eval = session_data.get('initial_quiz_evaluation', {})
+        quiz_running = session_data.get('quiz_running_state', {})
+        quiz_mastery = float(
+            quiz_eval.get('mastery', quiz_running.get('mastery', 0.3))
+        )
+
+        # Generate teaching content if not already cached (or force_new)
+        if not atom.explanation or force_new:
             engine = AdaptiveLearningEngine()
             
             # Adjust teaching based on pacing
@@ -536,7 +648,8 @@ class GetTeachingContentView(APIView):
                 atom_name=atom.name,
                 subject=atom.concept.subject,
                 concept=atom.concept.name,
-                knowledge_level=level_adjustment
+                knowledge_level=level_adjustment,
+                mastery_score=quiz_mastery
             )
             
             # Save to atom for future use
@@ -651,11 +764,17 @@ class GenerateQuestionsFromTeachingView(APIView):
 
         if not teaching_content['explanation']:
             engine = AdaptiveLearningEngine()
+            # Get quiz mastery for depth adaptation
+            session_data = session.session_data or {}
+            quiz_eval = session_data.get('initial_quiz_evaluation', {})
+            quiz_running = session_data.get('quiz_running_state', {})
+            quiz_mastery = float(quiz_eval.get('mastery', quiz_running.get('mastery', 0.3)))
             generated_teaching = engine.generate_teaching_content(
                 atom_name=atom.name,
                 subject=atom.concept.subject,
                 concept=atom.concept.name,
-                knowledge_level=session.knowledge_level
+                knowledge_level=session.knowledge_level,
+                mastery_score=quiz_mastery
             )
             teaching_content = {
                 'explanation': generated_teaching.get('explanation', ''),
