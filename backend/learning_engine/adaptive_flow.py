@@ -411,38 +411,52 @@ class AdaptiveLearningEngine:
             """
         
         prompt = f"""
-        You are creating a personalized teaching module for a single atomic concept.
-        
-        Subject: {subject}
-        Concept: {concept}
-        Atomic Concept: {atom_name}
-        Student Knowledge Level: {level_descriptions.get(knowledge_level, 'intermediate')}
-        
-        {error_context}
-        
-        Generate:
-        1. A clear explanation tailored to their knowledge level (2-4 sentences)
-        2. A concrete example relevant to their level
-        3. An analogy from everyday life that matches their understanding
-        4. A common misconception to watch out for
-        5. A practical application or "why this matters"
-        
-        Rules:
-        - ONE idea only
-        - No jargon without explanation
-        - Make it memorable and relevant
-        - If advanced, include edge cases or limitations
-        - If reteaching, explain in a different way than before
-        
-        Return STRICT JSON:
-        {{
-            "explanation": "Clear explanation here",
-            "example": "Concrete example here",
-            "analogy": "Everyday analogy here",
-            "misconception": "Common mistake students make",
-            "practical_application": "Why this matters in real life"
-        }}
-        """
+You are creating a personalized teaching module for a single atomic concept.  
+Your goal is to ensure the user fully understands this concept.
+
+Subject: {subject}  
+Concept: {concept}  
+Atomic Concept: {atom_name}  
+Student Knowledge Level: {level_descriptions.get(knowledge_level, 'intermediate')}  
+
+{error_context}
+
+Generate a teaching module with the following components, adhering strictly to these guidelines:
+
+1. **Explanation** (2‑4 sentences, but formatted pointwise – use bullet points or numbered steps for clarity):  
+   - Break down the idea into simple, logical parts.  
+   - If the concept involves programming, include a short, illustrative code snippet or pseudo‑code directly within the explanation.  
+   - Avoid jargon; define any necessary terms briefly.  
+
+2. **Example** (concrete and level‑appropriate):  
+   - Provide a real‑world, tangible scenario that the student can easily visualize.  
+   - Steer clear of abstract or overly theoretical illustrations – make it relatable to everyday life or the student’s likely experience.  
+
+3. **Analogy** (from everyday life):  
+   - Choose an analogy that matches the student’s understanding and makes the abstract idea intuitive.  
+
+4. **Common Misconception**:  
+   - Identify a typical mistake or misunderstanding about this concept, and briefly explain why it’s wrong.  
+
+5. **Practical Application** (“why this matters”):  
+   - Show a concrete, real‑life situation where this concept is useful or necessary.  
+
+Rules to follow:  
+- Focus on ONE atomic idea only.  
+- No unexplained jargon.  
+- Make the content memorable and directly relevant to the student’s level.  
+- If the student is advanced, include edge cases, limitations, or deeper insights.  
+- If this is a reteach (due to a previous error), explain the concept in a completely different way from before.  
+
+Return the result as a strict JSON object with exactly these keys:  
+{{
+    "explanation": "Clear, pointwise explanation here (use bullet points or numbers). Include a code snippet if appropriate.",
+    "example": "Concrete, real‑world example here.",
+    "analogy": "Everyday analogy here.",
+    "misconception": "Common mistake students make about this concept.",
+    "practical_application": "Why this matters in real life."
+}}
+"""
         
         try:
             response = self.groq_client.chat.completions.create(

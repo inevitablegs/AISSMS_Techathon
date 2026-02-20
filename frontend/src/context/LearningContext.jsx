@@ -112,7 +112,9 @@ export const LearningProvider = ({ children }) => {
                 analogy: raw.analogy || '',
                 misconception: raw.misconception || examples[2] || '',
                 practical_application: raw.practical_application || examples[1] || '',
-                examples: examples
+                examples: examples,
+                videos: Array.isArray(response.data?.videos) ? response.data.videos : [],
+                images: Array.isArray(response.data?.images) ? response.data.images : [],
             };
 
             setTeachingContent(normalized);

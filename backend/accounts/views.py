@@ -551,6 +551,19 @@ class GetTeachingContentView(APIView):
                 'examples': atom.examples
             }
         
+        # Fetch external resources (videos + images) for the atom
+        from learning_engine.external_resources import ExternalResourceFetcher
+        try:
+            fetcher = ExternalResourceFetcher()
+            resources = fetcher.get_resources_for_concept(
+                subject=atom.concept.subject,
+                concept=atom.concept.name,
+                atom_name=atom.name
+            )
+        except Exception as e:
+            logger.warning(f"External resource fetch failed: {e}")
+            resources = {'videos': [], 'images': []}
+
         # Update session data
         session_data['current_atom_index'] = atom.order
         session_data['current_phase'] = 'teaching'
@@ -561,6 +574,8 @@ class GetTeachingContentView(APIView):
             'atom_id': atom.id,
             'atom_name': atom.name,
             'teaching_content': teaching_content,
+            'videos': resources.get('videos', []),
+            'images': resources.get('images', []),
             'phase': progress.phase,
             'current_pacing': current_pacing
         })
