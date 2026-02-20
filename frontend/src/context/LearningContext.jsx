@@ -37,6 +37,9 @@ export const LearningProvider = ({ children }) => {
     const questionStartTime = useRef(null);
     const [timeSpent, setTimeSpent] = useState(0);
 
+    // Race-condition guard: track latest generation request
+    const latestQuestionGenId = useRef(0);
+
     // Generate atoms for a concept (no questions)
     const generateConcept = useCallback(async (subject, concept, knowledgeLevel = 'intermediate') => {
         setLoading(true);
@@ -132,6 +135,7 @@ export const LearningProvider = ({ children }) => {
     // Generate questions based on teaching content
     const generateQuestionsFromTeaching = useCallback(async ({ session_id, atom_id, force_new = false }) => {
         setLoading(true);
+        const requestId = ++latestQuestionGenId.current;
         try {
             const response = await axios.post('/auth/api/generate-questions-from-teaching/', {
                 session_id: session_id,
@@ -139,11 +143,14 @@ export const LearningProvider = ({ children }) => {
                 force_new: force_new
             });
             
-            setCurrentQuestions(response.data.questions || []);
-            setCurrentQuestionIndex(0);
-            
-            // Start timer for first question
-            questionStartTime.current = Date.now();
+            // Only apply state if this is still the latest request (prevents race condition)
+            if (requestId === latestQuestionGenId.current) {
+                setCurrentQuestions(response.data.questions || []);
+                setCurrentQuestionIndex(0);
+                
+                // Start timer for first question
+                questionStartTime.current = Date.now();
+            }
             
             return { success: true, data: response.data };
         } catch (error) {
@@ -152,7 +159,9 @@ export const LearningProvider = ({ children }) => {
                 error: error.response?.data?.error || 'Failed to generate questions'
             };
         } finally {
-            setLoading(false);
+            if (requestId === latestQuestionGenId.current) {
+                setLoading(false);
+            }
         }
     }, []);
 
@@ -207,14 +216,17 @@ export const LearningProvider = ({ children }) => {
 
     const generateFinalChallenge = useCallback(async ({ session_id, atom_id }) => {
         setLoading(true);
+        const requestId = ++latestQuestionGenId.current;
         try {
             const response = await axios.post('/auth/api/final-challenge/', {
                 session_id,
                 atom_id
             });
-            setCurrentQuestions(response.data.questions || []);
-            setCurrentQuestionIndex(0);
-            questionStartTime.current = Date.now();
+            if (requestId === latestQuestionGenId.current) {
+                setCurrentQuestions(response.data.questions || []);
+                setCurrentQuestionIndex(0);
+                questionStartTime.current = Date.now();
+            }
             return { success: true, data: response.data };
         } catch (error) {
             return {
@@ -222,7 +234,9 @@ export const LearningProvider = ({ children }) => {
                 error: error.response?.data?.error || 'Failed to generate final challenge'
             };
         } finally {
-            setLoading(false);
+            if (requestId === latestQuestionGenId.current) {
+                setLoading(false);
+            }
         }
     }, []);
 
@@ -245,14 +259,17 @@ export const LearningProvider = ({ children }) => {
 
     const generateConceptFinalChallenge = useCallback(async ({ session_id, concept_id }) => {
         setLoading(true);
+        const requestId = ++latestQuestionGenId.current;
         try {
             const response = await axios.post('/auth/api/concept-final-challenge/', {
                 session_id,
                 concept_id
             });
-            setCurrentQuestions(response.data.questions || []);
-            setCurrentQuestionIndex(0);
-            questionStartTime.current = Date.now();
+            if (requestId === latestQuestionGenId.current) {
+                setCurrentQuestions(response.data.questions || []);
+                setCurrentQuestionIndex(0);
+                questionStartTime.current = Date.now();
+            }
             return { success: true, data: response.data };
         } catch (error) {
             return {
@@ -260,7 +277,9 @@ export const LearningProvider = ({ children }) => {
                 error: error.response?.data?.error || 'Failed to generate concept final challenge'
             };
         } finally {
-            setLoading(false);
+            if (requestId === latestQuestionGenId.current) {
+                setLoading(false);
+            }
         }
     }, []);
 
