@@ -13,6 +13,10 @@ from .views import (
     GenerateInitialQuizView, SubmitInitialQuizAnswerView, CompleteInitialQuizView,
     GenerateFinalChallengeView, CompleteFinalChallengeView,
 
+    # Adaptive flow views
+    GenerateConceptOverviewView, GenerateAtomSummaryView,
+    AdaptiveReteachView, GetAllAtomsMasteryView,
+
     # Enhanced pacing engine views
     GetVelocityGraphView, GetFatigueStatusView, RecordBreakView,
     RetentionCheckView, RecordHintUsageView,
@@ -58,6 +62,12 @@ urlpatterns = [
     path('api/final-challenge/', GenerateFinalChallengeView.as_view(), name='generate_final_challenge'),
     path('api/complete-final-challenge/', CompleteFinalChallengeView.as_view(), name='complete_final_challenge'),
     
+    # Adaptive flow endpoints
+    path('api/concept-overview/', GenerateConceptOverviewView.as_view(), name='concept_overview'),
+    path('api/atom-summary/', GenerateAtomSummaryView.as_view(), name='atom_summary'),
+    path('api/adaptive-reteach/', AdaptiveReteachView.as_view(), name='adaptive_reteach'),
+    path('api/all-atoms-mastery/', GetAllAtomsMasteryView.as_view(), name='all_atoms_mastery'),
+
     # Progress
     path('api/progress/', GetLearningProgressView.as_view(), name='learning_progress'),
     

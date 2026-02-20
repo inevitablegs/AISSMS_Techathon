@@ -1593,6 +1593,246 @@ class CompleteAtomView(APIView):
         return Response(response_data)
 
 
+class GenerateConceptOverviewView(APIView):
+    """Generate a beginner-friendly overview when knowledge_level is zero."""
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        session_id = request.data.get('session_id')
+        try:
+            session = LearningSession.objects.get(id=session_id, user=request.user)
+        except LearningSession.DoesNotExist:
+            return Response({'error': 'Session not found'}, status=404)
+
+        concept = session.concept
+        atoms = TeachingAtom.objects.filter(concept=concept).order_by('order')
+        atom_names = [a.name for a in atoms]
+
+        generator = QuestionGenerator()
+        overview = generator.generate_concept_overview(
+            subject=concept.subject,
+            concept=concept.name,
+            atoms=atom_names
+        )
+
+        # Store in session
+        session_data = session.session_data or {}
+        session_data['concept_overview'] = overview
+        session_data['current_phase'] = 'concept_overview'
+        session.session_data = session_data
+        session.save()
+
+        return Response({
+            'overview': overview,
+            'concept_name': concept.name,
+            'subject': concept.subject,
+            'atom_names': atom_names,
+        })
+
+
+class GenerateAtomSummaryView(APIView):
+    """Generate end-of-atom summary with quick notes, must-remember, suggestions."""
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        session_id = request.data.get('session_id')
+        atom_id = request.data.get('atom_id')
+
+        try:
+            session = LearningSession.objects.get(id=session_id, user=request.user)
+            atom = TeachingAtom.objects.get(id=atom_id)
+            progress = StudentProgress.objects.get(user=request.user, atom=atom)
+        except (LearningSession.DoesNotExist, TeachingAtom.DoesNotExist, StudentProgress.DoesNotExist):
+            return Response({'error': 'Not found'}, status=404)
+
+        teaching_content = {
+            'explanation': atom.explanation or '',
+            'analogy': atom.analogy or '',
+            'examples': atom.examples or []
+        }
+
+        generator = QuestionGenerator()
+        summary = generator.generate_atom_summary(
+            subject=atom.concept.subject,
+            concept=atom.concept.name,
+            atom_name=atom.name,
+            teaching_content=teaching_content,
+            mastery_score=float(progress.mastery_score),
+            error_types=progress.error_history or []
+        )
+
+        # Store in session
+        session_data = session.session_data or {}
+        atom_summaries = session_data.get('atom_summaries', {})
+        atom_summaries[str(atom.id)] = summary
+        session_data['atom_summaries'] = atom_summaries
+        session.session_data = session_data
+        session.save()
+
+        return Response({
+            'atom_id': atom.id,
+            'atom_name': atom.name,
+            'mastery_score': float(progress.mastery_score),
+            'phase': progress.phase,
+            'summary': summary,
+        })
+
+
+class AdaptiveReteachView(APIView):
+    """Re-teach an atom with a DIFFERENT approach based on error history + mastery."""
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        session_id = request.data.get('session_id')
+        atom_id = request.data.get('atom_id')
+
+        try:
+            session = LearningSession.objects.get(id=session_id, user=request.user)
+            atom = TeachingAtom.objects.get(id=atom_id)
+            progress = StudentProgress.objects.get(user=request.user, atom=atom)
+        except (LearningSession.DoesNotExist, TeachingAtom.DoesNotExist, StudentProgress.DoesNotExist):
+            return Response({'error': 'Not found'}, status=404)
+
+        engine = AdaptiveLearningEngine()
+
+        # Force regen with error focus
+        error_history = progress.error_history or []
+
+        # Determine adjusted knowledge level based on mastery
+        mastery = float(progress.mastery_score)
+        if mastery < 0.3:
+            adjusted_level = 'zero'
+        elif mastery < 0.5:
+            adjusted_level = 'beginner'
+        elif mastery < 0.7:
+            adjusted_level = 'intermediate'
+        else:
+            adjusted_level = session.knowledge_level
+
+        teaching_content = engine.generate_teaching_content(
+            atom_name=atom.name,
+            subject=atom.concept.subject,
+            concept=atom.concept.name,
+            knowledge_level=adjusted_level,
+            error_history=error_history,
+            mastery_score=mastery
+        )
+
+        # Save updated content
+        atom.explanation = teaching_content.get('explanation', '')
+        atom.analogy = teaching_content.get('analogy', '')
+        atom.examples = [teaching_content.get('example', '')]
+        atom.save()
+
+        # Reset progress phase to teaching for this reteach cycle
+        progress.phase = 'teaching'
+        progress.times_practiced = (progress.times_practiced or 0) + 1
+        progress.save()
+
+        # Fetch external resources
+        from learning_engine.external_resources import ExternalResourceFetcher
+        try:
+            fetcher = ExternalResourceFetcher()
+            resources = fetcher.get_resources_for_concept(
+                subject=atom.concept.subject,
+                concept=atom.concept.name,
+                atom_name=atom.name
+            )
+        except Exception:
+            resources = {'videos': [], 'images': []}
+
+        return Response({
+            'atom_id': atom.id,
+            'atom_name': atom.name,
+            'teaching_content': teaching_content,
+            'videos': resources.get('videos', []),
+            'images': resources.get('images', []),
+            'adjusted_level': adjusted_level,
+            'mastery_score': mastery,
+            'reteach_count': progress.times_practiced,
+            'message': f"Here's a fresh explanation of {atom.name}, adapted to address your specific difficulties."
+        })
+
+
+class GetAllAtomsMasteryView(APIView):
+    """Get mastery overview for all atoms in a concept — used for end-of-concept dashboard."""
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        session_id = request.data.get('session_id')
+        concept_id = request.data.get('concept_id')
+
+        try:
+            session = LearningSession.objects.get(id=session_id, user=request.user)
+            concept = Concept.objects.get(id=concept_id)
+        except (LearningSession.DoesNotExist, Concept.DoesNotExist):
+            return Response({'error': 'Not found'}, status=404)
+
+        atoms = TeachingAtom.objects.filter(concept=concept).order_by('order')
+        atom_data = []
+        total_mastery = 0.0
+
+        for atom in atoms:
+            try:
+                progress = StudentProgress.objects.get(user=request.user, atom=atom)
+                mastery = float(progress.mastery_score)
+                phase = progress.phase
+                streak = progress.streak
+                errors = len(progress.error_history or [])
+            except StudentProgress.DoesNotExist:
+                mastery = 0.0
+                phase = 'not_started'
+                streak = 0
+                errors = 0
+
+            total_mastery += mastery
+
+            # Retrieve stored atom summary if available
+            session_data = session.session_data or {}
+            atom_summaries = session_data.get('atom_summaries', {})
+            summary = atom_summaries.get(str(atom.id))
+
+            atom_data.append({
+                'id': atom.id,
+                'name': atom.name,
+                'order': atom.order,
+                'mastery_score': round(mastery, 4),
+                'phase': phase,
+                'streak': streak,
+                'error_count': errors,
+                'summary': summary,
+            })
+
+        avg_mastery = total_mastery / max(len(atoms), 1)
+
+        # Suggestions based on overall performance
+        weak_atoms = [a for a in atom_data if a['mastery_score'] < 0.6]
+        strong_atoms = [a for a in atom_data if a['mastery_score'] >= 0.8]
+
+        suggestions = []
+        if weak_atoms:
+            names = ", ".join([a['name'] for a in weak_atoms[:3]])
+            suggestions.append(f"Focus on reviewing: {names}")
+        if avg_mastery < 0.6:
+            suggestions.append("Consider revisiting the concept overview before the final challenge.")
+        if avg_mastery >= 0.8:
+            suggestions.append("Excellent overall mastery! You're well prepared for the final challenge.")
+        if not suggestions:
+            suggestions.append("Good progress! Keep practicing the weaker areas.")
+
+        return Response({
+            'concept_name': concept.name,
+            'subject': concept.subject,
+            'atoms': atom_data,
+            'avg_mastery': round(avg_mastery, 4),
+            'total_atoms': len(atoms),
+            'completed_atoms': sum(1 for a in atom_data if a['phase'] == 'complete'),
+            'strong_atoms': len(strong_atoms),
+            'weak_atoms': len(weak_atoms),
+            'suggestions': suggestions,
+        })
+
+
 class GenerateFinalChallengeView(APIView):
     """Generate 5 medium+hard questions as final challenge after mastery."""
     permission_classes = [IsAuthenticated]

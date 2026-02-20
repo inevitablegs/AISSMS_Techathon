@@ -6,6 +6,7 @@ from typing import Dict, List, Optional
 from groq import Groq
 import google.generativeai as genai
 from django.conf import settings
+import re   
 
 class QuestionGenerator:
     """Generate questions and atoms for learning using AI"""
@@ -131,18 +132,18 @@ class QuestionGenerator:
 
         Output format:
 
-        {
+        {{
         "atoms": [
         "Atom 1",
         "Atom 2",
         "Atom 3",
         "Atom 4"
         ]
-        }
+        }}
 
         If proper pedagogically valid atoms cannot be generated, return:
 
-        {"atoms": []}
+        {{"atoms": []}}
 
         """
         
@@ -356,6 +357,7 @@ class QuestionGenerator:
                 if raw_text.startswith("json"):
                     raw_text = raw_text[4:]
             
+            raw_text = re.sub(r'[\x00-\x1f\x7f]', lambda m: ' ' if m.group() in ('\n', '\r', '\t') else '', raw_text)
             result = json.loads(raw_text.strip())
             questions = result.get("questions", [])
 
@@ -552,6 +554,169 @@ class QuestionGenerator:
 
         return questions
 
+    # ── NEW: Concept overview for zero-knowledge students ──
+    def generate_concept_overview(self, subject: str, concept: str, atoms: List[str]) -> Dict:
+        """
+        Generate a quick, beginner-friendly overview of the concept and its atoms.
+        Used when knowledge_level == 'zero' BEFORE the diagnostic quiz.
+        """
+        atoms_text = "\n".join([f"  {i+1}. {a}" for i, a in enumerate(atoms)])
+
+        prompt = f"""
+You are creating a SHORT, beginner-friendly overview for a student who has ZERO prior knowledge.
+
+Subject: {subject}
+Concept: {concept}
+Atomic sub-topics:
+{atoms_text}
+
+Generate a JSON overview with these keys:
+
+1. "overview" — 3-5 sentences explaining what this concept is about in the simplest possible language.
+   Use analogies, everyday language, no jargon so the student can develop a mental model.
+
+2. "why_it_matters" — 2-3 sentences on why this concept matters in real life.
+
+3. "what_you_will_learn" — A JSON array of short strings (one per atom), each describing
+   what the student will learn in 8-12 words. Written in second person ("You will learn...").
+
+4. "key_terms" — A JSON array of objects, each with "term" and "simple_definition" (1 sentence, plain English).
+   List 3-5 key terms the student will encounter.
+
+5. "encouragement" — One motivational sentence for a beginner.
+
+Return STRICT JSON only. No markdown, no explanation outside the JSON.
+
+{{
+  "overview": "...",
+  "why_it_matters": "...",
+  "what_you_will_learn": ["...", "..."],
+  "key_terms": [{{"term": "...", "simple_definition": "..."}}],
+  "encouragement": "..."
+}}
+"""
+        if not self.groq_client:
+            return self._fallback_concept_overview(subject, concept, atoms)
+
+        try:
+            response = self.groq_client.chat.completions.create(
+                model="llama-3.3-70b-versatile",
+                messages=[{"role": "user", "content": prompt}],
+                temperature=0.4,
+                max_tokens=1024,
+            )
+            raw = response.choices[0].message.content
+            if "```" in raw:
+                raw = raw.split("```")[1]
+                if raw.startswith("json"):
+                    raw = raw[4:]
+            raw = re.sub(r'[\x00-\x1f\x7f]', lambda m: ' ' if m.group() in ('\n', '\r', '\t') else '', raw)
+            return json.loads(raw.strip())
+        except Exception as e:
+            print(f"Error generating concept overview: {e}")
+            return self._fallback_concept_overview(subject, concept, atoms)
+
+    def _fallback_concept_overview(self, subject, concept, atoms):
+        return {
+            "overview": f"{concept} is a fundamental topic in {subject}. It covers several important ideas that build on each other. Don't worry if it sounds complex — we'll break it into small, easy pieces.",
+            "why_it_matters": f"Understanding {concept} will help you grasp core principles of {subject} and apply them in practice.",
+            "what_you_will_learn": [f"You will learn about {a}" for a in atoms],
+            "key_terms": [{"term": a, "simple_definition": f"A key part of {concept}"} for a in atoms[:4]],
+            "encouragement": "Every expert was once a beginner. Let's start this journey together!"
+        }
+
+    # ── NEW: Atom summary after completion ──
+    def generate_atom_summary(self, subject: str, concept: str, atom_name: str,
+                              teaching_content: Dict, mastery_score: float,
+                              error_types: List[str] = None) -> Dict:
+        """
+        Generate a concise summary after atom completion: quick notes, must-remember items,
+        common pitfalls, and suggestions.
+        """
+        explanation = teaching_content.get('explanation', '') if teaching_content else ''
+        analogy = teaching_content.get('analogy', '') if teaching_content else ''
+
+        error_context = ""
+        if error_types:
+            from collections import Counter
+            err_counts = Counter(error_types)
+            error_context = f"\nThe student made these types of errors: {dict(err_counts)}. Address the most common ones in your tips."
+
+        mastery_label = "low" if mastery_score < 0.5 else "moderate" if mastery_score < 0.75 else "high"
+
+        prompt = f"""
+You are summarizing an atomic concept that a student just finished learning.
+
+Subject: {subject}
+Concept: {concept}
+Atom: {atom_name}
+Mastery: {mastery_score:.0%} ({mastery_label})
+
+Teaching content shown:
+Explanation: {explanation[:500]}
+Analogy: {analogy[:200]}
+{error_context}
+
+Generate a concise review summary as JSON:
+
+1. "summary" — 2-3 sentence recap of the core idea (simple, memorable).
+2. "quick_notes" — Array of 3-5 bullet-point strings, each a key fact or insight.
+3. "must_remember" — Array of 2-3 strings: the absolute essentials that MUST stick.
+4. "common_pitfalls" — Array of 1-3 strings: typical mistakes to watch out for.
+5. "suggestions" — Array of 1-3 strings: what to do next based on mastery level.
+   If mastery is low, suggest review. If high, suggest connecting to next atoms.
+6. "confidence_boost" — One short motivational line based on their mastery.
+
+Return STRICT JSON only:
+{{
+  "summary": "...",
+  "quick_notes": ["...", "..."],
+  "must_remember": ["...", "..."],
+  "common_pitfalls": ["..."],
+  "suggestions": ["..."],
+  "confidence_boost": "..."
+}}
+"""
+        if not self.groq_client:
+            return self._fallback_atom_summary(atom_name, concept, mastery_score)
+
+        try:
+            response = self.groq_client.chat.completions.create(
+                model="llama-3.3-70b-versatile",
+                messages=[{"role": "user", "content": prompt}],
+                temperature=0.3,
+                max_tokens=800,
+            )
+            raw = response.choices[0].message.content
+            if "```" in raw:
+                raw = raw.split("```")[1]
+                if raw.startswith("json"):
+                    raw = raw[4:]
+            raw = re.sub(r'[\x00-\x1f\x7f]', lambda m: ' ' if m.group() in ('\n', '\r', '\t') else '', raw)
+            return json.loads(raw.strip())
+        except Exception as e:
+            print(f"Error generating atom summary: {e}")
+            return self._fallback_atom_summary(atom_name, concept, mastery_score)
+
+    def _fallback_atom_summary(self, atom_name, concept, mastery_score):
+        if mastery_score >= 0.75:
+            boost = f"Excellent work on {atom_name}! You've built a strong foundation."
+            suggestions = ["Try connecting this concept to the next atom.", "You're ready to tackle harder problems."]
+        elif mastery_score >= 0.5:
+            boost = f"Good progress on {atom_name}. A quick review will make it stick."
+            suggestions = ["Revisit the explanation once more.", "Practice one more round for confidence."]
+        else:
+            boost = f"Don't worry — {atom_name} takes time. Every attempt makes you stronger."
+            suggestions = ["Re-read the teaching material carefully.", "Focus on the basics before moving on.", "Try explaining it to yourself in your own words."]
+        return {
+            "summary": f"{atom_name} is a key building block of {concept}. Understanding it well will help you with the remaining atoms.",
+            "quick_notes": [f"Core idea: {atom_name} is fundamental to {concept}", "Review the analogy to reinforce your understanding", "Connect it to real-world examples"],
+            "must_remember": [f"The definition and role of {atom_name}", "How it relates to the broader concept"],
+            "common_pitfalls": [f"Confusing {atom_name} with related but different ideas"],
+            "suggestions": suggestions,
+            "confidence_boost": boost
+        }
+
     def generate_questions_from_teaching(self, subject, concept, atom, teaching_content, 
                                         need_easy=1, need_medium=2, need_hard=0, 
                                         knowledge_level='intermediate'):
@@ -705,6 +870,7 @@ class QuestionGenerator:
                 if raw_text.startswith("json"):
                     raw_text = raw_text[4:]
             
+            raw_text = re.sub(r'[\x00-\x1f\x7f]', lambda m: ' ' if m.group() in ('\n', '\r', '\t') else '', raw_text)
             result = json.loads(raw_text.strip())
             questions = result.get("questions", [])
 

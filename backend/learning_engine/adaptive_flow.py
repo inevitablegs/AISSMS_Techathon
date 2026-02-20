@@ -2,6 +2,7 @@
 
 import json
 import random
+import re
 from typing import Dict, List, Optional, Tuple, Any
 from django.conf import settings
 from groq import Groq
@@ -669,6 +670,9 @@ Return the result as a strict JSON object with exactly these keys:
                 raw_text = raw_text.split("```")[1]
                 if raw_text.startswith("json"):
                     raw_text = raw_text[4:]
+            
+            # Sanitize control characters inside JSON string values
+            raw_text = re.sub(r'[\x00-\x1f\x7f]', lambda m: ' ' if m.group() in ('\n', '\r', '\t') else '', raw_text)
             
             return json.loads(raw_text.strip())
         except Exception as e:

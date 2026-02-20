@@ -1,11 +1,13 @@
 import React from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
+import { useParams, useNavigate, useLocation } from 'react-router-dom';
 import { LearningProvider } from '../../context/LearningContext';
 import TeachingFirstFlow from './TeachingFirstFlow';
 
 const LearningRoute = () => {
     const { conceptId } = useParams();
     const navigate = useNavigate();
+    const location = useLocation();
+    const knowledgeLevel = location.state?.knowledge_level || 'intermediate';
     
     if (!conceptId) {
         return (
@@ -25,7 +27,7 @@ const LearningRoute = () => {
 
     return (
         <LearningProvider>
-            <TeachingFirstFlow conceptId={parseInt(conceptId)} />
+            <TeachingFirstFlow conceptId={parseInt(conceptId)} knowledgeLevel={knowledgeLevel} />
         </LearningProvider>
     );
 };
