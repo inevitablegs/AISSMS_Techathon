@@ -1,4 +1,17 @@
-# backend/learning_engine/adaptive_flow.py - Enhanced with robust 10-feature pacing engine
+# backend/learning_engine/adaptive_flow.py - TRUE Adaptive Learning Engine
+# ─────────────────────────────────────────────────────────────
+# Core function: get_next_learning_step(user, concept, session)
+#
+# ENGINE STATES MODEL:
+#   NOT_STARTED → LEARNING → PRACTICING → MASTERED → FRAGILE
+#
+# ADAPTIVE LOOP:
+#   Select weakest atom → Decide action (TEACH/PRACTICE/ADVANCE)
+#   → Deliver content → Student answers → Update mastery
+#   → Update velocity → Detect fragile → Select next atom
+#
+# STOP CONDITION: Subject complete when all atoms mastery >= 80%
+# ─────────────────────────────────────────────────────────────
 
 import json
 import random
@@ -13,8 +26,29 @@ from .pacing_engine import (
     PacingResult, FatigueLevel,
 )
 
+
+# ════════════════════════════════════════════════════════════════
+#  Constants for the adaptive engine
+# ════════════════════════════════════════════════════════════════
+MASTERY_THRESHOLD = 0.80       # Atom mastered when >= 80%
+TEACH_THRESHOLD = 0.40         # Below 40% → TEACH
+PRACTICE_THRESHOLD = 0.80      # 40-80% → PRACTICE, >=80 → ADVANCE
+FRAGILE_DECAY = 0.15           # Mastery penalty when fragile detected
+FRAGILE_TIME_RATIO = 2.0       # Correct but >2x expected time → fragile
+
+
 class AdaptiveLearningEngine:
-    """Enhanced adaptive learning engine with real-time mastery and strict pacing"""
+    """
+    TRUE Adaptive Learning Engine — Decision-based learning system.
+    
+    Core function: get_next_learning_step(user, concept, session)
+    
+    Performs:
+        1. Select atom (weakest eligible, priority-based)
+        2. Decide action (TEACH / PRACTICE / ADVANCE)
+        3. Fetch content
+        4. Return response
+    """
     
     def __init__(self):
         self.groq_client = None
@@ -23,6 +57,290 @@ class AdaptiveLearningEngine:
             self.groq_client = Groq(api_key=groq_key)
         
         self.pacing_engine = PacingEngine()
+
+    # ════════════════════════════════════════════════════════════════
+    #  CORE ENGINE FUNCTION (Main Brain)
+    # ════════════════════════════════════════════════════════════════
+
+    def get_next_learning_step(self, user, concept, session=None) -> Dict[str, Any]:
+        """
+        THE single most important function — the adaptive engine brain.
+        
+        Performs:
+            1. Select atom (weakest eligible, priority-based)
+            2. Decide action (TEACH / PRACTICE / ADVANCE)
+            3. Return response with atom + action + metadata
+        
+        Atom States:
+            NOT_STARTED → TEACHING (LEARNING) → PRACTICE (PRACTICING)
+            → COMPLETE (MASTERED) → FRAGILE (if performance drops)
+        
+        Priority order for atom selection:
+            1. Fragile atom (mastered but performance dropped)
+            2. Weakest active atom (lowest mastery, currently learning)
+            3. New atom (not started yet)
+            4. Reinforcement atom
+        
+        Args:
+            user: Django User object
+            concept: Concept model instance
+            session: Optional LearningSession for additional context
+        
+        Returns:
+            Dict with action, atom info, mastery, phase, message
+        """
+        from accounts.models import StudentProgress, TeachingAtom
+
+        atoms = TeachingAtom.objects.filter(concept=concept).order_by('order')
+        if not atoms.exists():
+            return {'action': 'NO_ATOMS', 'message': 'No atoms found for this concept.'}
+
+        # ── Build progress map for all atoms ──
+        atom_progress_list = []
+        for atom in atoms:
+            progress, created = StudentProgress.objects.get_or_create(
+                user=user, atom=atom,
+                defaults={'mastery_score': 0.0, 'phase': 'not_started'}
+            )
+            atom_progress_list.append({
+                'atom': atom,
+                'progress': progress,
+                'mastery': float(progress.mastery_score),
+                'phase': progress.phase,
+                'streak': progress.streak,
+                'error_history': progress.error_history or [],
+                'times_practiced': progress.times_practiced or 0,
+            })
+
+        # ── Check STOP CONDITION: all atoms mastered ──
+        all_mastered = all(
+            p['mastery'] >= MASTERY_THRESHOLD for p in atom_progress_list
+        )
+        if all_mastered:
+            return {
+                'action': 'SUBJECT_COMPLETE',
+                'message': 'Congratulations! All atoms mastered. Subject complete.',
+                'all_mastered': True,
+                'atoms': [
+                    {'id': p['atom'].id, 'name': p['atom'].name,
+                     'mastery': round(p['mastery'], 4), 'phase': p['phase']}
+                    for p in atom_progress_list
+                ],
+            }
+
+        # ── Find candidate atoms (not yet mastered) ──
+        candidates = [
+            p for p in atom_progress_list
+            if p['mastery'] < MASTERY_THRESHOLD and p['phase'] != 'complete'
+        ]
+
+        # Also include fragile atoms (were mastered, but performance dropped)
+        fragile = [
+            p for p in atom_progress_list if p['phase'] == 'fragile'
+        ]
+        # Merge fragile into candidates if not already there
+        fragile_ids = {p['atom'].id for p in fragile}
+        candidate_ids = {p['atom'].id for p in candidates}
+        for f in fragile:
+            if f['atom'].id not in candidate_ids:
+                candidates.append(f)
+
+        if not candidates:
+            # Edge case: all atoms either complete or no viable candidates
+            # Re-check if truly all mastered
+            return {
+                'action': 'SUBJECT_COMPLETE',
+                'message': 'All atoms mastered!',
+                'all_mastered': True,
+                'atoms': [
+                    {'id': p['atom'].id, 'name': p['atom'].name,
+                     'mastery': round(p['mastery'], 4), 'phase': p['phase']}
+                    for p in atom_progress_list
+                ],
+            }
+
+        # ── Priority sort (Step 1.2) ──
+        # 1. Fragile atoms (highest priority — knowledge decaying)
+        # 2. Weakest active atoms (lowest mastery, currently being learned)
+        # 3. New atoms (not_started — follow curriculum order)
+        def atom_priority(item):
+            phase = item['phase']
+            mastery = item['mastery']
+
+            if phase == 'fragile':
+                return (0, mastery)  # Highest priority, weakest first
+            elif phase in ('teaching', 'practice', 'reinforcement',
+                           'mastery_check', 'diagnostic'):
+                return (1, mastery)  # Active atoms, weakest first
+            elif phase == 'not_started':
+                return (2, item['atom'].order)  # New atoms by order
+            else:
+                return (3, mastery)
+
+        candidates.sort(key=atom_priority)
+
+        target = candidates[0]
+        target_atom = target['atom']
+        target_progress = target['progress']
+        target_mastery = target['mastery']
+        target_phase = target['phase']
+
+        # ── Decide LEARNING ACTION (Phase 2) ──
+        if target_mastery < TEACH_THRESHOLD:
+            action = 'TEACH'
+            if target_phase in ('not_started', 'diagnostic', 'fragile'):
+                target_progress.phase = 'teaching'
+                target_progress.save()
+            message = f"Let's learn about {target_atom.name}."
+
+        elif target_mastery < PRACTICE_THRESHOLD:
+            action = 'PRACTICE'
+            if target_phase not in ('practice', 'mastery_check'):
+                target_progress.phase = 'practice'
+                target_progress.save()
+            message = f"Let's practice {target_atom.name} to strengthen understanding."
+
+        else:
+            # Mastery >= 80% — mark complete
+            action = 'ADVANCE'
+            target_progress.phase = 'complete'
+            target_progress.save()
+            message = f"{target_atom.name} mastered! Moving to next concept."
+
+        return {
+            'action': action,
+            'atom': target_atom,
+            'mastery': round(target_mastery, 4),
+            'phase': target_progress.phase,
+            'message': message,
+            'all_mastered': False,
+            'progress_summary': [
+                {
+                    'id': p['atom'].id,
+                    'name': p['atom'].name,
+                    'mastery': round(p['mastery'], 4),
+                    'phase': p['phase'],
+                }
+                for p in atom_progress_list
+            ],
+        }
+
+    # ════════════════════════════════════════════════════════════════
+    #  ATOM STATE TRANSITIONS
+    # ════════════════════════════════════════════════════════════════
+
+    @staticmethod
+    def update_atom_state(progress, new_mastery: float, correct: bool) -> str:
+        """
+        Update atom state based on mastery score.
+        
+        State transitions:
+            NOT_STARTED → TEACHING     (when learning begins)
+            TEACHING    → PRACTICE     (mastery >= 40%)
+            PRACTICE    → COMPLETE     (mastery >= 80% + streak >= 2)
+            COMPLETE    → FRAGILE      (if performance drops)
+            FRAGILE     → PRACTICE     (when re-practicing)
+        
+        Returns:
+            New phase string
+        """
+        old_phase = progress.phase
+
+        if new_mastery >= MASTERY_THRESHOLD and progress.streak >= 2:
+            progress.phase = 'complete'
+        elif new_mastery >= TEACH_THRESHOLD:
+            if old_phase in ('not_started', 'teaching', 'diagnostic'):
+                progress.phase = 'practice'
+            elif old_phase == 'fragile':
+                progress.phase = 'practice'
+            # If already in practice/mastery_check, stay there
+        elif old_phase in ('not_started', 'diagnostic'):
+            progress.phase = 'teaching'
+
+        progress.mastery_score = new_mastery
+        progress.save()
+        return progress.phase
+
+    # ════════════════════════════════════════════════════════════════
+    #  FRAGILE KNOWLEDGE DETECTION
+    # ════════════════════════════════════════════════════════════════
+
+    @staticmethod
+    def detect_fragile_knowledge(progress, correct: bool,
+                                  time_taken: float,
+                                  estimated_time: float = 60.0) -> bool:
+        """
+        Detect if a mastered/completed atom has become fragile.
+        
+        Conditions:
+            - Atom was mastered (phase='complete')
+            - Wrong answer on mastered content → FRAGILE
+            - Correct but very slow (>2x expected) → FRAGILE
+        
+        Returns:
+            True if atom is now fragile
+        """
+        if progress.phase != 'complete':
+            return False
+
+        time_ratio = time_taken / estimated_time if estimated_time > 0 else 1.0
+
+        # Wrong answer on mastered content
+        if not correct:
+            progress.phase = 'fragile'
+            progress.mastery_score = max(0.0, float(progress.mastery_score) - FRAGILE_DECAY)
+            progress.save()
+            return True
+
+        # Correct but very slow response
+        if correct and time_ratio > FRAGILE_TIME_RATIO:
+            progress.phase = 'fragile'
+            progress.mastery_score = max(0.0, float(progress.mastery_score) - 0.05)
+            progress.save()
+            return True
+
+        return False
+
+    # ════════════════════════════════════════════════════════════════
+    #  LEARNING VELOCITY
+    # ════════════════════════════════════════════════════════════════
+
+    @staticmethod
+    def update_learning_velocity(user, concept, session=None) -> Dict[str, float]:
+        """
+        Calculate learning velocity.
+        
+        Formula: atoms_mastered / total_time_minutes
+        """
+        from accounts.models import StudentProgress, TeachingAtom
+        from django.utils import timezone as tz
+
+        atoms = TeachingAtom.objects.filter(concept=concept)
+        progress_records = StudentProgress.objects.filter(
+            user=user, atom__in=atoms
+        )
+        atoms_mastered = progress_records.filter(phase='complete').count()
+        total_atoms = atoms.count()
+
+        total_time = 0.0
+        if session:
+            elapsed = (tz.now() - session.start_time).total_seconds() / 60.0
+            total_time = max(elapsed, 1.0)
+        else:
+            total_time = max(1.0, sum(
+                float(p.times_practiced or 1) * 5.0
+                for p in progress_records
+            ))
+
+        velocity = atoms_mastered / total_time if total_time > 0 else 0.0
+
+        return {
+            'atoms_mastered': atoms_mastered,
+            'total_atoms': total_atoms,
+            'total_time_minutes': round(total_time, 2),
+            'velocity': round(velocity, 4),
+            'completion_pct': round(atoms_mastered / max(total_atoms, 1) * 100, 1),
+        }
 
     def determine_pacing(self, diagnostic_results: Dict, knowledge_level: str) -> str:
         """

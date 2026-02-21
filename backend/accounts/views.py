@@ -247,6 +247,7 @@ class StartTeachingSessionView(APIView):
             )
 
         # Get or create progress records for this concept's atoms
+        # Each atom starts at 0.0 mastery and 'not_started' phase
         atoms = TeachingAtom.objects.filter(concept=concept).order_by('order')
         
         atom_states = []
@@ -255,8 +256,8 @@ class StartTeachingSessionView(APIView):
                 user=user,
                 atom=atom,
                 defaults={
-                    'mastery_score': 0.3,
-                    'phase': 'diagnostic',
+                    'mastery_score': 0.0,
+                    'phase': 'not_started',
                     'error_history': []
                 }
             )
@@ -272,12 +273,24 @@ class StartTeachingSessionView(APIView):
                 retention_verified=progress.retention_verified
             ))
 
-        # Find current atom (first incomplete one)
+        # Use adaptive engine to find best next atom (weakest eligible)
+        engine = AdaptiveLearningEngine()
+        next_step = engine.get_next_learning_step(user, concept, session)
+        
         current_atom = None
-        for atom_state in atom_states:
-            if atom_state.phase != 'complete':
-                current_atom = atom_state
-                break
+        if next_step.get('atom'):
+            target_id = next_step['atom'].id
+            for atom_state in atom_states:
+                if atom_state.id == target_id:
+                    current_atom = atom_state
+                    break
+        
+        # Fallback: first incomplete atom
+        if not current_atom:
+            for atom_state in atom_states:
+                if atom_state.phase not in ('complete',):
+                    current_atom = atom_state
+                    break
 
         if not current_atom and atom_states:
             # All atoms complete - concept is mastered
@@ -543,16 +556,33 @@ class CompleteInitialQuizView(APIView):
         profile.overall_theta = updated_theta
         profile.save()
 
-        # ── Seed mastery on every atom's StudentProgress ──
+        # ────────────────────────────────────────────────────────
+        # FIX: Do NOT seed diagnostic mastery to ALL atoms!
+        # The diagnostic quiz assesses overall concept readiness,
+        # NOT per-atom mastery. Each atom must EARN its mastery
+        # through actual learning interaction.
+        #
+        # Instead: Only the FIRST atom gets a small head-start
+        # (capped at 30%). All other atoms stay at 0.0.
+        # ────────────────────────────────────────────────────────
         concept = session.concept
         atoms = TeachingAtom.objects.filter(concept=concept).order_by('order')
-        for atom in atoms:
+        for i, atom in enumerate(atoms):
             progress, _ = StudentProgress.objects.get_or_create(
                 user=request.user,
                 atom=atom,
-                defaults={'phase': 'diagnostic'}
+                defaults={'phase': 'not_started', 'mastery_score': 0.0}
             )
-            progress.mastery_score = seeded_mastery
+            if i == 0:
+                # First atom: cap initial mastery at 30% from diagnostic
+                capped_mastery = min(float(seeded_mastery), 0.30)
+                progress.mastery_score = capped_mastery
+                progress.phase = 'teaching'
+            else:
+                # Other atoms: start fresh at 0.0
+                if progress.phase in ('diagnostic', 'not_started'):
+                    progress.mastery_score = 0.0
+                    progress.phase = 'not_started'
             progress.error_history = evaluation.get('error_types', [])
             progress.save()
 
@@ -689,6 +719,11 @@ class GetTeachingContentView(APIView):
         session_data['current_phase'] = 'teaching'
         session.session_data = session_data
         session.save()
+
+        # Update atom phase to 'teaching' if not_started
+        if progress.phase in ('not_started', 'diagnostic'):
+            progress.phase = 'teaching'
+            progress.save()
         
         return Response({
             'atom_id': atom.id,
@@ -697,6 +732,7 @@ class GetTeachingContentView(APIView):
             'videos': resources.get('videos', []),
             'images': resources.get('images', []),
             'phase': progress.phase,
+            'mastery_score': float(progress.mastery_score),
             'current_pacing': current_pacing
         })
     
@@ -807,14 +843,16 @@ class GenerateQuestionsFromTeachingView(APIView):
         # Prepare response + session grading payload
         questions_data = []
         full_questions = []
+        saved_db_ids = []
         for q_data in generated:
+            adj_time = self._adjust_time_for_pacing(
+                q_data['estimated_time'],
+                current_pacing
+            )
             questions_data.append({
                 'difficulty': q_data['difficulty'],
                 'cognitive_operation': q_data['cognitive_operation'],
-                'estimated_time': self._adjust_time_for_pacing(
-                    q_data['estimated_time'],
-                    current_pacing
-                ),
+                'estimated_time': adj_time,
                 'question': q_data['question'],
                 'options': q_data['options']
             })
@@ -822,14 +860,26 @@ class GenerateQuestionsFromTeachingView(APIView):
             full_questions.append({
                 'difficulty': q_data['difficulty'],
                 'cognitive_operation': q_data['cognitive_operation'],
-                'estimated_time': self._adjust_time_for_pacing(
-                    q_data['estimated_time'],
-                    current_pacing
-                ),
+                'estimated_time': adj_time,
                 'question': q_data['question'],
                 'options': q_data['options'],
                 'correct_index': q_data['correct_index']
             })
+
+            # Persist to Question model so teachers can review
+            try:
+                db_q = Question.objects.create(
+                    atom=atom,
+                    difficulty=q_data['difficulty'],
+                    cognitive_operation=q_data.get('cognitive_operation', 'apply'),
+                    estimated_time=adj_time,
+                    question_text=q_data['question'],
+                    options=q_data['options'],
+                    correct_index=q_data['correct_index'],
+                )
+                saved_db_ids.append(db_q.id)
+            except Exception as save_err:
+                print(f"Warning: failed to persist question to DB: {save_err}")
         
         # Update session
         session_data['current_phase'] = 'questions'
@@ -999,11 +1049,22 @@ class SubmitAtomAnswerView(APIView):
             
             # Save updated values
             mastery_before = float(progress.mastery_score)
-            progress.mastery_score = result['updated_mastery']
-            progress.phase = atom_state.phase.value if hasattr(atom_state.phase, 'value') else atom_state.phase
+            new_mastery = result['updated_mastery']
+
+            # ── Use adaptive state machine for phase transitions ──
+            AdaptiveLearningEngine.update_atom_state(
+                progress, new_mastery, result['correct']
+            )
             progress.streak = result['streak']
             progress.error_history = atom_state.error_history
             progress.save()
+
+            # ── Detect fragile knowledge on ALL completed atoms ──
+            # Check if any previously mastered atoms show fragile signs
+            AdaptiveLearningEngine.detect_fragile_knowledge(
+                progress, result['correct'], time_taken,
+                estimated_time=float(question.get('estimated_time', 60))
+            )
             
             # Update learning profile theta
             profile.overall_theta = result['updated_theta']
@@ -1107,29 +1168,42 @@ class SubmitAtomAnswerView(APIView):
             if result.get('engagement_adjustment'):
                 session.engagement_score = result['engagement_adjustment'].get('score', session.engagement_score)
             
-            # If atom complete, get next atom info
+            # If atom complete, use ADAPTIVE ENGINE to find next best atom
             if result['atom_complete']:
                 # Mark atom complete
                 progress.phase = 'complete'
                 progress.save()
                 
-                # Get next incomplete atom
-                next_atom = TeachingAtom.objects.filter(
-                    concept=atom.concept,
-                    studentprogress__user=request.user,
-                    studentprogress__phase__in=['diagnostic', 'teaching', 'practice']
-                ).exclude(
-                    id=atom.id
-                ).order_by('order').first()
+                # Use adaptive engine to select next atom (weakest eligible)
+                next_step = engine.get_next_learning_step(
+                    request.user, atom.concept, session
+                )
                 
-                if next_atom:
+                if next_step.get('all_mastered'):
+                    # All atoms complete — signal concept final challenge
+                    response_data['concept_complete'] = True
+                    response_data['concept_final_challenge_ready'] = True
+                elif next_step.get('atom'):
+                    next_atom_obj = next_step['atom']
+                    # Get the actual next atom's progress for mastery info
+                    try:
+                        next_prog = StudentProgress.objects.get(
+                            user=request.user,
+                            atom=next_atom_obj
+                        )
+                        next_mastery = float(next_prog.mastery_score)
+                    except StudentProgress.DoesNotExist:
+                        next_mastery = 0.0
+                    
                     response_data['next_atom'] = {
-                        'id': next_atom.id,
-                        'name': next_atom.name
+                        'id': next_atom_obj.id,
+                        'name': next_atom_obj.name,
+                        'mastery_score': next_mastery,
+                        'phase': next_step.get('phase', 'not_started'),
                     }
                     response_data['next_action'] = 'next_atom'
+                    response_data['adaptive_action'] = next_step.get('action', 'TEACH')
                 else:
-                    # All atoms complete — signal concept final challenge
                     response_data['concept_complete'] = True
                     response_data['concept_final_challenge_ready'] = True
             
@@ -1410,14 +1484,14 @@ class CompleteAtomView(APIView):
             'mastery_confidence': mastery_confidence
         }
         
-        # Get next atom
-        next_atom = TeachingAtom.objects.filter(
-            concept=atom.concept,
-            order__gt=atom.order
-        ).order_by('order').first()
+        # ---- Use adaptive engine to pick the BEST next atom ----
+        engine = AdaptiveLearningEngine()
+        next_step = engine.get_next_learning_step(request.user, atom.concept, session)
+        next_atom = next_step.get('atom')          # TeachingAtom model instance or None
+        adaptive_action = next_step.get('action')  # TEACH / PRACTICE / ADVANCE / SUBJECT_COMPLETE
         
         all_atoms = TeachingAtom.objects.filter(concept=atom.concept).count()
-        all_completed = len(completed) >= all_atoms
+        all_completed = (adaptive_action == 'SUBJECT_COMPLETE') or next_step.get('all_mastered') or len(completed) >= all_atoms
         
         # ========== STEP 8: DETERMINE NEXT ACTION (AUTOMATIC) ==========
         
@@ -1425,44 +1499,28 @@ class CompleteAtomView(APIView):
         action_reason = ''
         
         if all_completed:
-            # All atoms done
             next_action = 'concept_complete'
             action_reason = 'All atoms in this concept have been mastered.'
-
+        elif adaptive_action == 'teach':
+            next_action = 'auto_advance'
+            action_reason = f'Moving to {next_atom.name} — teaching phase.'
+        elif adaptive_action == 'practice':
+            next_action = 'auto_advance'
+            action_reason = f'Moving to {next_atom.name} — practice phase.'
+        elif adaptive_action == 'advance':
+            next_action = 'auto_advance'
+            action_reason = f'{next_atom.name} is ready — advancing.'
         else:
-            # Decide based on metrics
+            # Fallback: use pacing heuristics
             if current_mastery < 0.5 or accuracy < 0.4 or conceptual_errors >= 2:
-                # Poor performance - FORCE REVIEW
                 next_action = 'review_current'
-                action_reason = 'Mastery too low - review required before proceeding'
-                
-            elif current_mastery < 0.7 or accuracy < 0.7:
-                # Marginal performance - offer choice but with strong recommendation
-                if pacing == 'sharp_slowdown':
-                    next_action = 'recommend_review'
-                    action_reason = 'Performance suggests you need more practice'
-                elif pacing == 'slow_down':
-                    next_action = 'recommend_practice'
-                    action_reason = 'Additional practice would be beneficial'
-                else:
-                    next_action = 'optional_continue'
-                    action_reason = 'You can continue, but review is optional'
-                    
+                action_reason = 'Mastery too low — review required before proceeding'
             elif current_mastery >= 0.7 and accuracy >= 0.75:
-                # Ready for final challenge before completing atom
                 next_action = 'final_challenge'
                 action_reason = 'Great progress! Complete the final challenge to finish this atom.'
-                
             else:
-                # Default - let user decide but with recommendation
-                if next_atom:
-                    next_action = 'user_choice'
-                    action_reason = 'Ready to continue?'
-            
-            # If there's no next atom, handle that
-            if not next_atom:
-                next_action = 'concept_complete'
-                action_reason = 'No more atoms in this concept'
+                next_action = 'user_choice'
+                action_reason = 'Ready to continue?'
         
         # Store pacing decision
         pacing_history = session_data.get('pacing_history', [])
@@ -1565,13 +1623,18 @@ class CompleteAtomView(APIView):
         
         # Add next atom info if exists
         if next_atom and not all_completed:
-            next_progress = StudentProgress.objects.get(user=request.user, atom=next_atom)
+            next_progress, _ = StudentProgress.objects.get_or_create(
+                user=request.user, atom=next_atom,
+                defaults={'mastery_score': 0.0, 'phase': 'not_started'}
+            )
             response_data['next_atom'] = {
                 'id': next_atom.id,
                 'name': next_atom.name,
                 'phase': next_progress.phase,
                 'order': next_atom.order,
-                'current_mastery': next_progress.mastery_score
+                'current_mastery': next_progress.mastery_score,
+                'mastery_score': next_progress.mastery_score,
+                'adaptive_action': adaptive_action,
             }
         
         # Award XP for atom completion
@@ -1591,6 +1654,48 @@ class CompleteAtomView(APIView):
             response_data['concept_mastery'] = concept_mastery
         
         return Response(response_data)
+
+
+class GetNextLearningStepView(APIView):
+    """Core adaptive endpoint — returns the best next atom + action for a student."""
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        session_id = request.query_params.get('session_id')
+        if not session_id:
+            return Response({'error': 'session_id required'}, status=400)
+        try:
+            session = LearningSession.objects.get(id=session_id, user=request.user)
+        except LearningSession.DoesNotExist:
+            return Response({'error': 'Session not found'}, status=404)
+
+        concept = session.concept
+        engine = AdaptiveLearningEngine()
+        step = engine.get_next_learning_step(request.user, concept, session)
+
+        atom = step.get('atom')
+        if atom is None:
+            return Response({
+                'action': 'concept_complete',
+                'reason': step.get('reason', 'All atoms mastered'),
+                'atom': None,
+            })
+
+        progress, _ = StudentProgress.objects.get_or_create(
+            user=request.user, atom=atom,
+            defaults={'mastery_score': 0.0, 'phase': 'not_started'}
+        )
+        return Response({
+            'action': step['action'],
+            'reason': step.get('reason', ''),
+            'atom': {
+                'id': atom.id,
+                'name': atom.name,
+                'order': atom.order,
+                'phase': progress.phase,
+                'mastery_score': progress.mastery_score,
+            }
+        })
 
 
 class GenerateConceptOverviewView(APIView):
@@ -1873,6 +1978,21 @@ class GenerateFinalChallengeView(APIView):
         session_data['current_phase'] = 'final_challenge'
         session.session_data = session_data
         session.save()
+
+        # Persist to Question model so teachers can review
+        for q in final_questions:
+            try:
+                Question.objects.create(
+                    atom=atom,
+                    difficulty=q['difficulty'],
+                    cognitive_operation=q.get('cognitive_operation', 'apply'),
+                    estimated_time=q.get('estimated_time', 60),
+                    question_text=q['question'],
+                    options=q['options'],
+                    correct_index=q['correct_index'],
+                )
+            except Exception as save_err:
+                print(f"Warning: failed to persist final-challenge question to DB: {save_err}")
 
         # Return without correct_index
         questions_payload = []

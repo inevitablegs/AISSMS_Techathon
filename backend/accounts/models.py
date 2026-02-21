@@ -44,12 +44,14 @@ class Concept(models.Model):
 class TeachingAtom(models.Model):
     """Atomic learning units"""
     PHASE_CHOICES = [
+        ('not_started', 'Not Started'),
         ('diagnostic', 'Diagnostic'),
         ('teaching', 'Teaching'),
         ('practice', 'Practice'),
         ('reinforcement', 'Reinforcement'),
         ('mastery_check', 'Mastery Check'),
         ('complete', 'Complete'),
+        ('fragile', 'Fragile'),
     ]
     
     name = models.CharField(max_length=200)
@@ -99,8 +101,8 @@ class StudentProgress(models.Model):
     """Track student progress on atoms — enriched for 10-feature pacing engine."""
     user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='progress')
     atom = models.ForeignKey(TeachingAtom, on_delete=models.CASCADE)
-    mastery_score = models.FloatField(default=0.3)
-    phase = models.CharField(max_length=20, choices=TeachingAtom.PHASE_CHOICES, default='diagnostic')
+    mastery_score = models.FloatField(default=0.0)
+    phase = models.CharField(max_length=20, choices=TeachingAtom.PHASE_CHOICES, default='not_started')
     streak = models.IntegerField(default=0)
     hint_usage = models.IntegerField(default=0)
     error_history = models.JSONField(default=list)

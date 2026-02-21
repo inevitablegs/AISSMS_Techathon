@@ -16,6 +16,7 @@ from .views import (
     # Adaptive flow views
     GenerateConceptOverviewView, GenerateAtomSummaryView,
     AdaptiveReteachView, GetAllAtomsMasteryView,
+    GetNextLearningStepView,
 
     # Enhanced pacing engine views
     GetVelocityGraphView, GetFatigueStatusView, RecordBreakView,
@@ -67,6 +68,7 @@ urlpatterns = [
     path('api/atom-summary/', GenerateAtomSummaryView.as_view(), name='atom_summary'),
     path('api/adaptive-reteach/', AdaptiveReteachView.as_view(), name='adaptive_reteach'),
     path('api/all-atoms-mastery/', GetAllAtomsMasteryView.as_view(), name='all_atoms_mastery'),
+    path('api/next-learning-step/', GetNextLearningStepView.as_view(), name='next_learning_step'),
 
     # Progress
     path('api/progress/', GetLearningProgressView.as_view(), name='learning_progress'),

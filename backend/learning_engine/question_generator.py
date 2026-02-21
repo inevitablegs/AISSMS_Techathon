@@ -4,7 +4,7 @@ import json
 import os
 from typing import Dict, List, Optional
 from groq import Groq
-import google.generativeai as genai
+from google import genai
 from django.conf import settings
 import re   
 
@@ -19,10 +19,9 @@ class QuestionGenerator:
         # Initialize Gemini client
         gemini_key = getattr(settings, 'GOOGLE_API_KEY', '')
         if gemini_key:
-            genai.configure(api_key=gemini_key)
-            self.gemini_model = genai.GenerativeModel('gemini-2.5-flash')
+            self.gemini_client = genai.Client(api_key=gemini_key)
         else:
-            self.gemini_model = None
+            self.gemini_client = None
 
     @staticmethod
     def _validate_questions(questions: list) -> list:
@@ -62,8 +61,8 @@ class QuestionGenerator:
         Returns:
             List of atomic concept names
         """
-        if not self.gemini_model:
-            print("Gemini model not available, using fallback atoms")
+        if not self.gemini_client:
+            print("Gemini client not available, using fallback atoms")
             return self._get_fallback_atoms(subject, concept)
         
         prompt = f"""
@@ -148,7 +147,10 @@ class QuestionGenerator:
         """
         
         try:
-            response = self.gemini_model.generate_content(prompt)
+            response = self.gemini_client.models.generate_content(
+                model="gemini-2.5-flash",
+                contents=prompt
+            )
             
             # Extract JSON from response
             text = response.text

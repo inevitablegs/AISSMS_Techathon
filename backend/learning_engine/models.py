@@ -4,12 +4,14 @@ from enum import Enum
 
 
 class LearningPhase(str, Enum):
+    NOT_STARTED = "not_started"
     DIAGNOSTIC = "diagnostic"
     TEACHING = "teaching"
     PRACTICE = "practice"
     REINFORCEMENT = "reinforcement"
     MASTERY_CHECK = "mastery_check"
     COMPLETE = "complete"
+    FRAGILE = "fragile"
 
 
 class ErrorType(str, Enum):
