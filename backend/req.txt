@@ -3,3 +3,6 @@ pip install djangorestframework-simplejwt
 pip install django-cors-headers
 pip install youtube-search-python
 pip install serpapi
+pip install google.generativeai
+pip install youtube-search
+pip install dotenv groq numpy

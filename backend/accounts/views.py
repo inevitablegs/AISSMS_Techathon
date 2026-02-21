@@ -1,11 +1,14 @@
 import json
+from django.http import JsonResponse
+from django.views.decorators.csrf import csrf_exempt
+from learning_engine.ai_assistant import generate_ai_response
 import logging
 from django.db import models
 from django.utils import timezone
 from django.contrib.auth import authenticate
 from django.contrib.auth.models import User
 from rest_framework import status
-from rest_framework.views import APIView
+from rest_framework.views import APIView, csrf_exempt
 from rest_framework.response import Response
 from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework_simplejwt.tokens import RefreshToken
@@ -136,6 +139,152 @@ class DashboardView(APIView):
             },
             'message': f'Welcome back, {request.user.first_name}!'
         })
+
+
+# ==================== SUGGESTION / AUTOCOMPLETE ====================
+
+# In-memory cache for AI concept suggestions (subject → [concepts])
+_concept_suggestions_cache = {}
+
+POPULAR_SUBJECTS = [
+    "Mathematics", "Physics", "Chemistry", "Biology",
+    "Computer Science", "Data Structures", "Algorithms",
+    "Machine Learning", "Artificial Intelligence", "Deep Learning",
+    "Operating Systems", "Database Management", "Computer Networks",
+    "Microprocessor", "Digital Electronics", "Signal Processing",
+    "Web Development", "Python Programming", "Java Programming",
+    "C Programming", "Object Oriented Programming",
+    "Software Engineering", "Cloud Computing", "Cyber Security",
+    "Data Science", "Statistics", "Probability",
+    "Discrete Mathematics", "Linear Algebra", "Calculus",
+    "English Literature", "History", "Economics",
+    "Psychology", "Sociology", "Philosophy",
+    "Electrical Engineering", "Mechanical Engineering",
+    "Civil Engineering", "Electronics Engineering",
+    "Embedded Systems", "Internet of Things",
+    "Blockchain", "Quantum Computing", "Natural Language Processing",
+    "Computer Vision", "Robotics", "Control Systems",
+    "Thermodynamics", "Fluid Mechanics", "Structural Analysis",
+    "Environmental Science", "Organic Chemistry", "Inorganic Chemistry",
+]
+
+
+class SuggestSubjectsView(APIView):
+    """Return subject suggestions — from DB + curated list, filtered by query."""
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        q = (request.query_params.get('q', '') or '').strip().lower()
+
+        # 1. Subjects the user already studied (DB)
+        db_subjects = list(
+            Concept.objects.filter(created_by=request.user)
+            .values_list('subject', flat=True)
+            .distinct()
+        )
+        # Also include subjects from ALL users (community)
+        all_subjects = list(
+            Concept.objects.values_list('subject', flat=True).distinct()
+        )
+
+        # 2. Merge with curated list (deduplicated, case-insensitive)
+        seen = set()
+        combined = []
+        for s in db_subjects + all_subjects + POPULAR_SUBJECTS:
+            key = s.strip().lower()
+            if key and key not in seen:
+                seen.add(key)
+                combined.append(s.strip())
+
+        # 3. Filter by query
+        if q:
+            combined = [s for s in combined if q in s.lower()]
+
+        # 4. Sort: user's own subjects first, then alphabetical
+        db_lower = {s.lower() for s in db_subjects}
+        combined.sort(key=lambda s: (0 if s.lower() in db_lower else 1, s.lower()))
+
+        return Response({'suggestions': combined[:20]})
+
+
+class SuggestConceptsView(APIView):
+    """Return concept suggestions for a subject — DB first, then AI-generated (cached)."""
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        subject = (request.query_params.get('subject', '') or '').strip()
+        q = (request.query_params.get('q', '') or '').strip().lower()
+
+        if not subject:
+            return Response({'suggestions': []})
+
+        # 1. Concepts already in DB for this subject
+        db_concepts = list(
+            Concept.objects.filter(subject__iexact=subject)
+            .values_list('name', flat=True)
+            .distinct()
+        )
+
+        # 2. Check AI cache
+        cache_key = subject.lower()
+        ai_concepts = _concept_suggestions_cache.get(cache_key, [])
+
+        # 3. If no AI cache, generate with Groq (fast)
+        if not ai_concepts:
+            ai_concepts = self._generate_concept_suggestions(subject)
+            if ai_concepts:
+                _concept_suggestions_cache[cache_key] = ai_concepts
+
+        # 4. Merge (deduplicated)
+        seen = set()
+        combined = []
+        for c in db_concepts + ai_concepts:
+            key = c.strip().lower()
+            if key and key not in seen:
+                seen.add(key)
+                combined.append(c.strip())
+
+        # 5. Filter by query
+        if q:
+            combined = [c for c in combined if q in c.lower()]
+
+        return Response({'suggestions': combined[:15]})
+
+    @staticmethod
+    def _generate_concept_suggestions(subject):
+        """Use Groq LLM to generate relevant concept suggestions for a subject."""
+        from groq import Groq
+        groq_key = getattr(settings, 'GROQ_API_KEY', '')
+        if not groq_key:
+            return []
+
+        prompt = (
+            f"List 15 important concepts/topics a student should learn in \"{subject}\". "
+            f"Return ONLY a JSON array of strings — no explanation, no numbering.\n"
+            f'Example: ["Concept A", "Concept B", "Concept C"]'
+        )
+        try:
+            client = Groq(api_key=groq_key)
+            response = client.chat.completions.create(
+                model="llama-3.3-70b-versatile",
+                messages=[{"role": "user", "content": prompt}],
+                temperature=0.4,
+                max_tokens=300,
+            )
+            raw = response.choices[0].message.content.strip()
+            # Extract JSON array
+            if '```' in raw:
+                raw = raw.split('```')[1]
+                if raw.startswith('json'):
+                    raw = raw[4:]
+            import re as _re
+            raw = _re.sub(r'[\x00-\x1f\x7f]', '', raw)
+            concepts = json.loads(raw.strip())
+            if isinstance(concepts, list):
+                return [str(c).strip() for c in concepts if c]
+        except Exception as e:
+            logger.warning(f"Concept suggestion AI failed: {e}")
+        return []
 
 
 # ==================== CONCEPT MANAGEMENT ====================
@@ -2790,12 +2939,23 @@ class CompleteConceptFinalChallengeView(APIView):
         # Overall concept mastery from atoms
         concept_atoms = TeachingAtom.objects.filter(concept=concept)
         atom_masteries = []
+        weakest_atom = None
+        lowest_mastery = 1.0
+
         for atom in concept_atoms:
             try:
                 prog = StudentProgress.objects.get(user=request.user, atom=atom)
-                atom_masteries.append(float(prog.mastery_score))
+
+                mastery = float(prog.mastery_score)
+                
             except StudentProgress.DoesNotExist:
-                atom_masteries.append(0.0)
+                 mastery = 0.0
+            atom_masteries.append(0.0)
+
+            if mastery < lowest_mastery:
+                lowest_mastery = mastery
+                weakest_atom = atom
+
         concept_mastery = sum(atom_masteries) / max(len(atom_masteries), 1)
 
         # Blend atom mastery with final challenge accuracy
@@ -2823,11 +2983,18 @@ class CompleteConceptFinalChallengeView(APIView):
             'final_mastery': final_mastery,
             'passed': passed,
             'xp_earned': concept_xp,
+            'weakest_atom': weakest_atom.title if weakest_atom else None,
+            'lowest_mastery': lowest_mastery,
         }
         session.session_data = session_data
         session.save()
+        if accuracy < 0.6 and weakest_atom:
+            recommendation = (
+                f" We recommend revising '{weakest_atom.title}' "
+                f"(Mastery: {lowest_mastery:.0%}) before continuing."
+            )
 
-        if passed:
+        elif passed:
             recommendation = f"🎉 Congratulations! You passed with {accuracy:.0%} accuracy and earned {concept_xp} XP!"
         elif accuracy >= 0.4:
             recommendation = f"Almost there! You scored {accuracy:.0%}. Review weaker atoms and try again."
@@ -2843,7 +3010,55 @@ class CompleteConceptFinalChallengeView(APIView):
             'final_mastery': final_mastery,
             'concept_xp': concept_xp,
             'recommendation': recommendation,
+            weakest_atom: weakest_atom.title if weakest_atom else None,
         })
+    # ==================== AI Assistance ====================
+
+class AIDoubtAssistantView(APIView):
+    """
+    AI-Based Doubt Solver
+    Personalized explanation based on student mastery and accuracy
+    """
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        question = request.data.get("question")
+        topic = request.data.get("topic")
+        level = request.data.get("level")
+        accuracy = request.data.get("accuracy")
+
+        if not question or not topic:
+            return Response(
+                {"error": "Question and topic are required"},
+                status=400
+            )
+
+        try:
+            # Generate AI Response
+            answer = generate_ai_response(
+                question=question,
+                topic=topic,
+                level=level,
+                accuracy=accuracy
+            )
+
+            # Optional: Save doubt to session or database
+            # Example: Attach to LearningSession if needed
+
+            return Response({
+                "question": question,
+                "topic": topic,
+                "level_used": level,
+                "ai_answer": answer,
+                "timestamp": timezone.now(),
+                "message": "AI explanation generated successfully"
+            })
+
+        except Exception as e:
+            return Response(
+                {"error": str(e)},
+                status=500
+            )
 
 
 # ==================== TEACHER PERMISSION MIXIN ====================

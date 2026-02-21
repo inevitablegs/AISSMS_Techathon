@@ -1,10 +1,11 @@
 from django.urls import path
 from .views import (
     # Auth views
-    GetConceptResourcesView, RegisterView, LoginView, DashboardView,
+    AIDoubtAssistantView, GetConceptResourcesView, RegisterView, LoginView, DashboardView,
     
     # Concept management
     ConceptListView, GenerateConceptView,
+    SuggestSubjectsView, SuggestConceptsView,
     
     # Teaching-first flow views
     StartTeachingSessionView, GetTeachingContentView,
@@ -50,6 +51,8 @@ urlpatterns = [
     # Concept management
     path('api/concepts/', ConceptListView.as_view(), name='concepts'),
     path('api/generate-concept/', GenerateConceptView.as_view(), name='generate_concept'),
+    path('api/suggest-subjects/', SuggestSubjectsView.as_view(), name='suggest_subjects'),
+    path('api/suggest-concepts/', SuggestConceptsView.as_view(), name='suggest_concepts'),
     
     # Teaching-first flow endpoints
     path('api/start-teaching-session/', StartTeachingSessionView.as_view(), name='start_teaching_session'),
@@ -90,6 +93,7 @@ urlpatterns = [
     path('api/concept-final-challenge/', GenerateConceptFinalChallengeView.as_view(), name='generate_concept_final_challenge'),
     path('api/submit-concept-final-answer/', SubmitConceptFinalAnswerView.as_view(), name='submit_concept_final_answer'),
     path('api/complete-concept-final-challenge/', CompleteConceptFinalChallengeView.as_view(), name='complete_concept_final_challenge'),
+    path("ai-assistant/", AIDoubtAssistantView.as_view(), name="ai_assistant"),
 
     # ==================== TEACHER ENDPOINTS ====================
     path('api/teacher/register/', TeacherRegisterView.as_view(), name='teacher_register'),

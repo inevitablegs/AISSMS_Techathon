@@ -12,6 +12,7 @@ import LearningRoute from './components/Learning/LearningRoute';
 import StartAnyConceptSessionRoute from './components/Learning/StartAnyConceptSessionRoute';
 import Leaderboard from './components/Leaderboard';
 import Progress from './components/Progress';
+import AIAssistantPage from './pages/AIAssistantPage.jsx';
 
 // Teacher imports
 import TeacherLogin from './components/Teacher/TeacherLogin';
@@ -104,6 +105,7 @@ function App() {
                             } />
                         </Route>
                     </Routes>
+                         <AIAssistantPage /> 
                 </AuthProvider>
             </Router>
         </ThemeProvider>
