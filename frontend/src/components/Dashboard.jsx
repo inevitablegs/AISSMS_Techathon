@@ -10,9 +10,32 @@ const Dashboard = () => {
     const [error, setError] = useState('');
     const [selectedSubject, setSelectedSubject] = useState('');
     const [subjects, setSubjects] = useState([]);
-    
+    const [parentInviteCode, setParentInviteCode] = useState('');
+    const [linkParentLoading, setLinkParentLoading] = useState(false);
+    const [linkParentMessage, setLinkParentMessage] = useState({ type: '', text: '' });
+
     const { user, logout } = useAuth();
     const navigate = useNavigate();
+
+    const handleLinkParent = async (e) => {
+        e.preventDefault();
+        const code = (parentInviteCode || '').trim();
+        if (!code) return;
+        setLinkParentMessage({ type: '', text: '' });
+        setLinkParentLoading(true);
+        try {
+            await axios.post('/auth/api/link-parent/', { invite_code: code });
+            setLinkParentMessage({ type: 'success', text: 'Successfully linked to parent.' });
+            setParentInviteCode('');
+        } catch (err) {
+            setLinkParentMessage({
+                type: 'error',
+                text: err.response?.data?.error || 'Invalid or expired code. Please try again.',
+            });
+        } finally {
+            setLinkParentLoading(false);
+        }
+    };
 
     const fetchConcepts = useCallback(async () => {
         try {
@@ -170,6 +193,35 @@ const Dashboard = () => {
                                 </div>
                             ))}
                         </div>
+                    )}
+                </div>
+
+                {/* Link to parent */}
+                <div className="mt-6 bg-surface rounded-theme-xl border border-theme-border p-5 animate-fade-in-up" style={{ animationDelay: '0.25s' }}>
+                    <h3 className="text-base font-semibold text-theme-text mb-2">Link your account to a parent</h3>
+                    <p className="text-sm text-theme-text-secondary mb-3">
+                        If a parent gave you an invite code, enter it below so they can see your learning insights.
+                    </p>
+                    <form onSubmit={handleLinkParent} className="flex flex-wrap items-center gap-2">
+                        <input
+                            type="text"
+                            value={parentInviteCode}
+                            onChange={(e) => setParentInviteCode(e.target.value)}
+                            placeholder="Enter invite code"
+                            className="px-3 py-2 rounded-theme bg-surface-alt border border-theme-border text-theme-text text-sm focus:outline-none focus:ring-2 focus:ring-primary/50 w-40"
+                        />
+                        <button
+                            type="submit"
+                            disabled={linkParentLoading}
+                            className="px-4 py-2 rounded-theme bg-violet-500/20 text-violet-600 dark:text-violet-400 font-medium text-sm hover:bg-violet-500/30 disabled:opacity-50"
+                        >
+                            {linkParentLoading ? 'Linking...' : 'Link'}
+                        </button>
+                    </form>
+                    {linkParentMessage.text && (
+                        <p className={`mt-2 text-sm ${linkParentMessage.type === 'success' ? 'text-emerald-600 dark:text-emerald-400' : 'text-error'}`}>
+                            {linkParentMessage.text}
+                        </p>
                     )}
                 </div>
 

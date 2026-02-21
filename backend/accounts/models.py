@@ -322,3 +322,37 @@ class TeacherGoal(models.Model):
     def __str__(self):
         target = 'All Students' if self.is_class_wide else self.student.username if self.student else 'N/A'
         return f"Goal: {self.title} → {target}"
+
+
+
+# ==================== PARENT MODELS ====================
+
+class ParentProfile(models.Model):
+    """Parent profile linked to a User"""
+    user = models.OneToOneField(User, on_delete=models.CASCADE, related_name='parent_profile')
+    display_name = models.CharField(max_length=200, blank=True)
+    is_active = models.BooleanField(default=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = 'parent_profile'
+
+    def __str__(self):
+        return f"Parent: {self.user.username}"
+
+
+class ParentChild(models.Model):
+    """Links a parent to a child (student). invite_code is used once to link; then cleared."""
+    parent = models.ForeignKey(User, on_delete=models.CASCADE, related_name='parent_children')
+    child = models.ForeignKey(User, on_delete=models.CASCADE, related_name='linked_parents', null=True, blank=True)
+    linked_at = models.DateTimeField(null=True, blank=True)
+    invite_code = models.CharField(max_length=20, unique=True, null=True, blank=True)
+
+    class Meta:
+        db_table = 'parent_child'
+        # (parent, child) unique when child is set; multiple pending (child=null) invites per parent allowed
+        unique_together = [['parent', 'child']]
+
+    def __str__(self):
+        return f"ParentChild: {self.parent.username} -> {self.child.username if self.child else 'pending'}"

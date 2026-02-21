@@ -57,7 +57,8 @@ from .models import (
     LearningProfile, Concept, TeachingAtom, 
     Question, StudentProgress, LearningSession,
     TeacherProfile, TeacherContent, QuestionApproval,
-    TeacherOverride, TeacherGoal
+    TeacherOverride, TeacherGoal,
+    ParentProfile, ParentChild,
 )
 
 class ConceptSerializer(serializers.ModelSerializer):
@@ -242,3 +243,99 @@ class StudentDetailSerializer(serializers.ModelSerializer):
             'mastery_score': p.mastery_score,
             'phase': p.phase,
         } for p in weak]
+        
+        
+
+# ==================== PARENT SERIALIZERS ====================
+
+class ParentProfileSerializer(serializers.ModelSerializer):
+    username = serializers.CharField(source='user.username', read_only=True)
+    email = serializers.CharField(source='user.email', read_only=True)
+    first_name = serializers.CharField(source='user.first_name', read_only=True)
+    last_name = serializers.CharField(source='user.last_name', read_only=True)
+
+    class Meta:
+        model = ParentProfile
+        fields = ['id', 'username', 'email', 'first_name', 'last_name', 'display_name', 'is_active', 'created_at']
+
+
+class ParentRegisterSerializer(serializers.Serializer):
+    username = serializers.CharField(max_length=150)
+    email = serializers.EmailField()
+    password = serializers.CharField(write_only=True)
+    password2 = serializers.CharField(write_only=True)
+    first_name = serializers.CharField(max_length=150)
+    last_name = serializers.CharField(max_length=150)
+    display_name = serializers.CharField(max_length=200, required=False, default='')
+
+    def validate(self, attrs):
+        if attrs['password'] != attrs['password2']:
+            raise serializers.ValidationError({"password": "Passwords don't match."})
+        if User.objects.filter(username=attrs['username']).exists():
+            raise serializers.ValidationError({"username": "Username already exists."})
+        if User.objects.filter(email=attrs['email']).exists():
+            raise serializers.ValidationError({"email": "Email already exists."})
+        return attrs
+
+    def create(self, validated_data):
+        validated_data.pop('password2')
+        password = validated_data.pop('password')
+        display_name = validated_data.pop('display_name', '')
+        user = User.objects.create_user(**validated_data)
+        user.set_password(password)
+        user.save()
+        ParentProfile.objects.create(user=user, display_name=display_name, is_active=True)
+        return user
+
+
+class ParentChildSerializer(serializers.ModelSerializer):
+    """Read-only for linked parent-child; child summary when child is set."""
+    child_id = serializers.SerializerMethodField()
+    child_username = serializers.SerializerMethodField()
+    child_name = serializers.SerializerMethodField()
+    last_active = serializers.SerializerMethodField()
+    overall_mastery = serializers.SerializerMethodField()
+    total_xp = serializers.SerializerMethodField()
+    invite_code = serializers.CharField(read_only=True)
+
+    class Meta:
+        model = ParentChild
+        fields = ['id', 'parent', 'child_id', 'child_username', 'child_name', 'linked_at',
+                  'last_active', 'overall_mastery', 'total_xp', 'invite_code']
+
+    def get_child_id(self, obj):
+        return obj.child_id if obj.child_id else None
+
+    def get_child_username(self, obj):
+        return obj.child.username if obj.child else None
+
+    def get_child_name(self, obj):
+        if obj.child:
+            return obj.child.get_full_name() or obj.child.username
+        return None
+
+    def get_last_active(self, obj):
+        if not obj.child:
+            return None
+        try:
+            return obj.child.learning_profile.last_active
+        except Exception:
+            return None
+
+    def get_overall_mastery(self, obj):
+        if not obj.child:
+            return None
+        from .models import StudentProgress
+        progress = StudentProgress.objects.filter(user=obj.child)
+        if not progress.exists():
+            return 0.0
+        from django.db.models import Avg
+        return round(progress.aggregate(avg=Avg('mastery_score'))['avg'] or 0, 3)
+
+    def get_total_xp(self, obj):
+        if not obj.child:
+            return None
+        try:
+            return obj.child.xp_profile.total_xp
+        except Exception:
+            return 0

@@ -12,6 +12,7 @@ import LearningRoute from './components/Learning/LearningRoute';
 import StartAnyConceptSessionRoute from './components/Learning/StartAnyConceptSessionRoute';
 import Leaderboard from './components/Leaderboard';
 import Progress from './components/Progress';
+import LearningCalendar from './components/LearningCalendar';
 import AIAssistantPage from './pages/AIAssistantPage.jsx';
 
 // Teacher imports
@@ -24,6 +25,14 @@ import QuestionManagement from './components/Teacher/QuestionManagement';
 import ClassAnalytics from './components/Teacher/ClassAnalytics';
 import GoalsManagement from './components/Teacher/GoalsManagement';
 import TeacherProtectedRoute from './components/Teacher/TeacherProtectedRoute';
+
+// Parent imports
+import { ParentProvider } from './context/ParentContext';
+import ParentLogin from './components/Parent/ParentLogin';
+import ParentRegister from './components/Parent/ParentRegister';
+import ParentDashboard from './components/Parent/ParentDashboard';
+import ParentChildInsights from './components/Parent/ParentChildInsights';
+import ParentProtectedRoute from './components/Parent/ParentProtectedRoute';
 
 function App() {
     return (
@@ -59,6 +68,15 @@ function App() {
                             element={
                                 <ProtectedRoute>
                                     <Progress />
+                                </ProtectedRoute>
+                            }
+                        />
+
+                        <Route
+                            path="/calendar"
+                            element={
+                                <ProtectedRoute>
+                                    <LearningCalendar />
                                 </ProtectedRoute>
                             }
                         />
@@ -104,6 +122,18 @@ function App() {
                                 <TeacherProtectedRoute><GoalsManagement /></TeacherProtectedRoute>
                             } />
                         </Route>
+
+                        {/* Parent Routes */}
+                        <Route element={<ParentProvider><Outlet /></ParentProvider>}>
+                            <Route path="/parent/login" element={<ParentLogin />} />
+                            <Route path="/parent/register" element={<ParentRegister />} />
+                            <Route path="/parent/dashboard" element={
+                                <ParentProtectedRoute><ParentDashboard /></ParentProtectedRoute>
+                            } />
+                            <Route path="/parent/child/:childId/insights" element={
+                                <ParentProtectedRoute><ParentChildInsights /></ParentProtectedRoute>
+                            } />
+                        </Route>
                     </Routes>
                          <AIAssistantPage /> 
                 </AuthProvider>
@@ -112,4 +142,4 @@ function App() {
     );
 }
 
-export default App;
+export default App; 

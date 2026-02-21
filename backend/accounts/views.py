@@ -1,9 +1,13 @@
+import calendar as cal_module
 import json
+import secrets
+from datetime import date, timedelta
 from django.http import JsonResponse
 from django.views.decorators.csrf import csrf_exempt
 from learning_engine.ai_assistant import generate_ai_response
 import logging
 from django.db import models
+from django.db.models import Max
 from django.utils import timezone
 from django.contrib.auth import authenticate
 from django.contrib.auth.models import User
@@ -14,10 +18,11 @@ from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework_simplejwt.tokens import RefreshToken
 
 from .models import (
-    Concept, TeachingAtom, Question, StudentProgress, 
+    Concept, TeachingAtom, Question, StudentProgress,
     LearningSession, LearningProfile, KnowledgeLevel, UserXP,
     TeacherProfile, TeacherContent, QuestionApproval,
-    TeacherOverride, TeacherGoal
+    TeacherOverride, TeacherGoal,
+    ParentProfile, ParentChild,
 )
 from .serializers import (
     RegisterSerializer, UserSerializer, ConceptSerializer,
@@ -25,7 +30,8 @@ from .serializers import (
     TeacherProfileSerializer, TeacherRegisterSerializer,
     TeacherContentSerializer, QuestionApprovalSerializer,
     TeacherOverrideSerializer, TeacherGoalSerializer,
-    StudentDetailSerializer, StudentProgressSerializer
+    StudentDetailSerializer, StudentProgressSerializer,
+    ParentProfileSerializer, ParentRegisterSerializer, ParentChildSerializer,
 )
 from learning_engine.question_generator import QuestionGenerator
 from learning_engine.adaptive_flow import AdaptiveLearningEngine, MASTERY_THRESHOLD
@@ -4348,3 +4354,323 @@ class CheckTeacherView(APIView):
         if is_teacher:
             data['teacher_profile'] = TeacherProfileSerializer(request.user.teacher_profile).data
         return Response(data)
+
+
+
+# ==================== PARENT PERMISSION ====================
+
+class IsParent:
+    """Check if user has a parent profile"""
+    @staticmethod
+    def check(user):
+        return hasattr(user, 'parent_profile') and user.parent_profile.is_active
+
+
+# ==================== PARENT AUTH VIEWS ====================
+
+class ParentRegisterView(APIView):
+    permission_classes = [AllowAny]
+
+    def post(self, request):
+        serializer = ParentRegisterSerializer(data=request.data)
+        if serializer.is_valid():
+            user = serializer.save()
+            return Response({
+                'message': 'Parent account created successfully. You can now log in.',
+                'user': UserSerializer(user).data,
+            }, status=status.HTTP_201_CREATED)
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+
+class ParentLoginView(APIView):
+    permission_classes = [AllowAny]
+
+    def post(self, request):
+        username = request.data.get('username')
+        password = request.data.get('password')
+        user = authenticate(username=username, password=password)
+
+        if user:
+            if not IsParent.check(user):
+                return Response({'error': 'This account is not a parent account'},
+                                status=status.HTTP_403_FORBIDDEN)
+            refresh = RefreshToken.for_user(user)
+            return Response({
+                'access': str(refresh.access_token),
+                'refresh': str(refresh),
+                'user': UserSerializer(user).data,
+                'is_parent': True,
+                'parent_profile': ParentProfileSerializer(user.parent_profile).data,
+            })
+        return Response({'error': 'Invalid credentials'}, status=status.HTTP_401_UNAUTHORIZED)
+
+
+class CheckParentView(APIView):
+    """Check if the current user is a parent"""
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        is_parent = IsParent.check(request.user)
+        data = {'is_parent': is_parent}
+        if is_parent:
+            data['parent_profile'] = ParentProfileSerializer(request.user.parent_profile).data
+        return Response(data)
+
+
+# ==================== PARENT CHILDREN & LINKING ====================
+
+class ParentChildrenView(APIView):
+    """List linked children (and pending invite codes) for the parent"""
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        if not IsParent.check(request.user):
+            return Response({'error': 'Not a parent'}, status=403)
+        links = ParentChild.objects.filter(parent=request.user).select_related('child')
+        # Return only linked children (child is not null) for the list; optionally include pending
+        children_list = [link for link in links if link.child_id is not None]
+        pending_list = [{'invite_code': link.invite_code} for link in links if link.child_id is None and link.invite_code]
+        serializer = ParentChildSerializer(children_list, many=True)
+
+        # Dashboard stats
+        child_ids = [link.child_id for link in children_list]
+        total_sessions_last_7_days = 0
+        last_activity_at = None
+        if child_ids:
+            since = timezone.now() - timedelta(days=7)
+            total_sessions_last_7_days = LearningSession.objects.filter(
+                user_id__in=child_ids,
+                start_time__gte=since,
+            ).count()
+            last_activity_at = LearningProfile.objects.filter(
+                user_id__in=child_ids,
+            ).aggregate(Max('last_active'))['last_active__max']
+
+        stats = {
+            'total_children': len(children_list),
+            'total_sessions_last_7_days': total_sessions_last_7_days,
+            'last_activity_at': last_activity_at.isoformat() if last_activity_at else None,
+        }
+
+        return Response({
+            'children': serializer.data,
+            'pending_invites': pending_list,
+            'stats': stats,
+        })
+
+
+class ParentLinkChildView(APIView):
+    """Parent generates an invite code to link a child. Creates ParentChild with child=null, invite_code set."""
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        if not IsParent.check(request.user):
+            return Response({'error': 'Not a parent'}, status=403)
+        code = secrets.token_hex(4).upper()[:8]  # 8-char code
+        link = ParentChild.objects.create(parent=request.user, invite_code=code)
+        return Response({'invite_code': code, 'message': 'Share this code with your child to link their account.'}, status=status.HTTP_201_CREATED)
+
+
+class ParentInviteCodeView(APIView):
+    """Return current pending invite code for the parent (if any)"""
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        if not IsParent.check(request.user):
+            return Response({'error': 'Not a parent'}, status=403)
+        pending = ParentChild.objects.filter(parent=request.user, child__isnull=True).exclude(invite_code__isnull=True).exclude(invite_code='').first()
+        if pending:
+            return Response({'invite_code': pending.invite_code})
+        return Response({'invite_code': None})
+
+
+class LinkParentView(APIView):
+    """Student links their account to a parent using an invite code"""
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        invite_code = (request.data.get('invite_code') or '').strip().upper()
+        if not invite_code:
+            return Response({'error': 'invite_code required'}, status=400)
+        try:
+            link = ParentChild.objects.get(invite_code=invite_code)
+        except ParentChild.DoesNotExist:
+            return Response({'error': 'Invalid or expired invite code.'}, status=400)
+        if link.child_id is not None:
+            if link.child_id == request.user.id:
+                return Response({'message': 'Already linked to this parent.'})
+            return Response({'error': 'This code has already been used.'}, status=400)
+        link.child = request.user
+        link.linked_at = timezone.now()
+        link.invite_code = None
+        link.save()
+        return Response({'message': 'Successfully linked to parent.'})
+
+
+# ==================== PARENT ADAPTIVE INSIGHTS ====================
+
+def _parent_pacing_message(pacing_value):
+    """Turn pacing enum into parent-facing message."""
+    if not pacing_value:
+        return 'steady', 'The system is gathering information about your child\'s pace.'
+    p = (pacing_value.value if hasattr(pacing_value, 'value') else pacing_value) or 'stay'
+    messages = {
+        'speed_up': ('speeding_up', 'The system is moving at a faster pace for your child.'),
+        'stay': ('steady', 'The system is moving at a steady pace for your child.'),
+        'slow_down': ('slowing_down', 'The system has slowed down a bit to reinforce recent topics.'),
+        'sharp_slowdown': ('slowing_down', 'The system has slowed down to give extra practice where needed.'),
+    }
+    return messages.get(p, ('steady', 'The system is adapting to your child\'s learning speed.'))
+
+
+class ParentChildInsightsView(APIView):
+    """Adaptive Learning Insights for one linked child."""
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, child_id):
+        if not IsParent.check(request.user):
+            return Response({'error': 'Not a parent'}, status=403)
+        if not ParentChild.objects.filter(parent=request.user, child_id=child_id).exists():
+            return Response({'error': 'Child not found or not linked to you'}, status=404)
+        try:
+            child = User.objects.get(id=child_id)
+        except User.DoesNotExist:
+            return Response({'error': 'Child not found'}, status=404)
+
+        # Child summary
+        progress_records = StudentProgress.objects.filter(user=child).select_related('atom__concept')
+        overall_mastery = 0.0
+        if progress_records.exists():
+            overall_mastery = round(
+                sum(p.mastery_score for p in progress_records) / progress_records.count(), 3
+            )
+        try:
+            total_xp = child.xp_profile.total_xp
+        except Exception:
+            total_xp = 0
+        try:
+            last_active = child.learning_profile.last_active
+        except Exception:
+            last_active = None
+
+        child_summary = {
+            'id': child.id,
+            'name': child.get_full_name() or child.username,
+            'username': child.username,
+            'last_active': last_active.isoformat() if last_active else None,
+            'total_xp': total_xp,
+            'overall_mastery': overall_mastery,
+        }
+
+        # Current pacing: from most recent session's pacing_history
+        recent_sessions = LearningSession.objects.filter(user=child).select_related('concept').order_by('-start_time')[:5]
+        current_pacing_value = None
+        for session in recent_sessions:
+            sh = (session.session_data or {}).get('pacing_history', [])
+            if sh:
+                current_pacing_value = _normalize_pacing_value(sh[-1])
+                break
+        pacing_label, pacing_message = _parent_pacing_message(current_pacing_value)
+        current_pacing = {'pacing': current_pacing_value or 'stay', 'label': pacing_label, 'message': pacing_message}
+
+        # Recent sessions
+        sessions = LearningSession.objects.filter(user=child).select_related('concept').order_by('-start_time')[:20]
+        recent_sessions_data = [{
+            'id': s.id,
+            'concept': s.concept.name,
+            'subject': s.concept.subject,
+            'start_time': s.start_time.isoformat(),
+            'end_time': s.end_time.isoformat() if s.end_time else None,
+            'questions_answered': s.questions_answered,
+            'correct_answers': s.correct_answers,
+            'accuracy': round(s.correct_answers / s.questions_answered, 2) if s.questions_answered > 0 else 0,
+            'fatigue_level': s.fatigue_level,
+            'engagement_score': s.engagement_score,
+        } for s in sessions]
+
+        # Mastery by concept/atom
+        concepts_data = {}
+        for p in progress_records:
+            c = p.atom.concept
+            if c.name not in concepts_data:
+                concepts_data[c.name] = {
+                    'concept_id': c.id,
+                    'concept_name': c.name,
+                    'subject': c.subject,
+                    'atoms': [],
+                }
+            concepts_data[c.name]['atoms'].append({
+                'atom_id': p.atom.id,
+                'atom_name': p.atom.name,
+                'mastery_score': round(p.mastery_score, 3),
+                'phase': p.phase,
+                'last_practiced': p.last_practiced.isoformat() if p.last_practiced else None,
+            })
+
+        # Weak areas
+        weak_areas = [{
+            'atom_id': p.atom.id,
+            'atom_name': p.atom.name,
+            'concept_name': p.atom.concept.name,
+            'mastery_score': round(p.mastery_score, 3),
+        } for p in progress_records.filter(mastery_score__lt=0.5).select_related('atom__concept').order_by('mastery_score')[:15]]
+
+        # Insight messages (rule-based)
+        insights = []
+        if progress_records.exists():
+            concepts_started = set(p.atom.concept.name for p in progress_records)
+            for cname in list(concepts_started)[:3]:
+                crecords = progress_records.filter(atom__concept__name=cname)
+                avg = sum(r.mastery_score for r in crecords) / crecords.count()
+                pct = int(round(avg * 100))
+                insights.append(f"Your child is learning {cname} at a steady pace; mastery is about {pct}%.")
+            mastered = progress_records.filter(phase='complete').count()
+            total = progress_records.count()
+            if total > 0:
+                insights.append(f"They've mastered {mastered} of {total} topics so far.")
+        if recent_sessions:
+            last_s = recent_sessions[0]
+            if last_s.questions_answered > 0:
+                acc = int(round(100 * last_s.correct_answers / last_s.questions_answered))
+                insights.append(f"Recent quiz accuracy in {last_s.concept.name} was {acc}%.")
+            if getattr(last_s, 'fatigue_level', None) and last_s.fatigue_level not in ('fresh', 'mild', ''):
+                insights.append("The system suggested a break during the last session (fatigue).")
+        if weak_areas:
+            names = [w['atom_name'] for w in weak_areas[:3]]
+            insights.append(f"Extra practice recommended for: {', '.join(names)}.")
+        if not insights:
+            insights.append("Your child hasn't started any topics yet. Once they do, you'll see insights here.")
+
+        # Optional: velocity snapshot (simple trend from session or progress)
+        velocity_snapshots = []
+        for s in sessions[:10]:
+            vd = getattr(s, 'velocity_data', None) or []
+            if vd:
+                for entry in (vd[-3:] if isinstance(vd, list) else []):
+                    if isinstance(entry, dict) and 'timestamp' in entry:
+                        velocity_snapshots.append({'date': entry.get('timestamp'), 'value': entry.get('value')})
+                    elif isinstance(entry, (int, float)):
+                        velocity_snapshots.append({'date': s.start_time.isoformat(), 'value': entry})
+        velocity_snapshots = velocity_snapshots[:10]
+
+        # Weekly summary (last 7 days)
+        since_7d = timezone.now() - timedelta(days=7)
+        sessions_last_7 = LearningSession.objects.filter(
+            user=child,
+            start_time__gte=since_7d,
+        ).count()
+        weekly_summary = {
+            'sessions_count': sessions_last_7,
+            'summary': f"{sessions_last_7} session(s) in the last 7 days. Overall mastery: {int(round(overall_mastery * 100))}%.",
+        }
+
+        return Response({
+            'child_summary': child_summary,
+            'current_pacing': current_pacing,
+            'recent_sessions': recent_sessions_data,
+            'mastery_by_concept': list(concepts_data.values()),
+            'weak_areas': weak_areas,
+            'insight_messages': insights,
+            'velocity_snapshots': velocity_snapshots,
+            'weekly_summary': weekly_summary,
+        })

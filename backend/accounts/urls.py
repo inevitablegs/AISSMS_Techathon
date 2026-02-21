@@ -40,6 +40,11 @@ from .views import (
     TeacherClassAnalyticsView,
     TeacherConceptManageView, TeacherAtomManageView,
     CheckTeacherView,
+    # Parent views
+    ParentRegisterView, ParentLoginView, CheckParentView,
+    ParentChildrenView, ParentLinkChildView, ParentInviteCodeView,
+    ParentChildInsightsView,
+    LinkParentView,
 )
 
 urlpatterns = [
@@ -128,4 +133,16 @@ urlpatterns = [
     # Knowledge graph management
     path('api/teacher/concepts/', TeacherConceptManageView.as_view(), name='teacher_concepts'),
     path('api/teacher/atoms/', TeacherAtomManageView.as_view(), name='teacher_atoms'),
+    
+    # ==================== PARENT ENDPOINTS ====================
+    path('api/parent/register/', ParentRegisterView.as_view(), name='parent_register'),
+    path('api/parent/login/', ParentLoginView.as_view(), name='parent_login'),
+    path('api/parent/check/', CheckParentView.as_view(), name='parent_check'),
+    path('api/parent/children/', ParentChildrenView.as_view(), name='parent_children'),
+    path('api/parent/link-child/', ParentLinkChildView.as_view(), name='parent_link_child'),
+    path('api/parent/invite-code/', ParentInviteCodeView.as_view(), name='parent_invite_code'),
+    path('api/parent/child/<int:child_id>/insights/', ParentChildInsightsView.as_view(), name='parent_child_insights'),
+
+    # Student links to parent (invite code)
+    path('api/link-parent/', LinkParentView.as_view(), name='link_parent'),
 ]

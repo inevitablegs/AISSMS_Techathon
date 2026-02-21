@@ -41,6 +41,7 @@ const Navbar = ({ variant = 'default' }) => {
         ? [
             { path: '/dashboard', label: 'Dashboard', icon: '🏠' },
             { path: '/progress', label: 'Progress', icon: '📊' },
+            { path: '/calendar', label: 'Calendar', icon: '📅' },
             { path: '/leaderboard', label: 'Leaderboard', icon: '🏆' },
             { path: '/learn/start', label: 'New Session', icon: '▶️' },
           ]

@@ -55,6 +55,9 @@ const Home = () => {
                             <Link to="/teacher/login" className="px-3 py-2 rounded-lg text-sm font-medium text-emerald-500 hover:bg-emerald-500/10 transition-colors">
                                 🎓 Teacher Portal
                             </Link>
+                            <Link to="/parent/login" className="px-3 py-2 rounded-lg text-sm font-medium text-violet-500 hover:bg-violet-500/10 transition-colors">
+                                👨‍👩‍👧 Parent Portal
+                            </Link>
                             <Link to="/login" className="px-4 py-2 rounded-lg text-sm font-medium text-theme-text-secondary hover:text-theme-text transition-colors">
                                 Sign In
                             </Link>
