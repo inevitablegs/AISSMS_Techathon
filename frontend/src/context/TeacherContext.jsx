@@ -1,4 +1,4 @@
-import React, { createContext, useState, useContext, useEffect } from 'react';
+import React, { createContext, useState, useContext, useEffect, useMemo } from 'react';
 import axios from '../axiosConfig';
 import { useNavigate } from 'react-router-dom';
 
@@ -76,46 +76,50 @@ export const TeacherProvider = ({ children }) => {
         navigate('/teacher/login');
     };
 
-    const teacherAxios = axios.create({
-        baseURL: 'http://localhost:8000',
-        headers: { 'Content-Type': 'application/json' },
-    });
+    const teacherAxios = useMemo(() => {
+        const instance = axios.create({
+            baseURL: 'http://localhost:8000',
+            headers: { 'Content-Type': 'application/json' },
+        });
 
-    teacherAxios.interceptors.request.use((config) => {
-        const token = localStorage.getItem('teacher_access_token');
-        if (token) {
-            config.headers.Authorization = `Bearer ${token}`;
-        }
-        return config;
-    });
-
-    teacherAxios.interceptors.response.use(
-        (response) => response,
-        async (error) => {
-            const originalRequest = error.config;
-            if (error.response?.status === 401 && !originalRequest._retry) {
-                originalRequest._retry = true;
-                try {
-                    const refreshToken = localStorage.getItem('teacher_refresh_token');
-                    if (refreshToken) {
-                        const response = await axios.post('http://localhost:8000/api/token/refresh/', {
-                            refresh: refreshToken
-                        });
-                        if (response.data.access) {
-                            localStorage.setItem('teacher_access_token', response.data.access);
-                            originalRequest.headers.Authorization = `Bearer ${response.data.access}`;
-                            return teacherAxios(originalRequest);
-                        }
-                    }
-                } catch {
-                    localStorage.removeItem('teacher_access_token');
-                    localStorage.removeItem('teacher_refresh_token');
-                    window.location.href = '/teacher/login';
-                }
+        instance.interceptors.request.use((config) => {
+            const token = localStorage.getItem('teacher_access_token');
+            if (token) {
+                config.headers.Authorization = `Bearer ${token}`;
             }
-            return Promise.reject(error);
-        }
-    );
+            return config;
+        });
+
+        instance.interceptors.response.use(
+            (response) => response,
+            async (error) => {
+                const originalRequest = error.config;
+                if (error.response?.status === 401 && !originalRequest._retry) {
+                    originalRequest._retry = true;
+                    try {
+                        const refreshToken = localStorage.getItem('teacher_refresh_token');
+                        if (refreshToken) {
+                            const response = await axios.post('http://localhost:8000/api/token/refresh/', {
+                                refresh: refreshToken
+                            });
+                            if (response.data.access) {
+                                localStorage.setItem('teacher_access_token', response.data.access);
+                                originalRequest.headers.Authorization = `Bearer ${response.data.access}`;
+                                return instance(originalRequest);
+                            }
+                        }
+                    } catch {
+                        localStorage.removeItem('teacher_access_token');
+                        localStorage.removeItem('teacher_refresh_token');
+                        window.location.href = '/teacher/login';
+                    }
+                }
+                return Promise.reject(error);
+            }
+        );
+
+        return instance;
+    }, []);
 
     const value = {
         teacher,

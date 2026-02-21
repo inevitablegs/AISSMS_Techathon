@@ -16,7 +16,7 @@ export const LearningProvider = ({ children }) => {
     const [currentQuestions, setCurrentQuestions] = useState([]);
     const [currentQuestionIndex, setCurrentQuestionIndex] = useState(0);
     const [answers, setAnswers] = useState([]);
-    const [atomMastery, setAtomMastery] = useState(0.3);
+    const [atomMastery, setAtomMastery] = useState(0.0);
     const [currentTheta, setCurrentTheta] = useState(0.0);
     const [pacingDecision, setPacingDecision] = useState('stay');
     const [nextAction, setNextAction] = useState('continue_practice');
@@ -70,7 +70,7 @@ export const LearningProvider = ({ children }) => {
         setLoading(true);
         setKnowledgeLevel(level);
         setAnswers([]);
-        setAtomMastery(0.3);
+        setAtomMastery(0.0);
         setPacingDecision('stay');
         
         try {
@@ -127,6 +127,11 @@ export const LearningProvider = ({ children }) => {
                 id: atom_id,
                 name: response.data?.atom_name || response.data?.name || raw.atom_name || raw.name,
             });
+
+            // Sync mastery from backend so new atoms start at their real value
+            if (response.data?.mastery_score !== undefined) {
+                setAtomMastery(response.data.mastery_score);
+            }
             
             return { success: true, data: response.data };
         } catch (error) {
@@ -662,6 +667,7 @@ export const LearningProvider = ({ children }) => {
         setCurrentQuestions([]);
         setCurrentQuestionIndex(0);
         setAnswers([]);
+        setAtomMastery(0.0);          // <-- critical: reset mastery for new atom
         setShowTeaching(true);
         setPacingDecision('stay');
         questionStartTime.current = null;

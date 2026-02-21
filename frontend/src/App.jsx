@@ -1,5 +1,5 @@
 import React from 'react';
-import { BrowserRouter as Router, Routes, Route } from 'react-router-dom';
+import { BrowserRouter as Router, Routes, Route, Outlet } from 'react-router-dom';
 import { AuthProvider } from './context/AuthContext';
 import { ThemeProvider } from './context/ThemeContext';
 import { TeacherProvider } from './context/TeacherContext';
@@ -80,31 +80,29 @@ function App() {
                             }
                         />
 
-                        {/* Teacher Routes */}
-                        <Route path="/teacher/login" element={
-                            <TeacherProvider><TeacherLogin /></TeacherProvider>
-                        } />
-                        <Route path="/teacher/register" element={
-                            <TeacherProvider><TeacherRegister /></TeacherProvider>
-                        } />
-                        <Route path="/teacher/dashboard" element={
-                            <TeacherProvider><TeacherProtectedRoute><TeacherDashboard /></TeacherProtectedRoute></TeacherProvider>
-                        } />
-                        <Route path="/teacher/students" element={
-                            <TeacherProvider><TeacherProtectedRoute><StudentAnalytics /></TeacherProtectedRoute></TeacherProvider>
-                        } />
-                        <Route path="/teacher/content" element={
-                            <TeacherProvider><TeacherProtectedRoute><ContentManagement /></TeacherProtectedRoute></TeacherProvider>
-                        } />
-                        <Route path="/teacher/questions" element={
-                            <TeacherProvider><TeacherProtectedRoute><QuestionManagement /></TeacherProtectedRoute></TeacherProvider>
-                        } />
-                        <Route path="/teacher/analytics" element={
-                            <TeacherProvider><TeacherProtectedRoute><ClassAnalytics /></TeacherProtectedRoute></TeacherProvider>
-                        } />
-                        <Route path="/teacher/goals" element={
-                            <TeacherProvider><TeacherProtectedRoute><GoalsManagement /></TeacherProtectedRoute></TeacherProvider>
-                        } />
+                        {/* Teacher Routes — single shared TeacherProvider */}
+                        <Route element={<TeacherProvider><Outlet /></TeacherProvider>}>
+                            <Route path="/teacher/login" element={<TeacherLogin />} />
+                            <Route path="/teacher/register" element={<TeacherRegister />} />
+                            <Route path="/teacher/dashboard" element={
+                                <TeacherProtectedRoute><TeacherDashboard /></TeacherProtectedRoute>
+                            } />
+                            <Route path="/teacher/students" element={
+                                <TeacherProtectedRoute><StudentAnalytics /></TeacherProtectedRoute>
+                            } />
+                            <Route path="/teacher/content" element={
+                                <TeacherProtectedRoute><ContentManagement /></TeacherProtectedRoute>
+                            } />
+                            <Route path="/teacher/questions" element={
+                                <TeacherProtectedRoute><QuestionManagement /></TeacherProtectedRoute>
+                            } />
+                            <Route path="/teacher/analytics" element={
+                                <TeacherProtectedRoute><ClassAnalytics /></TeacherProtectedRoute>
+                            } />
+                            <Route path="/teacher/goals" element={
+                                <TeacherProtectedRoute><GoalsManagement /></TeacherProtectedRoute>
+                            } />
+                        </Route>
                     </Routes>
                 </AuthProvider>
             </Router>

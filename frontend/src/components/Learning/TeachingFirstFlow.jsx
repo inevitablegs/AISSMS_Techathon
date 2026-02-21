@@ -635,7 +635,7 @@ useEffect(() => {
             }
             
         } else if (action === 'skip') {
-            // Force continue despite low mastery
+            // Force continue despite low mastery — complete current atom, move to next
             setFlowState('completing');
             
             try {
@@ -648,9 +648,40 @@ useEffect(() => {
                 
                 if (completeResult.success) {
                     if (completeResult.data.next_atom) {
-                        setCurrentAtomData(completeResult.data.next_atom);
-                        setFlowState('teaching');
+                        const nextAtom = completeResult.data.next_atom;
+                        setCurrentAtomData(nextAtom);
                         resetForNewAtom();
+
+                        // Actually load teaching content for the NEW atom
+                        setFlowState('loading');
+                        try {
+                            const contentResult = await getTeachingContent({
+                                session_id: currentSession.session_id,
+                                atom_id: nextAtom.id
+                            });
+                            if (contentResult.success) {
+                                setFlowState('teaching');
+                            } else {
+                                setError('Failed to load teaching content for next atom');
+                                setFlowState('error');
+                            }
+                        } catch (contentErr) {
+                            console.error('Error loading next atom content:', contentErr);
+                            setError('Failed to load next atom');
+                            setFlowState('error');
+                        }
+                    } else if (completeResult.data.all_completed || completeResult.data.concept_final_challenge_ready) {
+                        // No next atom — all atoms done
+                        setFlowState('loading');
+                        try {
+                            await getAllAtomsMastery({
+                                session_id: currentSession.session_id,
+                                concept_id: conceptId
+                            });
+                            setFlowState('all_atoms_mastery');
+                        } catch (e) {
+                            await launchConceptFinalChallenge();
+                        }
                     } else {
                         setFlowState('concept_complete');
                     }
@@ -664,7 +695,7 @@ useEffect(() => {
                 setFlowState('error');
             }
         }
-    }, [currentSession, currentAtomData, getTeachingContent, generateQuestionsFromTeaching, completeAtom, resetForNewAtom, adaptiveReteach]);
+    }, [currentSession, currentAtomData, conceptId, getTeachingContent, generateQuestionsFromTeaching, completeAtom, resetForNewAtom, adaptiveReteach, getAllAtomsMastery, launchConceptFinalChallenge]);
 
     // Handle atom summary continue → next atom or all_atoms_mastery
     const handleAtomSummaryContinue = useCallback(async () => {
