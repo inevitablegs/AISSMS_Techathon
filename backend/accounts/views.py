@@ -25,7 +25,7 @@ from .serializers import (
     StudentDetailSerializer, StudentProgressSerializer
 )
 from learning_engine.question_generator import QuestionGenerator
-from learning_engine.adaptive_flow import AdaptiveLearningEngine
+from learning_engine.adaptive_flow import AdaptiveLearningEngine, MASTERY_THRESHOLD
 from learning_engine.knowledge_tracing import (
     bkt_update, update_theta, classify_behavior, 
     update_mastery_from_behavior, classify_error_type
@@ -169,26 +169,34 @@ class GenerateConceptView(APIView):
             defaults={'description': f'{concept_name} in {subject}'}
         )
         
-        # Generate atoms using AI
-        generator = QuestionGenerator()
-        atoms = generator.generate_atoms(subject, concept_name)
-        
-        if not atoms:
-            return Response({'error': 'Failed to generate atoms'}, status=500)
-        
-        # Create atom records (without questions)
-        atom_objects = []
-        for i, atom_name in enumerate(atoms):
-            atom, _ = TeachingAtom.objects.get_or_create(
-                name=atom_name,
-                concept=concept,
-                defaults={'order': i}
-            )
-            atom_objects.append({
-                'id': atom.id,
-                'name': atom.name,
-                'order': atom.order
-            })
+        # If concept already has atoms, return them directly (skip AI call)
+        existing_atoms = TeachingAtom.objects.filter(concept=concept).order_by('order')
+        if existing_atoms.exists():
+            atom_objects = [
+                {'id': atom.id, 'name': atom.name, 'order': atom.order}
+                for atom in existing_atoms
+            ]
+        else:
+            # Generate atoms using AI only for new concepts
+            generator = QuestionGenerator()
+            atoms = generator.generate_atoms(subject, concept_name)
+            
+            if not atoms:
+                return Response({'error': 'Failed to generate atoms'}, status=500)
+            
+            # Create atom records (without questions)
+            atom_objects = []
+            for i, atom_name in enumerate(atoms):
+                atom, _ = TeachingAtom.objects.get_or_create(
+                    name=atom_name,
+                    concept=concept,
+                    defaults={'order': i}
+                )
+                atom_objects.append({
+                    'id': atom.id,
+                    'name': atom.name,
+                    'order': atom.order
+                })
         
         return Response({
             'concept_id': concept.id,
@@ -300,7 +308,7 @@ class StartTeachingSessionView(APIView):
         pacing_engine = PacingEngine()
         pacing_context = PacingContext(
             accuracy=0.5,  # Default accuracy
-            mastery_score=current_atom.mastery_score if current_atom else 0.3,
+            mastery_score=current_atom.mastery_score if current_atom else 0.0,
             streak=current_atom.streak if current_atom else 0,
             error_types=current_atom.error_history[-5:] if current_atom and current_atom.error_history else [],
             theta=0.0,  # Initial theta
@@ -427,12 +435,12 @@ class SubmitInitialQuizAnswerView(APIView):
         # ── Real-time mastery update per question ──
         # Retrieve running mastery & theta from session data (or defaults)
         running = session.session_data.get('quiz_running_state', {
-            'mastery': 0.3,
+            'mastery': 0.0,
             'theta': 0.0,
             'streak': 0,
             'error_types': []
         })
-        current_mastery = float(running.get('mastery', 0.3))
+        current_mastery = float(running.get('mastery', 0.0))
         current_theta = float(running.get('theta', 0.0))
 
         # Get user profile theta if this is the first question
@@ -659,7 +667,7 @@ class GetTeachingContentView(APIView):
         progress, _ = StudentProgress.objects.get_or_create(
             user=request.user,
             atom=atom,
-            defaults={'phase': 'teaching'}
+            defaults={'mastery_score': 0.0, 'phase': 'not_started'}
         )
         
         # Get pacing from session data
@@ -671,7 +679,7 @@ class GetTeachingContentView(APIView):
         quiz_eval = session_data.get('initial_quiz_evaluation', {})
         quiz_running = session_data.get('quiz_running_state', {})
         quiz_mastery = float(
-            quiz_eval.get('mastery', quiz_running.get('mastery', 0.3))
+            quiz_eval.get('mastery', quiz_running.get('mastery', 0.0))
         )
 
         # Generate teaching content if not already cached (or force_new)
@@ -811,7 +819,7 @@ class GenerateQuestionsFromTeachingView(APIView):
             session_data = session.session_data or {}
             quiz_eval = session_data.get('initial_quiz_evaluation', {})
             quiz_running = session_data.get('quiz_running_state', {})
-            quiz_mastery = float(quiz_eval.get('mastery', quiz_running.get('mastery', 0.3)))
+            quiz_mastery = float(quiz_eval.get('mastery', quiz_running.get('mastery', 0.0)))
             generated_teaching = engine.generate_teaching_content(
                 atom_name=atom.name,
                 subject=atom.concept.subject,
@@ -995,7 +1003,7 @@ class SubmitAtomAnswerView(APIView):
             progress, _ = StudentProgress.objects.get_or_create(
                 user=request.user,
                 atom=atom,
-                defaults={'mastery_score': 0.3, 'phase': 'diagnostic'}
+                defaults={'mastery_score': 0.0, 'phase': 'not_started'}
             )
             
             # Get question from session data
@@ -1050,21 +1058,26 @@ class SubmitAtomAnswerView(APIView):
             # Save updated values
             mastery_before = float(progress.mastery_score)
             new_mastery = result['updated_mastery']
+            was_already_complete = (progress.phase == 'complete')
+
+            # ── Update streak + error_history BEFORE state machine ──
+            # (update_atom_state checks streak for completion decisions)
+            progress.streak = result['streak']
+            progress.error_history = atom_state.error_history
 
             # ── Use adaptive state machine for phase transitions ──
             AdaptiveLearningEngine.update_atom_state(
                 progress, new_mastery, result['correct']
             )
-            progress.streak = result['streak']
-            progress.error_history = atom_state.error_history
-            progress.save()
+            # update_atom_state already calls progress.save()
 
-            # ── Detect fragile knowledge on ALL completed atoms ──
-            # Check if any previously mastered atoms show fragile signs
-            AdaptiveLearningEngine.detect_fragile_knowledge(
-                progress, result['correct'], time_taken,
-                estimated_time=float(question.get('estimated_time', 60))
-            )
+            # ── Detect fragile knowledge only on atoms that were ALREADY
+            #    complete before this answer (not ones that just became complete) ──
+            if was_already_complete:
+                AdaptiveLearningEngine.detect_fragile_knowledge(
+                    progress, result['correct'], time_taken,
+                    estimated_time=float(question.get('estimated_time', 60))
+                )
             
             # Update learning profile theta
             profile.overall_theta = result['updated_theta']
@@ -1169,10 +1182,17 @@ class SubmitAtomAnswerView(APIView):
                 session.engagement_score = result['engagement_adjustment'].get('score', session.engagement_score)
             
             # If atom complete, use ADAPTIVE ENGINE to find next best atom
-            if result['atom_complete']:
-                # Mark atom complete
+            # atom_complete comes from pacing engine's should_exit_atom.
+            # Sync: if pacing says complete but state machine didn't mark it yet,
+            # explicitly mark complete. (update_atom_state may lag by one streak)
+            if result['atom_complete'] and progress.phase != 'complete':
                 progress.phase = 'complete'
+                progress.mastery_score = max(
+                    float(progress.mastery_score), MASTERY_THRESHOLD
+                )
                 progress.save()
+
+            if result['atom_complete'] or progress.phase == 'complete':
                 
                 # Use adaptive engine to select next atom (weakest eligible)
                 next_step = engine.get_next_learning_step(
@@ -1329,7 +1349,7 @@ class CompleteAtomView(APIView):
         
         # Calculate learning rate (how fast they improved)
         if len(atom_performance) >= 2:
-            first_mastery = atom_performance[0].get('mastery_before', 0.3)
+            first_mastery = atom_performance[0].get('mastery_before', 0.0)
             last_mastery = atom_performance[-1].get('mastery_after', current_mastery)
             learning_rate = (last_mastery - first_mastery) / len(atom_performance)
         else:
@@ -1348,48 +1368,19 @@ class CompleteAtomView(APIView):
         # Look for fast correct answers when mastery was low
         guess_events = 0
         for i, p in enumerate(atom_performance):
-            if p['correct'] and p.get('mastery_before', 0.3) < 0.4 and p.get('time_taken', 30) < 10:
+            if p['correct'] and p.get('mastery_before', 0.0) < 0.4 and p.get('time_taken', 30) < 10:
                 # Fast correct when mastery low - possible guess
                 guess_events += 1
         guess_prob = guess_events / max(answered_questions, 1)
         
-        # ========== STEP 3: CALCULATE THETA (IRT ABILITY) ==========
+        # ========== STEP 3: USE ALREADY-UPDATED THETA ==========
         
-        # Current theta from user profile
+        # Theta was already incrementally updated per-question in
+        # SubmitAtomAnswerView via process_answer(). Don't recalculate
+        # here — just read the current value from the profile.
         current_theta = request.user.learning_profile.overall_theta
-        
-        # Calculate theta change
-        # Update theta based on performance
-        question_difficulties = []
-        for i, q in enumerate(questions):
-            if i < len(atom_performance):
-                difficulty = q.get('difficulty', 'medium')
-                if difficulty == 'easy':
-                    b = -0.5
-                elif difficulty == 'medium':
-                    b = 0.5
-                else:
-                    b = 1.5
-                question_difficulties.append(b)
-        
-        # Calculate theta update using IRT
-        from learning_engine.knowledge_tracing import update_theta
-        
-        theta_updates = []
-        for i, p in enumerate(atom_performance):
-            if i < len(question_difficulties):
-                new_theta = update_theta(
-                    theta=current_theta,
-                    correct=p['correct'],
-                    b=question_difficulties[i],
-                    a=1.0,
-                    lr=0.2
-                )
-                theta_updates.append(new_theta)
-        
-        # Final theta after atom
-        final_theta = theta_updates[-1] if theta_updates else current_theta
-        theta_change = final_theta - current_theta
+        final_theta = current_theta
+        theta_change = 0.0  # Already accounted for per-question
         
         # ========== STEP 4: ANALYZE ERROR PATTERNS ==========
         
@@ -1456,10 +1447,7 @@ class CompleteAtomView(APIView):
         
         # ========== STEP 7: MAKE AUTOMATIC DECISION ==========
 
-        # Update user's theta
-        profile = request.user.learning_profile
-        profile.overall_theta = final_theta
-        profile.save()
+        # Theta already updated per-question in SubmitAtomAnswerView — no overwrite needed.
         
         # Update session data
         completed = session_data.get('completed_atoms', [])
@@ -1540,12 +1528,19 @@ class CompleteAtomView(APIView):
         
         # ========== STEP 9: BUILD COMPREHENSIVE RESPONSE ==========
         
-        # Update progress phase without final completion yet
-        if next_action in ['review_current', 'recommend_review', 'recommend_practice']:
+        # Update progress phase — respect adaptive engine decisions.
+        # Do NOT overwrite 'complete' if the atom was already mastered.
+        if progress.phase == 'complete':
+            pass  # Already mastered — don't regress
+        elif next_action in ['review_current', 'recommend_review', 'recommend_practice']:
             progress.phase = 'reinforcement'
+            progress.save()
+        elif next_action == 'concept_complete':
+            progress.phase = 'complete'
+            progress.save()
         else:
             progress.phase = 'practice'
-        progress.save()
+            progress.save()
 
         response_data = {
             # Atom completion status
@@ -1562,7 +1557,7 @@ class CompleteAtomView(APIView):
                 
                 # BKT parameters
                 'final_mastery': current_mastery,
-                'mastery_improvement': current_mastery - session_data.get('initial_mastery', 0.3),
+                'mastery_improvement': current_mastery - session_data.get('initial_mastery', 0.0),
                 'learning_rate': learning_rate,
                 'slip_probability': slip_prob,
                 'guess_probability': guess_prob,
@@ -3362,8 +3357,8 @@ class TeacherOverrideListView(APIView):
         if action == 'reset_mastery' and atom_id:
             try:
                 progress = StudentProgress.objects.get(user=student, atom_id=atom_id)
-                progress.mastery_score = 0.3
-                progress.phase = 'diagnostic'
+                progress.mastery_score = 0.0
+                progress.phase = 'not_started'
                 progress.streak = 0
                 progress.save()
             except StudentProgress.DoesNotExist:

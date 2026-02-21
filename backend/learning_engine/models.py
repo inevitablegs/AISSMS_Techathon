@@ -38,8 +38,8 @@ class TeachingAtomState:
     """Represents a teaching atom's state in memory — enriched for the 10-feature pacing engine."""
     id: int
     name: str
-    mastery_score: float = 0.3
-    phase: LearningPhase = LearningPhase.DIAGNOSTIC
+    mastery_score: float = 0.0
+    phase: LearningPhase = LearningPhase.NOT_STARTED
     streak: int = 0
     hint_usage: int = 0
     error_history: List[str] = None
