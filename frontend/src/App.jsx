@@ -11,6 +11,7 @@ import LearningRoute from './components/Learning/LearningRoute';
 import StartAnyConceptSessionRoute from './components/Learning/StartAnyConceptSessionRoute';
 import Leaderboard from './components/Leaderboard';
 import Progress from './components/Progress';
+import AIAssistantPage from './pages/AIAssistantPage.jsx';
 
 function App() {
     return (
@@ -67,6 +68,7 @@ function App() {
                             }
                         />
                     </Routes>
+                         <AIAssistantPage /> 
                 </AuthProvider>
             </Router>
         </ThemeProvider>

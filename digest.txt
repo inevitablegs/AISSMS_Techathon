@@ -1,10 +1,10 @@
 Directory structure:
-└── Final/
+└── AISSMS_Techathon/
     ├── tempCodeRunnerFile.python
     ├── backend/
     │   ├── a.py
     │   ├── manage.py
-    │   ├── req
+    │   ├── req.txt
     │   ├── accounts/
     │   │   ├── __init__.py
     │   │   ├── admin.py
@@ -19,6 +19,8 @@ Directory structure:
     │   │       ├── 0002_concept_created_by.py
     │   │       ├── 0003_learningsession_knowledge_level_and_more.py
     │   │       ├── 0004_add_error_history_default.py
+    │   │       ├── 0005_learningsession_break_count_and_more.py
+    │   │       ├── 0006_userxp.py
     │   │       └── __init__.py
     │   ├── core/
     │   │   ├── __init__.py
@@ -29,6 +31,8 @@ Directory structure:
     │   └── learning_engine/
     │       ├── __init__.py
     │       ├── adaptive_flow.py
+    │       ├── ai_assistant.py
+    │       ├── external_resources.py
     │       ├── knowledge_tracing.py
     │       ├── models.py
     │       ├── pacing_engine.py
@@ -51,23 +55,33 @@ Directory structure:
             ├── components/
             │   ├── Dashboard.jsx
             │   ├── Home.jsx
+            │   ├── Leaderboard.jsx
             │   ├── Login.jsx
+            │   ├── Navbar.jsx
+            │   ├── Progress.jsx
             │   ├── ProtectedRoute.jsx
             │   ├── Register.jsx
             │   └── Learning/
             │       ├── AtomComplete.jsx
             │       ├── AtomList.jsx
             │       ├── AtomReview.jsx
+            │       ├── ExternalResources.jsx
+            │       ├── FatigueIndicator.jsx
             │       ├── LearningProgress.jsx
             │       ├── LearningRoute.jsx
+            │       ├── LearningVelocityGraph.jsx
             │       ├── QuestionsFromTeaching.jsx
             │       ├── StartAnyConceptSession.jsx
             │       ├── StartAnyConceptSessionRoute.jsx
             │       ├── TeachingFirstFlow.jsx
-            │       └── TeachingModule.jsx
-            └── context/
-                ├── AuthContext.jsx
-                └── LearningContext.jsx
+            │       ├── TeachingModule.jsx
+            │       └── WeakTopicDetector.jsx
+            ├── context/
+            │   ├── AuthContext.jsx
+            │   ├── LearningContext.jsx
+            │   └── ThemeContext.jsx
+            └── pages/
+                └── AIAssistantPage.jsx
 
 ================================================
 FILE: tempCodeRunnerFile.python
@@ -247,11 +261,16 @@ if __name__ == '__main__':
 
 
 ================================================
-FILE: backend/req
+FILE: backend/req.txt
 ================================================
 pip install django djangorestframework
 pip install djangorestframework-simplejwt
 pip install django-cors-headers
+pip install youtube-search-python
+pip install serpapi
+pip install google.generativeai
+pip install youtube-search
+pip install dotenv groq numpy
 
 
 
@@ -382,7 +401,7 @@ class Question(models.Model):
         }
 
 class StudentProgress(models.Model):
-    """Track student progress on atoms"""
+    """Track student progress on atoms â€” enriched for 10-feature pacing engine."""
     user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='progress')
     atom = models.ForeignKey(TeachingAtom, on_delete=models.CASCADE)
     mastery_score = models.FloatField(default=0.3)
@@ -393,7 +412,19 @@ class StudentProgress(models.Model):
     retention_verified = models.BooleanField(default=False)
     last_practiced = models.DateTimeField(auto_now=True)
     times_practiced = models.IntegerField(default=0)
-    
+
+    # â”€â”€ Feature 2: per-atom learning speed â”€â”€
+    time_per_question = models.JSONField(default=list, blank=True)  # list of floats (seconds)
+
+    # â”€â”€ Feature 6: retention tracking â”€â”€
+    retention_score = models.FloatField(default=1.0)
+    retention_checks_passed = models.IntegerField(default=0)
+    retention_checks_failed = models.IntegerField(default=0)
+    next_review_at = models.DateTimeField(null=True, blank=True)
+
+    # â”€â”€ Feature 10: velocity snapshots â”€â”€
+    velocity_snapshots = models.JSONField(default=list, blank=True)
+
     class Meta:
         unique_together = ['user', 'atom']
 
@@ -407,7 +438,7 @@ class KnowledgeLevel(models.TextChoices):
 
 
 class LearningSession(models.Model):
-    """Track learning sessions"""
+    """Track learning sessions â€” enriched for 10-feature pacing engine."""
     user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='learning_sessions')
     concept = models.ForeignKey(Concept, on_delete=models.CASCADE)
     start_time = models.DateTimeField(auto_now_add=True)
@@ -421,11 +452,47 @@ class LearningSession(models.Model):
         choices=KnowledgeLevel.choices,
         default=KnowledgeLevel.ZERO
     )
-    user_feedback = models.JSONField(default=dict)  
-    
+    user_feedback = models.JSONField(default=dict)
+
+    # â”€â”€ Feature 8: fatigue tracking â”€â”€
+    fatigue_level = models.CharField(max_length=20, default='fresh')   # fresh|mild|moderate|high|critical
+    break_count = models.IntegerField(default=0)
+    last_break_at = models.DateTimeField(null=True, blank=True)
+
+    # â”€â”€ Feature 9: engagement â”€â”€
+    engagement_score = models.FloatField(default=0.7)
+    consecutive_skips = models.IntegerField(default=0)
+
+    # â”€â”€ Feature 10: session-level velocity snapshots â”€â”€
+    velocity_data = models.JSONField(default=list, blank=True)  
 
 
+class UserXP(models.Model):
+    """Track XP points for leaderboard"""
+    user = models.OneToOneField(User, on_delete=models.CASCADE, related_name='xp_profile')
+    total_xp = models.IntegerField(default=0)
+    questions_xp = models.IntegerField(default=0)
+    atoms_xp = models.IntegerField(default=0)
+    concepts_xp = models.IntegerField(default=0)
+    updated_at = models.DateTimeField(auto_now=True)
 
+    class Meta:
+        db_table = 'user_xp'
+        ordering = ['-total_xp']
+
+    def __str__(self):
+        return f"{self.user.username} - {self.total_xp} XP"
+
+    def award_xp(self, amount, category='questions'):
+        """Award XP and update totals"""
+        self.total_xp += amount
+        if category == 'questions':
+            self.questions_xp += amount
+        elif category == 'atoms':
+            self.atoms_xp += amount
+        elif category == 'concepts':
+            self.concepts_xp += amount
+        self.save()
 
 
 
@@ -539,7 +606,7 @@ FILE: backend/accounts/urls.py
 from django.urls import path
 from .views import (
     # Auth views
-    RegisterView, LoginView, DashboardView,
+    AIDoubtAssistantView, GetConceptResourcesView, RegisterView, LoginView, DashboardView,
     
     # Concept management
     ConceptListView, GenerateConceptView,
@@ -549,7 +616,18 @@ from .views import (
     GenerateQuestionsFromTeachingView, SubmitAtomAnswerView,
     CompleteAtomView, GetLearningProgressView,
     GenerateInitialQuizView, SubmitInitialQuizAnswerView, CompleteInitialQuizView,
-    GenerateFinalChallengeView, CompleteFinalChallengeView
+    GenerateFinalChallengeView, CompleteFinalChallengeView,
+
+    # Enhanced pacing engine views
+    GetVelocityGraphView, GetFatigueStatusView, RecordBreakView,
+    RetentionCheckView, RecordHintUsageView,
+
+    # Leaderboard views
+    LeaderboardView, MyXPView,
+
+    # Concept final challenge views
+    GenerateConceptFinalChallengeView, SubmitConceptFinalAnswerView,
+    CompleteConceptFinalChallengeView,
 )
 
 urlpatterns = [
@@ -576,13 +654,32 @@ urlpatterns = [
     
     # Progress
     path('api/progress/', GetLearningProgressView.as_view(), name='learning_progress'),
+    
+    path('api/concept-resources/', GetConceptResourcesView.as_view(), name='concept_resources'),
+
+    # Enhanced pacing engine endpoints
+    path('api/velocity-graph/', GetVelocityGraphView.as_view(), name='velocity_graph'),
+    path('api/fatigue-status/', GetFatigueStatusView.as_view(), name='fatigue_status'),
+    path('api/record-break/', RecordBreakView.as_view(), name='record_break'),
+    path('api/retention-check/', RetentionCheckView.as_view(), name='retention_check'),
+    path('api/record-hint/', RecordHintUsageView.as_view(), name='record_hint'),
+
+    # Leaderboard endpoints
+    path('api/leaderboard/', LeaderboardView.as_view(), name='leaderboard'),
+    path('api/my-xp/', MyXPView.as_view(), name='my_xp'),
+
+    # Concept final challenge endpoints
+    path('api/concept-final-challenge/', GenerateConceptFinalChallengeView.as_view(), name='generate_concept_final_challenge'),
+    path('api/submit-concept-final-answer/', SubmitConceptFinalAnswerView.as_view(), name='submit_concept_final_answer'),
+    path('api/complete-concept-final-challenge/', CompleteConceptFinalChallengeView.as_view(), name='complete_concept_final_challenge'),
+    path("ai-assistant/", AIDoubtAssistantView.as_view(), name="ai_assistant"),
 ]
 
 
 ================================================
 FILE: backend/accounts/views.py
 ================================================
-Error reading file with 'cp1252': 'charmap' codec can't decode byte 0x8f in position 39437: character maps to <undefined>
+Error reading file with 'cp1252': 'charmap' codec can't decode byte 0x8f in position 42578: character maps to <undefined>
 
 
 ================================================
@@ -788,6 +885,123 @@ class Migration(migrations.Migration):
 
 
 ================================================
+FILE: backend/accounts/migrations/0005_learningsession_break_count_and_more.py
+================================================
+# Generated by Django 6.0.2 on 2026-02-19 14:37
+
+from django.db import migrations, models
+
+
+class Migration(migrations.Migration):
+
+    dependencies = [
+        ('accounts', '0004_add_error_history_default'),
+    ]
+
+    operations = [
+        migrations.AddField(
+            model_name='learningsession',
+            name='break_count',
+            field=models.IntegerField(default=0),
+        ),
+        migrations.AddField(
+            model_name='learningsession',
+            name='consecutive_skips',
+            field=models.IntegerField(default=0),
+        ),
+        migrations.AddField(
+            model_name='learningsession',
+            name='engagement_score',
+            field=models.FloatField(default=0.7),
+        ),
+        migrations.AddField(
+            model_name='learningsession',
+            name='fatigue_level',
+            field=models.CharField(default='fresh', max_length=20),
+        ),
+        migrations.AddField(
+            model_name='learningsession',
+            name='last_break_at',
+            field=models.DateTimeField(blank=True, null=True),
+        ),
+        migrations.AddField(
+            model_name='learningsession',
+            name='velocity_data',
+            field=models.JSONField(blank=True, default=list),
+        ),
+        migrations.AddField(
+            model_name='studentprogress',
+            name='next_review_at',
+            field=models.DateTimeField(blank=True, null=True),
+        ),
+        migrations.AddField(
+            model_name='studentprogress',
+            name='retention_checks_failed',
+            field=models.IntegerField(default=0),
+        ),
+        migrations.AddField(
+            model_name='studentprogress',
+            name='retention_checks_passed',
+            field=models.IntegerField(default=0),
+        ),
+        migrations.AddField(
+            model_name='studentprogress',
+            name='retention_score',
+            field=models.FloatField(default=1.0),
+        ),
+        migrations.AddField(
+            model_name='studentprogress',
+            name='time_per_question',
+            field=models.JSONField(blank=True, default=list),
+        ),
+        migrations.AddField(
+            model_name='studentprogress',
+            name='velocity_snapshots',
+            field=models.JSONField(blank=True, default=list),
+        ),
+    ]
+
+
+
+================================================
+FILE: backend/accounts/migrations/0006_userxp.py
+================================================
+# Generated by Django 6.0.2 on 2026-02-19 16:04
+
+import django.db.models.deletion
+from django.conf import settings
+from django.db import migrations, models
+
+
+class Migration(migrations.Migration):
+
+    dependencies = [
+        ('accounts', '0005_learningsession_break_count_and_more'),
+        migrations.swappable_dependency(settings.AUTH_USER_MODEL),
+    ]
+
+    operations = [
+        migrations.CreateModel(
+            name='UserXP',
+            fields=[
+                ('id', models.BigAutoField(auto_created=True, primary_key=True, serialize=False, verbose_name='ID')),
+                ('total_xp', models.IntegerField(default=0)),
+                ('questions_xp', models.IntegerField(default=0)),
+                ('atoms_xp', models.IntegerField(default=0)),
+                ('concepts_xp', models.IntegerField(default=0)),
+                ('updated_at', models.DateTimeField(auto_now=True)),
+                ('user', models.OneToOneField(on_delete=django.db.models.deletion.CASCADE, related_name='xp_profile', to=settings.AUTH_USER_MODEL)),
+            ],
+            options={
+                'db_table': 'user_xp',
+                'ordering': ['-total_xp'],
+            },
+        ),
+    ]
+
+
+
+================================================
 FILE: backend/accounts/migrations/__init__.py
 ================================================
 [Empty file]
@@ -833,6 +1047,10 @@ FILE: backend/core/settings.py
 import os
 from datetime import timedelta
 from pathlib import Path
+
+from dotenv import load_dotenv
+
+load_dotenv()
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -1014,7 +1232,8 @@ LEARNING_ENGINE = {
 }
 
 # API Keys (set these in environment variables)
-GOOGLE_API_KEY = os.environ.get('GOOGLE_API_KEY', '')
+GOOGLE_API_KEY = os.environ.get('GOOGLE_API_KEY',  '')
+GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")
 GROQ_API_KEY = os.environ.get('GROQ_API_KEY', '')
 
 
@@ -1129,7 +1348,7 @@ __all__ = [
 ================================================
 FILE: backend/learning_engine/adaptive_flow.py
 ================================================
-# backend/learning_engine/adaptive_flow.py - Enhanced with pacing engine
+# backend/learning_engine/adaptive_flow.py - Enhanced with robust 10-feature pacing engine
 
 import json
 import random
@@ -1138,7 +1357,10 @@ from django.conf import settings
 from groq import Groq
 from .models import TeachingAtomState, LearningPhase
 from .knowledge_tracing import calculate_updated_mastery, classify_error_type
-from .pacing_engine import PacingEngine, PacingContext, PacingDecision, NextAction
+from .pacing_engine import (
+    PacingEngine, PacingContext, PacingDecision, NextAction,
+    PacingResult, FatigueLevel,
+)
 
 class AdaptiveLearningEngine:
     """Enhanced adaptive learning engine with real-time mastery and strict pacing"""
@@ -1171,11 +1393,91 @@ class AdaptiveLearningEngine:
             theta=theta,
             questions_answered=questions_answered,
             knowledge_level=knowledge_level,
-            phase=diagnostic_results.get('phase', 'practice')
+            phase=diagnostic_results.get('phase', 'practice'),
+            # Enriched signals from diagnostic_results
+            avg_response_time=float(diagnostic_results.get('avg_response_time', 0)),
+            expected_response_time=float(diagnostic_results.get('expected_response_time', 60)),
+            time_per_question_history=diagnostic_results.get('time_per_question_history', []),
+            hint_usage_count=int(diagnostic_results.get('hint_usage_count', 0)),
+            session_duration_minutes=float(diagnostic_results.get('session_duration_minutes', 0)),
+            total_questions_session=int(diagnostic_results.get('total_questions_session', 0)),
+            recent_accuracy_trend=diagnostic_results.get('recent_accuracy_trend', []),
+            recent_response_times=diagnostic_results.get('recent_response_times', []),
+            last_practiced_minutes_ago=float(diagnostic_results.get('last_practiced_minutes_ago', 0)),
+            retention_score=float(diagnostic_results.get('retention_score', 1.0)),
+            retention_checks_passed=int(diagnostic_results.get('retention_checks_passed', 0)),
+            engagement_score=float(diagnostic_results.get('engagement_score', 0.7)),
+            diagnostic_accuracy=diagnostic_results.get('diagnostic_accuracy'),
         )
 
-        pacing_decision, _next_action, _reasoning = self.pacing_engine.decide_pacing(context)
-        return pacing_decision.value if hasattr(pacing_decision, 'value') else pacing_decision
+        result: PacingResult = self.pacing_engine.decide_pacing(context)
+        return result.decision.value if hasattr(result.decision, 'value') else result.decision
+
+    def determine_pacing_full(self, diagnostic_results: Dict, knowledge_level: str, session=None) -> Dict[str, Any]:
+        """
+        Full pacing decision with all 10-feature signals.
+        Returns a rich dict with decision, fatigue, retention, hints, velocity, etc.
+        Optionally accepts a session object to enrich context with session-level data.
+        """
+        accuracy = float(diagnostic_results.get('accuracy', 0))
+        mastery = float(diagnostic_results.get('mastery', 0))
+        streak = int(diagnostic_results.get('streak', 0))
+        error_types = diagnostic_results.get('error_types', []) or []
+        theta = float(diagnostic_results.get('theta', 0.0))
+        questions_answered = int(diagnostic_results.get('questions_answered', 0))
+
+        context = PacingContext(
+            accuracy=accuracy,
+            mastery_score=mastery,
+            streak=streak,
+            error_types=error_types,
+            theta=theta,
+            questions_answered=questions_answered,
+            knowledge_level=knowledge_level,
+            phase=diagnostic_results.get('phase', 'practice'),
+            avg_response_time=float(diagnostic_results.get('avg_response_time', 0)),
+            expected_response_time=float(diagnostic_results.get('expected_response_time', 60)),
+            time_per_question_history=diagnostic_results.get('time_per_question_history', []),
+            hint_usage_count=int(diagnostic_results.get('hint_usage_count', 0)),
+            session_duration_minutes=float(diagnostic_results.get('session_duration_minutes', 0)),
+            total_questions_session=int(diagnostic_results.get('total_questions_session', 0)),
+            recent_accuracy_trend=diagnostic_results.get('recent_accuracy_trend', []),
+            recent_response_times=diagnostic_results.get('recent_response_times', []),
+            last_practiced_minutes_ago=float(diagnostic_results.get('last_practiced_minutes_ago', 0)),
+            retention_score=float(diagnostic_results.get('retention_score', 1.0)),
+            retention_checks_passed=int(diagnostic_results.get('retention_checks_passed', 0)),
+            retention_checks_failed=int(diagnostic_results.get('retention_checks_failed', 0)),
+            engagement_score=float(diagnostic_results.get('engagement_score', 0.7)),
+            consecutive_skips=int(diagnostic_results.get('consecutive_skips', 0)),
+            drop_off_risk=float(diagnostic_results.get('drop_off_risk', 0)),
+            diagnostic_accuracy=diagnostic_results.get('diagnostic_accuracy'),
+        )
+
+        # Enrich context from session object if available
+        if session is not None:
+            from django.utils import timezone as tz
+            elapsed = (tz.now() - session.start_time).total_seconds() / 60.0
+            context.session_duration_minutes = max(context.session_duration_minutes, elapsed)
+            context.consecutive_skips = getattr(session, 'consecutive_skips', 0)
+            perf = (session.session_data or {}).get('performance_history', [])
+            if perf and not context.time_per_question_history:
+                context.time_per_question_history = [p.get('time_taken', 30) for p in perf]
+
+        result: PacingResult = self.pacing_engine.decide_pacing(context)
+
+        return {
+            'pacing': result.decision.value,
+            'decision': result.decision.value,
+            'next_action': result.next_action.value,
+            'fatigue': result.fatigue.value,
+            'recommended_difficulty': result.recommended_difficulty,
+            'mastery_verdict': result.mastery_verdict,
+            'retention_action': result.retention_action,
+            'hint_warning': result.hint_warning,
+            'velocity_snapshot': result.velocity_snapshot,
+            'engagement_adjustment': result.engagement_adjustment,
+            'reasoning': result.reasoning,
+        }
     
     def process_answer(self, 
                       atom_state: TeachingAtomState,
@@ -1239,7 +1541,23 @@ class AdaptiveLearningEngine:
         # Get recent error types
         recent_errors = [e for e in atom_state.error_history[-5:] if e]
         
-        # Create pacing context
+        # Collect time-per-question history from questions_history
+        time_history = [q.get('time_taken', 30) for q in questions_history if 'time_taken' in q]
+        time_history.append(time_taken)
+
+        # Compute accuracy trend (rolling window of recent correctness)
+        accuracy_trend = []
+        for q in questions_history[-10:]:
+            accuracy_trend.append(1.0 if q.get('correct', False) else 0.0)
+        accuracy_trend.append(1.0 if correct else 0.0)
+
+        # Hint usage count from atom state
+        hint_count = atom_state.hint_usage
+
+        # Expected response time from question
+        expected_time = question.get('estimated_time', 60)
+
+        # Create enriched pacing context with all 10 features
         pacing_context = PacingContext(
             accuracy=recent_accuracy,
             mastery_score=new_mastery,
@@ -1248,11 +1566,27 @@ class AdaptiveLearningEngine:
             theta=new_theta,
             questions_answered=len(questions_history) + 1,
             knowledge_level=knowledge_level,
-            phase=atom_state.phase.value if hasattr(atom_state.phase, 'value') else atom_state.phase
+            phase=atom_state.phase.value if hasattr(atom_state.phase, 'value') else atom_state.phase,
+            # Feature 2: learning speed
+            avg_response_time=time_taken,
+            expected_response_time=float(expected_time),
+            time_per_question_history=time_history,
+            # Feature 7: hint depth
+            hint_usage_count=hint_count,
+            # Feature 8: fatigue (session-level, passed from caller if available)
+            recent_accuracy_trend=accuracy_trend,
+            recent_response_times=time_history[-10:],
+            # Feature 6: retention
+            retention_score=getattr(atom_state, 'retention_score', 1.0),
+            retention_checks_passed=getattr(atom_state, 'retention_checks_passed', 0),
+            last_practiced_minutes_ago=getattr(atom_state, 'last_practiced_minutes_ago', 0),
         )
-        
-        # Get pacing decision
-        pacing_decision, next_action, reasoning = self.pacing_engine.decide_pacing(pacing_context)
+
+        # Get full pacing result (10-feature)
+        pacing_result: PacingResult = self.pacing_engine.decide_pacing(pacing_context)
+        pacing_decision = pacing_result.decision
+        next_action = pacing_result.next_action
+        reasoning = pacing_result.reasoning
         
         # Determine next difficulty based on ability and pacing
         next_difficulty = self.pacing_engine.get_next_difficulty(
@@ -1262,7 +1596,18 @@ class AdaptiveLearningEngine:
         # Check if atom is complete
         atom_complete = self._check_atom_complete(atom_state, pacing_context)
         
-        # Prepare result
+        # Store velocity snapshot on atom state
+        if hasattr(atom_state, 'velocity_snapshots'):
+            atom_state.velocity_snapshots.append(pacing_result.velocity_snapshot)
+
+        # Store time_taken on atom state for per-atom speed tracking
+        if hasattr(atom_state, 'time_per_question'):
+            atom_state.time_per_question.append(time_taken)
+
+        # Fatigue recommendation
+        fatigue_rec = self.pacing_engine.get_fatigue_recommendation(pacing_result.fatigue)
+
+        # Prepare result with all 10 feature outputs
         result = {
             'correct': correct,
             'error_type': error_type,
@@ -1274,9 +1619,26 @@ class AdaptiveLearningEngine:
             'next_difficulty': next_difficulty,
             'reasoning': reasoning,
             'atom_complete': atom_complete,
-            'streak': atom_state.streak
+            'streak': atom_state.streak,
+            # â”€â”€ Feature 5: mastery verdict â”€â”€
+            'mastery_verdict': pacing_result.mastery_verdict,
+            # â”€â”€ Feature 6: retention â”€â”€
+            'retention_action': pacing_result.retention_action,
+            # â”€â”€ Feature 7: hint warning â”€â”€
+            'hint_warning': pacing_result.hint_warning,
+            # â”€â”€ Feature 8: fatigue â”€â”€
+            'fatigue': {
+                'level': pacing_result.fatigue.value,
+                'message': fatigue_rec.get('message', ''),
+                'break_suggested': fatigue_rec.get('break_suggested', False),
+                'lighter_mode': fatigue_rec.get('lighter_mode', False),
+            },
+            # â”€â”€ Feature 9: engagement â”€â”€
+            'engagement_adjustment': pacing_result.engagement_adjustment,
+            # â”€â”€ Feature 10: velocity snapshot â”€â”€
+            'velocity_snapshot': pacing_result.velocity_snapshot,
         }
-        
+
         # Add specific recommendations
         if next_action == NextAction.RETEACH:
             result['recommendation'] = 'review_teaching'
@@ -1284,45 +1646,31 @@ class AdaptiveLearningEngine:
         elif next_action == NextAction.ADVANCE_NEXT_ATOM:
             result['recommendation'] = 'advance'
             result['message'] = "Great job! Ready for the next concept."
+        elif next_action == NextAction.TAKE_BREAK:
+            result['recommendation'] = 'take_break'
+            result['message'] = fatigue_rec.get('message', "Time for a short break!")
+        elif next_action == NextAction.LIGHTER_TASK:
+            result['recommendation'] = 'lighter_task'
+            result['message'] = "Switching to lighter tasks to keep you going."
+        elif next_action == NextAction.INSERT_REVIEW:
+            result['recommendation'] = 'review_old_content'
+            result['message'] = "Let's quickly review some earlier content to keep it fresh."
         elif pacing_decision == PacingDecision.SHARP_SLOWDOWN:
             result['recommendation'] = 'easier_questions'
             result['message'] = "Let's try some easier questions to build confidence."
         elif pacing_decision == PacingDecision.SPEED_UP:
             result['recommendation'] = 'challenge'
             result['message'] = "You're doing great! Ready for a challenge?"
-        
+
         return result
     
     def _check_atom_complete(self, atom_state: TeachingAtomState, 
                             context: PacingContext) -> bool:
         """
-        Check if atom should be marked complete based on mastery, not question count
+        Check if atom should be marked complete using the engine's should_exit_atom.
         """
-        # Mastery threshold (can be adjusted)
-        MASTERY_THRESHOLD = 0.7
-
-        # Need at least one response to evaluate
-        if context.questions_answered < 1:
-            return False
-        
-        # Check mastery
-        if atom_state.mastery_score < MASTERY_THRESHOLD:
-            return False
-        
-        # Check recent performance
-        if context.accuracy < 0.75:
-            return False
-        
-        # Check streak
-        if context.streak < 2:
-            return False
-        
-        # Check for conceptual errors
-        if any(e in ['conceptual', 'structural'] for e in context.error_types[-3:] if context.error_types):
-            return False
-        
-        # All conditions met
-        return True
+        should_exit, reason = self.pacing_engine.should_exit_atom(context)
+        return should_exit
     
     def select_next_questions(self, 
                              atom_state: TeachingAtomState,
@@ -1507,6 +1855,259 @@ class AdaptiveLearningEngine:
                 "misconception": f"Beginners often think {atom_name} is harder than it really is.",
                 "practical_application": f"Understanding {atom_name} opens the door to mastering {concept}."
             }
+
+
+================================================
+FILE: backend/learning_engine/ai_assistant.py
+================================================
+# learning_engine/ai_assistant.py
+
+import google.generativeai as genai
+from django.conf import settings
+
+
+# Configure Gemini
+genai.configure(api_key=settings.GOOGLE_API_KEY)
+
+model = genai.GenerativeModel("gemini-3-flash-preview")
+
+
+def generate_ai_response(question, topic, level, accuracy=None):
+    """
+    Core Learning Engine Logic
+    """
+
+    # Adaptive Level Based on Accuracy (Optional)
+    if accuracy is not None:
+        if accuracy < 50:
+            level = "Beginner"
+        elif accuracy < 80:
+            level = "Intermediate"
+        else:
+            level = "Advanced"
+
+    difficulty_instruction = {
+        "Beginner": "Explain in very simple language using real-life analogy.",
+        "Intermediate": "Explain clearly with one technical example.",
+        "Advanced": "Explain deeply with edge cases and complexity."
+    }
+
+    prompt = f"""
+    You are an adaptive AI tutor.
+
+    Student Level: {level}
+    Topic: {topic}
+
+    {difficulty_instruction.get(level)}
+
+    Question: {question}
+
+    Only answer if the question is related to academic syllabus.
+    Keep answer under 200 words.
+    """
+
+    response = model.generate_content(prompt)
+
+    return response.text
+
+
+================================================
+FILE: backend/learning_engine/external_resources.py
+================================================
+# backend/learning_engine/external_resources.py
+
+import os
+import requests
+from youtube_search import YoutubeSearch
+from serpapi import Client  # Changed import
+from django.conf import settings
+import logging
+import json
+
+logger = logging.getLogger(__name__)
+
+class ExternalResourceFetcher:
+    """Fetch external learning resources (images, videos) for concepts"""
+    
+    def __init__(self):
+        self.serpapi_key = getattr(settings, 'SERPAPI_KEY', os.getenv('SERPAPI_KEY', ''))
+        self.download_folder = os.path.join(settings.BASE_DIR, 'media', 'concept_images')
+        os.makedirs(self.download_folder, exist_ok=True)
+    
+    def get_youtube_videos(self, topic, max_results=3):
+        """
+        Search YouTube for videos related to the given topic
+        """
+        try:
+            # Enhance the search query for better educational content
+            search_query = f"{topic} tutorial explanation"
+            
+            # Try-except for youtube-search which might have issues
+            try:
+                results = YoutubeSearch(search_query, max_results=max_results).to_dict()
+            except Exception as e:
+                logger.error(f"YouTube search failed: {e}")
+                # Fallback: return empty list
+                return []
+            
+            videos = []
+            for result in results:
+                video = {
+                    'title': result.get('title', ''),
+                    'url': f"https://youtube.com{result.get('url_suffix', '')}",
+                    'channel': result.get('channel', ''),
+                    'duration': result.get('duration', ''),
+                    'thumbnail': result.get('thumbnails', [''])[0] if result.get('thumbnails') else '',
+                    'views': result.get('views', '')
+                }
+                videos.append(video)
+            return videos
+        except Exception as e:
+            logger.error(f"Error in get_youtube_videos: {e}")
+            return []
+    
+    def get_images(self, query, max_images=3):
+        """
+        Fetch relevant images/diagrams for a concept using SerpAPI
+        """
+        if not self.serpapi_key:
+            logger.warning("SERPAPI_KEY not set, skipping image fetch")
+            return self.get_fallback_images(query, max_images)
+        
+        try:
+            # Priority sites for educational content
+            priority_sites = [
+                "geeksforgeeks.org",
+                "medium.com",
+                "tutorialspoint.com",
+                "javatpoint.com",
+                "programiz.com",
+                "w3schools.com"
+            ]
+            
+            image_urls = []
+            
+            # First try to get images from priority sites
+            for site in priority_sites[:max_images]:
+                if len(image_urls) >= max_images:
+                    break
+                
+                try:
+                    # Using the Client approach for serpapi
+                    client = Client(api_key=self.serpapi_key)
+                    
+                    full_query = f"{query} diagram OR illustration site:{site}"
+                    
+                    # Create params for image search
+                    params = {
+                        "engine": "google_images",
+                        "q": full_query,
+                        "num": 1,
+                        "ijn": 0,
+                        "api_key": self.serpapi_key
+                    }
+                    
+                    # Make the request
+                    result = client.search(params)
+                    
+                    if hasattr(result, 'get') and result.get('images_results'):
+                        images = result['images_results']
+                        if images and len(images) > 0:
+                            image_urls.append({
+                                'url': images[0].get('original', ''),
+                                'title': images[0].get('title', ''),
+                                'source': site,
+                                'thumbnail': images[0].get('thumbnail', '')
+                            })
+                            logger.info(f"Found image from {site}")
+                except Exception as e:
+                    logger.error(f"Error fetching image from {site}: {e}")
+                    continue
+            
+            # If we still need more images, do a general search
+            if len(image_urls) < max_images:
+                try:
+                    client = Client(api_key=self.serpapi_key)
+                    params = {
+                        "engine": "google_images",
+                        "q": f"{query} educational diagram",
+                        "num": max_images - len(image_urls),
+                        "ijn": 0,
+                        "api_key": self.serpapi_key
+                    }
+                    
+                    result = client.search(params)
+                    
+                    if hasattr(result, 'get') and result.get('images_results'):
+                        images = result['images_results']
+                        for img in images:
+                            if len(image_urls) >= max_images:
+                                break
+                            image_urls.append({
+                                'url': img.get('original', ''),
+                                'title': img.get('title', ''),
+                                'source': img.get('source', ''),
+                                'thumbnail': img.get('thumbnail', '')
+                            })
+                except Exception as e:
+                    logger.error(f"Error in general image search: {e}")
+            
+            return image_urls
+            
+        except Exception as e:
+            logger.error(f"Error in get_images: {e}")
+            return self.get_fallback_images(query, max_images)
+    
+    def get_fallback_images(self, query, max_images=3):
+        """Provide fallback placeholder images when API fails"""
+        fallback_images = []
+        for i in range(min(max_images, 3)):
+            fallback_images.append({
+                'url': f'https://via.placeholder.com/600x400?text={query.replace(" ", "+")}+Diagram+{i+1}',
+                'title': f'{query} - Diagram {i+1}',
+                'source': 'placeholder',
+                'thumbnail': f'https://via.placeholder.com/300x200?text={query.replace(" ", "+")}+{i+1}'
+            })
+        return fallback_images
+    
+    def get_resources_for_concept(self, subject, concept, atom_name=None):
+        """
+        Get both videos and images for a concept
+        """
+        # Create search queries
+        if atom_name:
+            main_query = f"{subject} {concept} {atom_name}"
+            specific_query = f"{atom_name} in {concept}"
+        else:
+            main_query = f"{subject} {concept}"
+            specific_query = concept
+        
+        # Fetch resources with error handling
+        videos = []
+        images = []
+        
+        try:
+            videos = self.get_youtube_videos(main_query, max_results=2)
+        except Exception as e:
+            logger.error(f"Error fetching videos: {e}")
+        
+        try:
+            images = self.get_images(main_query, max_images=3)
+        except Exception as e:
+            logger.error(f"Error fetching images: {e}")
+        
+        # If no results, try more specific query
+        if not videos and not images:
+            try:
+                videos = self.get_youtube_videos(specific_query, max_results=2)
+                images = self.get_images(specific_query, max_images=3)
+            except Exception as e:
+                logger.error(f"Error in fallback search: {e}")
+        
+        return {
+            'videos': videos,
+            'images': images
+        }
 
 
 ================================================
@@ -1976,9 +2577,10 @@ def calculate_performance_quality(correct: bool, time_ratio: float, error_type: 
 ================================================
 FILE: backend/learning_engine/models.py
 ================================================
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import List, Dict, Optional
 from enum import Enum
+
 
 class LearningPhase(str, Enum):
     DIAGNOSTIC = "diagnostic"
@@ -1988,6 +2590,7 @@ class LearningPhase(str, Enum):
     MASTERY_CHECK = "mastery_check"
     COMPLETE = "complete"
 
+
 class ErrorType(str, Enum):
     CONCEPTUAL = "conceptual"
     PROCEDURAL = "procedural"
@@ -1995,6 +2598,7 @@ class ErrorType(str, Enum):
     GUESSING = "guessing"
     STRUCTURAL = "structural"
     ATTENTIONAL = "attentional"
+
 
 class PacingDecision(str, Enum):
     SPEED_UP = "speed_up"
@@ -2005,9 +2609,10 @@ class PacingDecision(str, Enum):
     ADVANCE = "advance"
     RETREAT = "retreat"
 
+
 @dataclass
 class TeachingAtomState:
-    """Represents a teaching atom's state in memory"""
+    """Represents a teaching atom's state in memory â€” enriched for the 10-feature pacing engine."""
     id: int
     name: str
     mastery_score: float = 0.3
@@ -2016,11 +2621,27 @@ class TeachingAtomState:
     hint_usage: int = 0
     error_history: List[str] = None
     retention_verified: bool = False
-    
+
+    # â”€â”€ Per-atom learning speed (feature 2) â”€â”€
+    time_per_question: List[float] = None
+
+    # â”€â”€ Retention tracking (feature 6) â”€â”€
+    retention_score: float = 1.0
+    retention_checks_passed: int = 0
+    retention_checks_failed: int = 0
+    last_practiced_minutes_ago: float = 0.0
+
+    # â”€â”€ Velocity snapshots (feature 10) â”€â”€
+    velocity_snapshots: List[Dict] = None
+
     def __post_init__(self):
         if self.error_history is None:
             self.error_history = []
-    
+        if self.time_per_question is None:
+            self.time_per_question = []
+        if self.velocity_snapshots is None:
+            self.velocity_snapshots = []
+
     def to_dict(self):
         return {
             'id': self.id,
@@ -2030,281 +2651,19 @@ class TeachingAtomState:
             'streak': self.streak,
             'hint_usage': self.hint_usage,
             'retention_verified': self.retention_verified,
-            'error_history': self.error_history[-5:]
+            'error_history': self.error_history[-5:],
+            'retention_score': self.retention_score,
+            'retention_checks_passed': self.retention_checks_passed,
+            'time_per_question': self.time_per_question[-10:],
+            'velocity_snapshots': self.velocity_snapshots[-20:],
         }
+
 
 
 ================================================
 FILE: backend/learning_engine/pacing_engine.py
 ================================================
-# backend/learning_engine/pacing_engine.py - NEW FILE
-
-from typing import Dict, List, Optional, Tuple
-from enum import Enum
-from dataclasses import dataclass
-
-
-class PacingDecision(str, Enum):
-    SPEED_UP = "speed_up"
-    STAY = "stay"
-    SLOW_DOWN = "slow_down"
-    SHARP_SLOWDOWN = "sharp_slowdown"
-
-
-class NextAction(str, Enum):
-    CONTINUE_PRACTICE = "continue_practice"
-    RETEACH = "reteach"
-    ADVANCE_NEXT_ATOM = "advance_next_atom"
-    MASTERY_CHECK = "mastery_check"
-    COMPLETE_ATOM = "complete_atom"
-
-
-@dataclass
-class PacingContext:
-    """Context for pacing decisions"""
-    accuracy: float  # Recent accuracy (0-1)
-    mastery_score: float  # Current mastery (0-1)
-    streak: int  # Current correct streak
-    error_types: List[str]  # Recent error types
-    theta: float  # Ability parameter
-    questions_answered: int  # Total questions in this atom
-    knowledge_level: str  # Initial self-reported level
-    phase: str  # Current learning phase
-
-
-class PacingEngine:
-    """
-    Strict pacing decision engine with formal rules
-    """
-    
-    def __init__(self):
-        # Thresholds by knowledge level
-        self.accuracy_thresholds = {
-            'zero': {'speed_up': 0.8, 'stay': 0.6, 'slow_down': 0.4, 'sharp_slowdown': 0.25},
-            'beginner': {'speed_up': 0.8, 'stay': 0.6, 'slow_down': 0.45, 'sharp_slowdown': 0.3},
-            'intermediate': {'speed_up': 0.85, 'stay': 0.7, 'slow_down': 0.55, 'sharp_slowdown': 0.4},
-            'advanced': {'speed_up': 0.9, 'stay': 0.8, 'slow_down': 0.65, 'sharp_slowdown': 0.5}
-        }
-        
-        self.mastery_thresholds = {
-            'zero': {'speed_up': 0.7, 'stay': 0.5, 'slow_down': 0.35, 'sharp_slowdown': 0.2},
-            'beginner': {'speed_up': 0.75, 'stay': 0.55, 'slow_down': 0.4, 'sharp_slowdown': 0.25},
-            'intermediate': {'speed_up': 0.8, 'stay': 0.6, 'slow_down': 0.45, 'sharp_slowdown': 0.3},
-            'advanced': {'speed_up': 0.85, 'stay': 0.7, 'slow_down': 0.55, 'sharp_slowdown': 0.4}
-        }
-        
-        # Error type weights for pacing
-        self.error_weights = {
-            'guessing': 1.2,      # Makes slowdown more likely
-            'attentional': 0.8,    # Less impact
-            'factual': 1.0,
-            'procedural': 1.3,
-            'conceptual': 1.8,     # Strongest impact
-            'structural': 1.5
-        }
-    
-    def decide_pacing(self, context: PacingContext) -> Tuple[PacingDecision, NextAction, Dict]:
-        """
-        Make strict pacing decision based on formal rules
-        
-        Returns:
-            Tuple of (pacing_decision, next_action, reasoning)
-        """
-        # Extract context
-        level = context.knowledge_level
-        accuracy = context.accuracy
-        mastery = context.mastery_score
-        streak = context.streak
-        error_types = context.error_types
-        phase = context.phase
-        q_count = context.questions_answered
-        
-        # Get thresholds for this knowledge level
-        acc_thresh = self.accuracy_thresholds.get(level, self.accuracy_thresholds['intermediate'])
-        mas_thresh = self.mastery_thresholds.get(level, self.mastery_thresholds['intermediate'])
-        
-        # Initialize reasoning
-        reasoning = {
-            'accuracy': accuracy,
-            'mastery': mastery,
-            'streak': streak,
-            'primary_factors': [],
-            'error_analysis': {}
-        }
-        
-        # Analyze recent errors
-        if error_types:
-            error_counts = {}
-            for err in error_types[-5:]:  # Last 5 errors
-                error_counts[err] = error_counts.get(err, 0) + 1
-            
-            reasoning['error_analysis'] = error_counts
-            
-            # Check for severe error patterns
-            conceptual_errors = error_counts.get('conceptual', 0)
-            structural_errors = error_counts.get('structural', 0)
-            repeated_errors = len(error_types) >= 3 and len(set(error_types[-3:])) <= 2
-        
-        # STEP 1: Check for critical conditions
-        critical_conditions = []
-        
-        # Conceptual errors in last 3 questions
-        if any(e in ['conceptual', 'structural'] for e in error_types[-3:] if error_types):
-            critical_conditions.append('conceptual_error')
-        
-        # Very low accuracy
-        if accuracy < acc_thresh['sharp_slowdown']:
-            critical_conditions.append('very_low_accuracy')
-        
-        # Very low mastery
-        if mastery < mas_thresh['sharp_slowdown']:
-            critical_conditions.append('very_low_mastery')
-        
-        # Negative streak (multiple wrong)
-        if streak < -2:  # 2 or more wrong in a row
-            critical_conditions.append('negative_streak')
-        
-        # If any critical condition, sharp slowdown
-        if critical_conditions:
-            reasoning['primary_factors'] = critical_conditions
-            reasoning['severity'] = 'critical'
-            
-            # Determine next action
-            if phase in ['diagnostic', 'teaching'] and mastery < 0.3:
-                next_action = NextAction.RETEACH
-            elif phase == 'practice':
-                next_action = NextAction.RETEACH
-            else:
-                next_action = NextAction.CONTINUE_PRACTICE
-            
-            return PacingDecision.SHARP_SLOWDOWN, next_action, reasoning
-        
-        # STEP 2: Check moderate conditions
-        moderate_conditions = []
-        
-        if accuracy < acc_thresh['slow_down']:
-            moderate_conditions.append('low_accuracy')
-        
-        if mastery < mas_thresh['slow_down']:
-            moderate_conditions.append('low_mastery')
-        
-        if streak < 0:  # Currently on wrong answer
-            moderate_conditions.append('negative_streak_start')
-        
-        # Procedural errors indicate need for practice
-        if error_types and error_types[-1] in ['procedural', 'factual']:
-            moderate_conditions.append('procedural_error')
-        
-        if moderate_conditions:
-            reasoning['primary_factors'] = moderate_conditions
-            reasoning['severity'] = 'moderate'
-            return PacingDecision.SLOW_DOWN, NextAction.CONTINUE_PRACTICE, reasoning
-        
-        # STEP 3: Check speed-up conditions
-        speed_conditions = []
-        
-        if accuracy >= acc_thresh['speed_up']:
-            speed_conditions.append('high_accuracy')
-        
-        if mastery >= mas_thresh['speed_up']:
-            speed_conditions.append('high_mastery')
-        
-        if streak >= 3:  # Strong streak
-            speed_conditions.append('strong_streak')
-        
-        # For speed-up, need at least 2 conditions
-        if len(speed_conditions) >= 2:
-            reasoning['primary_factors'] = speed_conditions
-            reasoning['severity'] = 'positive'
-            
-            # Check if ready to advance
-            if mastery >= 0.7 and accuracy >= 0.8 and streak >= 2:
-                # Ready to move to next phase or atom
-                if phase == 'diagnostic':
-                    next_action = NextAction.ADVANCE_NEXT_ATOM
-                elif phase == 'teaching':
-                    next_action = NextAction.ADVANCE_NEXT_ATOM
-                elif phase == 'practice' and mastery >= 0.8:
-                    next_action = NextAction.MASTERY_CHECK
-                else:
-                    next_action = NextAction.CONTINUE_PRACTICE
-            else:
-                next_action = NextAction.CONTINUE_PRACTICE
-            
-            return PacingDecision.SPEED_UP, next_action, reasoning
-        
-        # STEP 4: Default - stay
-        reasoning['primary_factors'] = ['normal_performance']
-        reasoning['severity'] = 'normal'
-        return PacingDecision.STAY, NextAction.CONTINUE_PRACTICE, reasoning
-    
-    def get_next_difficulty(self, theta: float, current_pacing: PacingDecision, 
-                           knowledge_level: str) -> str:
-        """
-        Select next difficulty based on ability and pacing
-        """
-        # Map theta to base difficulty
-        if theta < -0.5:
-            base_difficulty = 'easy'
-        elif theta < 0.5:
-            base_difficulty = 'medium'
-        else:
-            base_difficulty = 'hard'
-        
-        # Adjust based on pacing
-        pacing_adjustments = {
-            PacingDecision.SPEED_UP: {'easy': 'medium', 'medium': 'hard', 'hard': 'hard'},
-            PacingDecision.STAY: {'easy': 'easy', 'medium': 'medium', 'hard': 'medium'},
-            PacingDecision.SLOW_DOWN: {'easy': 'easy', 'medium': 'easy', 'hard': 'medium'},
-            PacingDecision.SHARP_SLOWDOWN: {'easy': 'easy', 'medium': 'easy', 'hard': 'easy'}
-        }
-        
-        adjustment = pacing_adjustments.get(current_pacing, {})
-        next_difficulty = adjustment.get(base_difficulty, base_difficulty)
-        
-        # Adjust for knowledge level
-        if knowledge_level == 'zero' and next_difficulty == 'hard':
-            next_difficulty = 'medium'
-        elif knowledge_level == 'advanced' and next_difficulty == 'easy':
-            next_difficulty = 'medium'
-        
-        return next_difficulty
-    
-    def should_reteach(self, context: PacingContext) -> bool:
-        """
-        Determine if reteaching is needed
-        """
-        error_types = context.error_types[-3:] if context.error_types else []
-        
-        # Conditions for reteaching
-        conditions = [
-            # Conceptual errors in last 3 questions
-            any(e in ['conceptual', 'structural'] for e in error_types),
-            # Very low mastery
-            context.mastery_score < 0.3,
-            # Multiple wrong in a row with low mastery
-            context.streak < -2 and context.mastery_score < 0.5,
-            # Low accuracy with conceptual errors
-            context.accuracy < 0.4 and 'conceptual' in error_types
-        ]
-        
-        return any(conditions)
-    
-    def should_advance(self, context: PacingContext) -> bool:
-        """
-        Determine if student should advance to next atom
-        """
-        conditions = [
-            context.mastery_score >= 0.7,
-            context.accuracy >= 0.8,
-            context.streak >= 2,
-            context.questions_answered >= 4,  # Minimum practice
-            # No conceptual errors recently
-            'conceptual' not in (context.error_types[-3:] if context.error_types else [])
-        ]
-        
-        # Need at least 3 conditions including mastery and accuracy
-        return sum(conditions) >= 3 and conditions[0] and conditions[1]
+Error reading file with 'cp1252': 'charmap' codec can't decode byte 0x90 in position 1045: character maps to <undefined>
 
 
 ================================================
@@ -2334,6 +2693,33 @@ class QuestionGenerator:
             self.gemini_model = genai.GenerativeModel('gemini-2.5-flash')
         else:
             self.gemini_model = None
+
+    @staticmethod
+    def _validate_questions(questions: list) -> list:
+        """
+        Validate and sanitise AI-generated questions.
+        - Ensures correct_index is an int within [0, len(options)-1]
+        - Ensures options is a list of exactly 4 strings
+        - Drops any malformed question instead of passing it through
+        """
+        validated = []
+        for q in questions:
+            opts = q.get('options')
+            if not isinstance(opts, list) or len(opts) != 4:
+                continue  # Skip malformed question
+
+            ci = q.get('correct_index')
+            try:
+                ci = int(ci)
+            except (TypeError, ValueError):
+                ci = 0  # Fallback to first option
+
+            if ci < 0 or ci >= len(opts):
+                ci = 0  # Clamp to safe default
+
+            q['correct_index'] = ci
+            validated.append(q)
+        return validated
     
     def generate_atoms(self, subject: str, concept: str) -> List[str]:
         """
@@ -2594,7 +2980,7 @@ class QuestionGenerator:
                 model="llama-3.3-70b-versatile",
                 messages=[{"role": "user", "content": prompt}],
                 temperature=0.3,
-                max_tokens=1024,
+                max_tokens=2048,
             )
             
             raw_text = response.choices[0].message.content
@@ -2605,6 +2991,9 @@ class QuestionGenerator:
             
             result = json.loads(raw_text.strip())
             questions = result.get("questions", [])
+
+            # Validate correct_index and options for every question
+            questions = self._validate_questions(questions)
             
             # Adjust estimated time based on knowledge level
             for q in questions:
@@ -2940,7 +3329,7 @@ class QuestionGenerator:
                 model="llama-3.3-70b-versatile",
                 messages=[{"role": "user", "content": prompt}],
                 temperature=0.3,
-                max_tokens=1024,
+                max_tokens=2048,
             )
             
             raw_text = response.choices[0].message.content
@@ -2951,6 +3340,9 @@ class QuestionGenerator:
             
             result = json.loads(raw_text.strip())
             questions = result.get("questions", [])
+
+            # Validate correct_index and options for every question
+            questions = self._validate_questions(questions)
             
             print(f"Generated {len(questions)} questions from teaching")
             return questions
@@ -3125,7 +3517,10 @@ FILE: frontend/index.html
     <meta charset="UTF-8" />
     <link rel="icon" type="image/svg+xml" href="/vite.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Student Portal</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&display=swap" rel="stylesheet" />
+    <title>AdaptLearn â€” Adaptive Learning System</title>
   </head>
   <body>
     <div id="root"></div>
@@ -3150,6 +3545,7 @@ FILE: frontend/package.json
   },
   "dependencies": {
     "axios": "^1.13.5",
+    "lucide-react": "^0.575.0",
     "react": "^19.2.0",
     "react-dom": "^19.2.0",
     "react-router-dom": "^7.13.0"
@@ -3196,8 +3592,58 @@ export default {
     "./index.html",
     "./src/**/*.{js,ts,jsx,tsx}",
   ],
+  darkMode: 'class',
   theme: {
-    extend: {},
+    extend: {
+      colors: {
+        primary: {
+          DEFAULT: 'rgb(var(--color-primary) / <alpha-value>)',
+          light: 'rgb(var(--color-primary-light) / <alpha-value>)',
+          dark: 'rgb(var(--color-primary-dark) / <alpha-value>)',
+        },
+        accent: {
+          DEFAULT: 'rgb(var(--color-accent) / <alpha-value>)',
+          light: 'rgb(var(--color-accent-light) / <alpha-value>)',
+        },
+        surface: {
+          DEFAULT: 'rgb(var(--color-surface) / <alpha-value>)',
+          alt: 'rgb(var(--color-surface-alt) / <alpha-value>)',
+        },
+        theme: {
+          bg: 'rgb(var(--color-bg) / <alpha-value>)',
+          text: 'rgb(var(--color-text) / <alpha-value>)',
+          'text-secondary': 'rgb(var(--color-text-secondary) / <alpha-value>)',
+          'text-muted': 'rgb(var(--color-text-muted) / <alpha-value>)',
+          border: 'rgb(var(--color-border) / <alpha-value>)',
+          'border-light': 'rgb(var(--color-border-light) / <alpha-value>)',
+        },
+        success: 'rgb(var(--color-success) / <alpha-value>)',
+        warning: 'rgb(var(--color-warning) / <alpha-value>)',
+        error: 'rgb(var(--color-error) / <alpha-value>)',
+        info: 'rgb(var(--color-info) / <alpha-value>)',
+      },
+      borderRadius: {
+        theme: 'var(--radius)',
+        'theme-lg': 'var(--radius-lg)',
+        'theme-xl': 'var(--radius-xl)',
+      },
+      boxShadow: {
+        'theme-sm': 'var(--shadow-sm)',
+        'theme': 'var(--shadow-md)',
+        'theme-lg': 'var(--shadow-lg)',
+        'theme-xl': 'var(--shadow-xl)',
+      },
+      fontFamily: {
+        sans: ['Inter', 'system-ui', '-apple-system', 'sans-serif'],
+      },
+      animation: {
+        'fade-in-up': 'fadeInUp 0.5s ease-out forwards',
+        'fade-in': 'fadeIn 0.4s ease-out forwards',
+        'slide-in-right': 'slideInRight 0.4s ease-out forwards',
+        'scale-in': 'scaleIn 0.3s ease-out forwards',
+        'float': 'float 3s ease-in-out infinite',
+      },
+    },
   },
   plugins: [],
 }
@@ -3232,58 +3678,17 @@ export default defineConfig({
 ================================================
 FILE: frontend/src/App.css
 ================================================
-#root {
-  max-width: 1280px;
-  margin: 0 auto;
-  padding: 2rem;
-  text-align: center;
-}
-
-.logo {
-  height: 6em;
-  padding: 1.5em;
-  will-change: filter;
-  transition: filter 300ms;
-}
-.logo:hover {
-  filter: drop-shadow(0 0 2em #646cffaa);
-}
-.logo.react:hover {
-  filter: drop-shadow(0 0 2em #61dafbaa);
-}
-
-@keyframes logo-spin {
-  from {
-    transform: rotate(0deg);
-  }
-  to {
-    transform: rotate(360deg);
-  }
-}
-
-@media (prefers-reduced-motion: no-preference) {
-  a:nth-of-type(2) .logo {
-    animation: logo-spin infinite 20s linear;
-  }
-}
-
-.card {
-  padding: 2em;
-}
-
-.read-the-docs {
-  color: #888;
-}
+/* App.css is no longer needed â€” all styles are in index.css + Tailwind */
 
 
 
 ================================================
 FILE: frontend/src/App.jsx
 ================================================
-// In App.jsx - Make sure your route is exactly like this:
 import React from 'react';
 import { BrowserRouter as Router, Routes, Route } from 'react-router-dom';
 import { AuthProvider } from './context/AuthContext';
+import { ThemeProvider } from './context/ThemeContext';
 import Home from './components/Home';
 import Login from './components/Login';
 import Register from './components/Register';
@@ -3291,46 +3696,69 @@ import Dashboard from './components/Dashboard';
 import ProtectedRoute from './components/ProtectedRoute';
 import LearningRoute from './components/Learning/LearningRoute';
 import StartAnyConceptSessionRoute from './components/Learning/StartAnyConceptSessionRoute';
+import Leaderboard from './components/Leaderboard';
+import Progress from './components/Progress';
+import AIAssistantPage from './pages/AIAssistantPage.jsx';
 
 function App() {
     return (
-        <Router>
-            <AuthProvider>
-                <Routes>
-                    <Route path="/" element={<Home />} />
-                    <Route path="/login" element={<Login />} />
-                    <Route path="/register" element={<Register />} />
-                    
-                    <Route
-                        path="/dashboard"
-                        element={
-                            <ProtectedRoute>
-                                <Dashboard />
-                            </ProtectedRoute>
-                        }
-                    />
+        <ThemeProvider>
+            <Router>
+                <AuthProvider>
+                    <Routes>
+                        <Route path="/" element={<Home />} />
+                        <Route path="/login" element={<Login />} />
+                        <Route path="/register" element={<Register />} />
+                        
+                        <Route
+                            path="/dashboard"
+                            element={
+                                <ProtectedRoute>
+                                    <Dashboard />
+                                </ProtectedRoute>
+                            }
+                        />
 
-                    {/* This is the important route - note the :conceptId parameter */}
-                    <Route
-                        path="/learn/:conceptId"
-                        element={
-                            <ProtectedRoute>
-                                <LearningRoute />
-                            </ProtectedRoute>
-                        }
-                    />
+                        <Route
+                            path="/leaderboard"
+                            element={
+                                <ProtectedRoute>
+                                    <Leaderboard />
+                                </ProtectedRoute>
+                            }
+                        />
 
-                    <Route
-                        path="/learn/start"
-                        element={
-                            <ProtectedRoute>
-                                <StartAnyConceptSessionRoute />
-                            </ProtectedRoute>
-                        }
-                    />
-                </Routes>
-            </AuthProvider>
-        </Router>
+                        <Route
+                            path="/progress"
+                            element={
+                                <ProtectedRoute>
+                                    <Progress />
+                                </ProtectedRoute>
+                            }
+                        />
+
+                        <Route
+                            path="/learn/:conceptId"
+                            element={
+                                <ProtectedRoute>
+                                    <LearningRoute />
+                                </ProtectedRoute>
+                            }
+                        />
+
+                        <Route
+                            path="/learn/start"
+                            element={
+                                <ProtectedRoute>
+                                    <StartAnyConceptSessionRoute />
+                                </ProtectedRoute>
+                            }
+                        />
+                    </Routes>
+                         <AIAssistantPage /> 
+                </AuthProvider>
+            </Router>
+        </ThemeProvider>
     );
 }
 
@@ -3409,44 +3837,209 @@ FILE: frontend/src/index.css
 @tailwind components;
 @tailwind utilities;
 
+/* ══════════════════════════════════════════════
+   CSS Custom Properties — Light & Dark Themes
+   ══════════════════════════════════════════════ */
+:root {
+  /* Brand palette */
+  --color-primary: 99 102 241;
+  --color-primary-light: 129 140 248;
+  --color-primary-dark: 79 70 229;
+  --color-accent: 236 72 153;
+  --color-accent-light: 244 114 182;
 
-@keyframes bounce {
-    0%, 100% { transform: translateY(0); }
-    50% { transform: translateY(-10px); }
+  /* Surfaces */
+  --color-bg: 249 250 251;
+  --color-surface: 255 255 255;
+  --color-surface-alt: 243 244 246;
+
+  /* Text */
+  --color-text: 17 24 39;
+  --color-text-secondary: 107 114 128;
+  --color-text-muted: 156 163 175;
+
+  /* Borders */
+  --color-border: 229 231 235;
+  --color-border-light: 243 244 246;
+
+  /* Semantic */
+  --color-success: 34 197 94;
+  --color-warning: 234 179 8;
+  --color-error: 239 68 68;
+  --color-info: 59 130 246;
+
+  /* Shadows */
+  --shadow-sm: 0 1px 2px 0 rgb(0 0 0 / 0.05);
+  --shadow-md: 0 4px 6px -1px rgb(0 0 0 / 0.07), 0 2px 4px -2px rgb(0 0 0 / 0.07);
+  --shadow-lg: 0 10px 15px -3px rgb(0 0 0 / 0.08), 0 4px 6px -4px rgb(0 0 0 / 0.08);
+  --shadow-xl: 0 20px 25px -5px rgb(0 0 0 / 0.1), 0 8px 10px -6px rgb(0 0 0 / 0.1);
+
+  --radius: 0.75rem;
+  --radius-lg: 1rem;
+  --radius-xl: 1.5rem;
 }
 
-.animate-bounce {
-    animation: bounce 1s infinite;
+.dark {
+  --color-primary: 129 140 248;
+  --color-primary-light: 165 180 252;
+  --color-primary-dark: 99 102 241;
+  --color-accent: 244 114 182;
+  --color-accent-light: 251 146 199;
+
+  --color-bg: 15 23 42;
+  --color-surface: 30 41 59;
+  --color-surface-alt: 51 65 85;
+
+  --color-text: 241 245 249;
+  --color-text-secondary: 148 163 184;
+  --color-text-muted: 100 116 139;
+
+  --color-border: 51 65 85;
+  --color-border-light: 30 41 59;
+
+  --color-success: 74 222 128;
+  --color-warning: 250 204 21;
+  --color-error: 248 113 113;
+  --color-info: 96 165 250;
+
+  --shadow-sm: 0 1px 2px 0 rgb(0 0 0 / 0.2);
+  --shadow-md: 0 4px 6px -1px rgb(0 0 0 / 0.3), 0 2px 4px -2px rgb(0 0 0 / 0.25);
+  --shadow-lg: 0 10px 15px -3px rgb(0 0 0 / 0.35), 0 4px 6px -4px rgb(0 0 0 / 0.3);
+  --shadow-xl: 0 20px 25px -5px rgb(0 0 0 / 0.4), 0 8px 10px -6px rgb(0 0 0 / 0.35);
 }
 
-@keyframes pulse {
-    0%, 100% { transform: scale(1); }
-    50% { transform: scale(1.05); }
+/* ══════════════════════════════════════════════
+   Base styles
+   ══════════════════════════════════════════════ */
+body {
+  background-color: rgb(var(--color-bg));
+  color: rgb(var(--color-text));
+  font-family: 'Inter', system-ui, -apple-system, sans-serif;
+  transition: background-color 0.3s ease, color 0.3s ease;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
 }
 
-.animate-pulse-slow {
-    animation: pulse 2s infinite;
+#root {
+  min-height: 100vh;
 }
 
-/* Progress bar animations */
+::-webkit-scrollbar { width: 6px; }
+::-webkit-scrollbar-track { background: rgb(var(--color-bg)); }
+::-webkit-scrollbar-thumb { background: rgb(var(--color-text-muted)); border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: rgb(var(--color-text-secondary)); }
+
+/* ══════════════════════════════════════════════
+   Utility classes
+   ══════════════════════════════════════════════ */
+.glass {
+  background: rgb(var(--color-surface) / 0.7);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid rgb(var(--color-border) / 0.5);
+}
+
+.glass-strong {
+  background: rgb(var(--color-surface) / 0.85);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  border: 1px solid rgb(var(--color-border) / 0.4);
+}
+
+.gradient-primary {
+  background: linear-gradient(135deg, rgb(var(--color-primary)), rgb(var(--color-accent)));
+}
+
+.gradient-surface {
+  background: linear-gradient(180deg, rgb(var(--color-surface)), rgb(var(--color-surface-alt)));
+}
+
+.text-gradient {
+  background: linear-gradient(135deg, rgb(var(--color-primary)), rgb(var(--color-accent)));
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+/* ══════════════════════════════════════════════
+   Animations
+   ══════════════════════════════════════════════ */
+@keyframes float {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-10px); }
+}
+
+@keyframes shimmer {
+  0% { background-position: -200% 0; }
+  100% { background-position: 200% 0; }
+}
+
+@keyframes fadeInUp {
+  from { opacity: 0; transform: translateY(20px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes slideInRight {
+  from { opacity: 0; transform: translateX(20px); }
+  to { opacity: 1; transform: translateX(0); }
+}
+
+@keyframes scaleIn {
+  from { opacity: 0; transform: scale(0.9); }
+  to { opacity: 1; transform: scale(1); }
+}
+
+@keyframes spin { to { transform: rotate(360deg); } }
+
+.animate-float { animation: float 3s ease-in-out infinite; }
+.animate-shimmer {
+  background: linear-gradient(90deg, transparent, rgb(var(--color-primary) / 0.1), transparent);
+  background-size: 200% 100%;
+  animation: shimmer 2s infinite;
+}
+.animate-fade-in-up { animation: fadeInUp 0.5s ease-out forwards; }
+.animate-fade-in { animation: fadeIn 0.4s ease-out forwards; }
+.animate-slide-in-right { animation: slideInRight 0.4s ease-out forwards; }
+.animate-scale-in { animation: scaleIn 0.3s ease-out forwards; }
+
+.stagger > * { opacity: 0; animation: fadeInUp 0.5s ease-out forwards; }
+.stagger > *:nth-child(1) { animation-delay: 0.05s; }
+.stagger > *:nth-child(2) { animation-delay: 0.1s; }
+.stagger > *:nth-child(3) { animation-delay: 0.15s; }
+.stagger > *:nth-child(4) { animation-delay: 0.2s; }
+.stagger > *:nth-child(5) { animation-delay: 0.25s; }
+.stagger > *:nth-child(6) { animation-delay: 0.3s; }
+.stagger > *:nth-child(7) { animation-delay: 0.35s; }
+.stagger > *:nth-child(8) { animation-delay: 0.4s; }
+
 .progress-bar-striped {
-    background-image: linear-gradient(
-        45deg,
-        rgba(255, 255, 255, 0.15) 25%,
-        transparent 25%,
-        transparent 50%,
-        rgba(255, 255, 255, 0.15) 50%,
-        rgba(255, 255, 255, 0.15) 75%,
-        transparent 75%,
-        transparent
-    );
-    background-size: 1rem 1rem;
-    animation: progress-bar-stripes 1s linear infinite;
+  background-image: linear-gradient(
+    45deg,
+    rgba(255, 255, 255, 0.15) 25%,
+    transparent 25%,
+    transparent 50%,
+    rgba(255, 255, 255, 0.15) 50%,
+    rgba(255, 255, 255, 0.15) 75%,
+    transparent 75%,
+    transparent
+  );
+  background-size: 1rem 1rem;
+  animation: progress-bar-stripes 1s linear infinite;
 }
 
 @keyframes progress-bar-stripes {
-    0% { background-position: 1rem 0; }
-    100% { background-position: 0 0; }
+  0% { background-position: 1rem 0; }
+  100% { background-position: 0 0; }
+}
+
+.focus-ring:focus-visible {
+  outline: 2px solid rgb(var(--color-primary));
+  outline-offset: 2px;
 }
 
 
@@ -3468,360 +4061,206 @@ ReactDOM.createRoot(document.getElementById('root')).render(
 ================================================
 FILE: frontend/src/components/Dashboard.jsx
 ================================================
-import React, { useCallback, useEffect, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
-import { useAuth } from '../context/AuthContext';
-import axios from '../axiosConfig';
+Error reading file with 'cp1252': 'charmap' codec can't decode byte 0x8f in position 3178: character maps to <undefined>
 
-const Dashboard = () => {
-    const [concepts, setConcepts] = useState([]);
-    const [loading, setLoading] = useState(true);
-    const [error, setError] = useState('');
-    const [selectedSubject, setSelectedSubject] = useState('');
-    const [subjects, setSubjects] = useState([]);
-    
+
+================================================
+FILE: frontend/src/components/Home.jsx
+================================================
+Error reading file with 'cp1252': 'charmap' codec can't decode byte 0x8f in position 2717: character maps to <undefined>
+
+
+================================================
+FILE: frontend/src/components/Leaderboard.jsx
+================================================
+Error reading file with 'cp1252': 'charmap' codec can't decode byte 0x8f in position 2261: character maps to <undefined>
+
+
+================================================
+FILE: frontend/src/components/Login.jsx
+================================================
+Error reading file with 'cp1252': 'charmap' codec can't decode byte 0x8f in position 4088: character maps to <undefined>
+
+
+================================================
+FILE: frontend/src/components/Navbar.jsx
+================================================
+import React, { useState } from 'react';
+import { Link, useNavigate, useLocation } from 'react-router-dom';
+import { useAuth } from '../context/AuthContext';
+import { useTheme } from '../context/ThemeContext';
+
+const ThemeToggle = () => {
+    const { theme, toggleTheme } = useTheme();
+    return (
+        <button
+            onClick={toggleTheme}
+            className="relative w-14 h-7 rounded-full bg-surface-alt border border-theme-border transition-colors duration-300 focus-ring"
+            aria-label="Toggle theme"
+        >
+            <span
+                className={`absolute top-0.5 left-0.5 w-6 h-6 rounded-full transition-all duration-300 flex items-center justify-center text-sm ${
+                    theme === 'dark'
+                        ? 'translate-x-7 bg-indigo-500 text-white'
+                        : 'translate-x-0 bg-yellow-400 text-yellow-900'
+                }`}
+            >
+                {theme === 'dark' ? '🌙' : '☀️'}
+            </span>
+        </button>
+    );
+};
+
+const Navbar = ({ variant = 'default' }) => {
     const { user, logout } = useAuth();
     const navigate = useNavigate();
-
-    const fetchConcepts = useCallback(async () => {
-        try {
-            const response = await axios.get('/auth/api/concepts/');
-            setConcepts(response.data);
-            
-            // Extract unique subjects
-            const uniqueSubjects = [...new Set(response.data.map(c => c.subject))];
-            setSubjects(uniqueSubjects);
-        } catch (err) {
-            console.error('Failed to fetch concepts:', err);
-            setError('Failed to load concepts');
-            
-            if (err.response?.status === 401) {
-                logout();
-                navigate('/login');
-            }
-        } finally {
-            setLoading(false);
-        }
-    }, [logout, navigate]);
-
-    useEffect(() => {
-        fetchConcepts();
-    }, [fetchConcepts]);
+    const location = useLocation();
+    const [mobileOpen, setMobileOpen] = useState(false);
 
     const handleLogout = () => {
         logout();
         navigate('/login');
     };
 
-    const handleStartLearning = (conceptId) => {
-        navigate(`/learn/${conceptId}`);
-    };
+    const isActive = (path) => location.pathname === path;
 
-    const handleStartAnyConcept = () => {
-        navigate('/learn/start');
-    };
-
-    const handleViewProgress = () => {
-        navigate('/progress');
-    };
-
-    const filteredConcepts = selectedSubject
-        ? concepts.filter(c => c.subject === selectedSubject)
-        : concepts;
-
-    if (loading) {
-        return (
-            <div className="min-h-screen flex items-center justify-center">
-                <div className="text-xl text-gray-600">Loading...</div>
-            </div>
-        );
-    }
+    const navLinks = user
+        ? [
+            { path: '/dashboard', label: 'Dashboard', icon: '🏠' },
+            { path: '/progress', label: 'Progress', icon: '📊' },
+            { path: '/leaderboard', label: 'Leaderboard', icon: '🏆' },
+            { path: '/learn/start', label: 'New Session', icon: '▶️' },
+          ]
+        : [];
 
     return (
-        <div className="min-h-screen bg-gray-100">
-            {/* Navigation */}
-            <nav className="bg-white shadow-lg">
-                <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-                    <div className="flex justify-between h-16">
-                        <div className="flex items-center">
-                            <h1 className="text-xl font-semibold text-gray-800">
-                                Adaptive Learning System
-                            </h1>
+        <nav className="sticky top-0 z-50 glass-strong">
+            <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+                <div className="flex justify-between h-16 items-center">
+                    {/* Logo */}
+                    <Link to={user ? '/dashboard' : '/'} className="flex items-center gap-2 group">
+                        <div className="w-9 h-9 gradient-primary rounded-xl flex items-center justify-center text-white font-bold text-lg shadow-lg group-hover:scale-105 transition-transform">
+                            A
                         </div>
-                        <div className="flex items-center space-x-4">
-                            <span className="text-gray-700">
-                                Welcome, {user?.first_name || user?.username}!
-                            </span>
-                            <button
-                                onClick={handleLogout}
-                                className="bg-red-500 hover:bg-red-700 text-white font-bold py-2 px-4 rounded"
-                            >
-                                Logout
-                            </button>
-                        </div>
-                    </div>
-                </div>
-            </nav>
+                        <span className="text-lg font-bold text-theme-text hidden sm:block">
+                            Adapt<span className="text-gradient">Learn</span>
+                        </span>
+                    </Link>
 
-            <main className="max-w-7xl mx-auto py-6 sm:px-6 lg:px-8">
-                <div className="px-4 py-6 sm:px-0">
-                    {/* Error Message */}
-                    {error && (
-                        <div className="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded mb-6">
-                            {error}
+                    {/* Desktop Nav Links */}
+                    {user && (
+                        <div className="hidden md:flex items-center gap-1">
+                            {navLinks.map(link => (
+                                <Link
+                                    key={link.path}
+                                    to={link.path}
+                                    className={`px-3 py-2 rounded-lg text-sm font-medium transition-all duration-200 ${
+                                        isActive(link.path)
+                                            ? 'bg-primary/10 text-primary'
+                                            : 'text-theme-text-secondary hover:text-theme-text hover:bg-surface-alt'
+                                    }`}
+                                >
+                                    <span className="mr-1.5">{link.icon}</span>
+                                    {link.label}
+                                </Link>
+                            ))}
                         </div>
                     )}
 
-                    {/* Quick Actions */}
-                    <div className="bg-white shadow overflow-hidden sm:rounded-lg mb-6">
-                        <div className="px-4 py-5 sm:px-6">
-                            <h3 className="text-lg leading-6 font-medium text-gray-900">
-                                Quick Actions
-                            </h3>
-                        </div>
-                        <div className="border-t border-gray-200 px-4 py-5 sm:px-6">
-                            <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
-                                <button
-                                    onClick={handleStartAnyConcept}
-                                    className="bg-green-600 hover:bg-green-700 text-white font-bold py-3 px-4 rounded-lg text-center transition"
-                                >
-                                    â–¶ Start New Session
-                                </button>
+                    {/* Right section */}
+                    <div className="flex items-center gap-3">
+                        <ThemeToggle />
 
+                        {user ? (
+                            <>
+                                <div className="hidden sm:flex items-center gap-2 px-3 py-1.5 rounded-lg bg-surface-alt">
+                                    <div className="w-7 h-7 gradient-primary rounded-full flex items-center justify-center text-white text-xs font-bold">
+                                        {(user.first_name || user.username || '?')[0].toUpperCase()}
+                                    </div>
+                                    <span className="text-sm font-medium text-theme-text">
+                                        {user.first_name || user.username}
+                                    </span>
+                                </div>
                                 <button
-                                    onClick={handleViewProgress}
-                                    className="bg-purple-600 hover:bg-purple-700 text-white font-bold py-3 px-4 rounded-lg text-center transition"
+                                    onClick={handleLogout}
+                                    className="px-3 py-1.5 rounded-lg text-sm font-medium text-error hover:bg-error/10 transition-colors"
                                 >
-                                    ðŸ“Š View Progress
+                                    Logout
                                 </button>
-
-                                <button
-                                    onClick={() => window.location.reload()}
-                                    className="bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 px-4 rounded-lg text-center transition"
-                                >
-                                    ðŸ”„ Refresh
-                                </button>
-                            </div>
-                        </div>
-                    </div>
-
-                    {/* Concepts Section */}
-                    <div className="bg-white shadow overflow-hidden sm:rounded-lg">
-                        <div className="px-4 py-5 sm:px-6 flex justify-between items-center">
-                            <div>
-                                <h3 className="text-lg leading-6 font-medium text-gray-900">
-                                    Available Concepts
-                                </h3>
-                                <p className="mt-1 text-sm text-gray-500">
-                                    Select a concept to start learning
-                                </p>
-                            </div>
-                            
-                            {/* Subject Filter */}
-                            {subjects.length > 0 && (
-                                <div className="w-64">
-                                    <select
-                                        value={selectedSubject}
-                                        onChange={(e) => setSelectedSubject(e.target.value)}
-                                        className="mt-1 block w-full pl-3 pr-10 py-2 text-base border-gray-300 focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm rounded-md"
+                            </>
+                        ) : (
+                            variant !== 'auth' && (
+                                <div className="flex items-center gap-2">
+                                    <Link
+                                        to="/login"
+                                        className="px-4 py-2 rounded-lg text-sm font-medium text-theme-text-secondary hover:text-theme-text transition-colors"
                                     >
-                                        <option value="">All Subjects</option>
-                                        {subjects.map(subject => (
-                                            <option key={subject} value={subject}>
-                                                {subject}
-                                            </option>
-                                        ))}
-                                    </select>
+                                        Sign In
+                                    </Link>
+                                    <Link
+                                        to="/register"
+                                        className="px-4 py-2 gradient-primary text-white rounded-lg text-sm font-semibold hover:opacity-90 transition-opacity shadow-theme"
+                                    >
+                                        Get Started
+                                    </Link>
                                 </div>
-                            )}
-                        </div>
-                        
-                        <div className="border-t border-gray-200">
-                            {filteredConcepts.length === 0 ? (
-                                <div className="text-center py-12">
-                                    <p className="text-gray-500">No concepts available.</p>
-                                    <p className="text-sm text-gray-400 mt-2">
-                                        Click "Start New Session" to create your first concept!
-                                    </p>
-                                </div>
-                            ) : (
-                                <ul className="divide-y divide-gray-200">
-                                    {filteredConcepts.map((concept) => (
-                                        <li key={concept.id} className="px-4 py-4 sm:px-6 hover:bg-gray-50">
-                                            <div className="flex items-center justify-between">
-                                                <div className="flex-1 min-w-0">
-                                                    <p className="text-sm font-medium text-blue-600 truncate">
-                                                        {concept.name}
-                                                    </p>
-                                                    <div className="mt-2 flex items-center text-sm text-gray-500">
-                                                        <span className="truncate">{concept.subject}</span>
-                                                        <span className="mx-2">â€¢</span>
-                                                        <span className="capitalize">
-                                                            Difficulty: {concept.difficulty}
-                                                        </span>
-                                                        {concept.description && (
-                                                            <>
-                                                                <span className="mx-2">â€¢</span>
-                                                                <span className="truncate">{concept.description}</span>
-                                                            </>
-                                                        )}
-                                                    </div>
-                                                </div>
-                                                <div className="ml-4 flex-shrink-0">
-                                                    <button
-                                                        onClick={() => handleStartLearning(concept.id)}
-                                                        className="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500"
-                                                    >
-                                                        Start Learning
-                                                    </button>
-                                                </div>
-                                            </div>
-                                        </li>
-                                    ))}
-                                </ul>
-                            )}
-                        </div>
-                    </div>
+                            )
+                        )}
 
-                    {/* Learning Tips */}
-                    <div className="mt-6 bg-blue-50 border-l-4 border-blue-400 p-4 rounded">
-                        <div className="flex">
-                            <div className="flex-shrink-0">
-                                <svg className="h-5 w-5 text-blue-400" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor">
-                                    <path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clipRule="evenodd" />
+                        {/* Mobile hamburger */}
+                        {user && (
+                            <button
+                                className="md:hidden p-2 rounded-lg text-theme-text-secondary hover:bg-surface-alt"
+                                onClick={() => setMobileOpen(!mobileOpen)}
+                            >
+                                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    {mobileOpen ? (
+                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                                    ) : (
+                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
+                                    )}
                                 </svg>
-                            </div>
-                            <div className="ml-3">
-                                <p className="text-sm text-blue-700">
-                                    <strong>How it works:</strong> For each concept, you'll learn one atomic piece at a time, 
-                                    then take a short quiz. The system adapts to your pace and mastery level.
-                                </p>
-                            </div>
-                        </div>
+                            </button>
+                        )}
                     </div>
                 </div>
-            </main>
-        </div>
-    );
-};
 
-export default Dashboard;
-
-
-================================================
-FILE: frontend/src/components/Home.jsx
-================================================
-Error reading file with 'cp1252': 'charmap' codec can't decode byte 0x9d in position 3592: character maps to <undefined>
-
-
-================================================
-FILE: frontend/src/components/Login.jsx
-================================================
-import React, { useState } from 'react';
-import { useNavigate, Link } from 'react-router-dom';
-import { useAuth } from '../context/AuthContext';
-
-const Login = () => {
-    const [formData, setFormData] = useState({
-        username: '',
-        password: ''
-    });
-    const [error, setError] = useState('');
-    const [loading, setLoading] = useState(false);
-    
-    const { login } = useAuth();
-    const navigate = useNavigate();
-
-    const handleChange = (e) => {
-        setFormData({
-            ...formData,
-            [e.target.name]: e.target.value
-        });
-    };
-
-    const handleSubmit = async (e) => {
-        e.preventDefault();
-        setError('');
-        setLoading(true);
-
-        const result = await login(formData.username, formData.password);
-        
-        if (result.success) {
-            navigate('/dashboard');
-        } else {
-            setError(result.error);
-        }
-        
-        setLoading(false);
-    };
-
-    return (
-        <div className="min-h-screen flex items-center justify-center bg-gray-50 py-12 px-4 sm:px-6 lg:px-8">
-            <div className="max-w-md w-full space-y-8">
-                <div>
-                    <h2 className="mt-6 text-center text-3xl font-extrabold text-gray-900">
-                        Sign in to your account
-                    </h2>
-                    <p className="mt-2 text-center text-sm text-gray-600">
-                        Or{' '}
-                        <Link to="/register" className="font-medium text-blue-600 hover:text-blue-500">
-                            create a new account
-                        </Link>
-                    </p>
-                </div>
-                
-                {error && (
-                    <div className="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded relative" role="alert">
-                        <span className="block sm:inline">{error}</span>
+                {/* Mobile nav */}
+                {mobileOpen && user && (
+                    <div className="md:hidden pb-4 pt-2 border-t border-theme-border animate-fade-in">
+                        <div className="flex flex-col gap-1">
+                            {navLinks.map(link => (
+                                <Link
+                                    key={link.path}
+                                    to={link.path}
+                                    onClick={() => setMobileOpen(false)}
+                                    className={`px-3 py-2.5 rounded-lg text-sm font-medium transition-colors ${
+                                        isActive(link.path)
+                                            ? 'bg-primary/10 text-primary'
+                                            : 'text-theme-text-secondary hover:bg-surface-alt'
+                                    }`}
+                                >
+                                    <span className="mr-2">{link.icon}</span>
+                                    {link.label}
+                                </Link>
+                            ))}
+                        </div>
                     </div>
                 )}
-                
-                <form className="mt-8 space-y-6" onSubmit={handleSubmit}>
-                    <div className="rounded-md shadow-sm -space-y-px">
-                        <div>
-                            <label htmlFor="username" className="sr-only">Username or Email</label>
-                            <input
-                                id="username"
-                                name="username"
-                                type="text"
-                                required
-                                className="appearance-none rounded-none relative block w-full px-3 py-2 border border-gray-300 placeholder-gray-500 text-gray-900 rounded-t-md focus:outline-none focus:ring-blue-500 focus:border-blue-500 focus:z-10 sm:text-sm"
-                                placeholder="Username or Email"
-                                value={formData.username}
-                                onChange={handleChange}
-                            />
-                        </div>
-                        <div>
-                            <label htmlFor="password" className="sr-only">Password</label>
-                            <input
-                                id="password"
-                                name="password"
-                                type="password"
-                                required
-                                className="appearance-none rounded-none relative block w-full px-3 py-2 border border-gray-300 placeholder-gray-500 text-gray-900 rounded-b-md focus:outline-none focus:ring-blue-500 focus:border-blue-500 focus:z-10 sm:text-sm"
-                                placeholder="Password"
-                                value={formData.password}
-                                onChange={handleChange}
-                            />
-                        </div>
-                    </div>
-
-                    <div>
-                        <button
-                            type="submit"
-                            disabled={loading}
-                            className="group relative w-full flex justify-center py-2 px-4 border border-transparent text-sm font-medium rounded-md text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 disabled:opacity-50"
-                        >
-                            {loading ? 'Signing in...' : 'Sign in'}
-                        </button>
-                    </div>
-                </form>
             </div>
-        </div>
+        </nav>
     );
 };
 
-export default Login;
+export { ThemeToggle };
+export default Navbar;
+
+
+
+================================================
+FILE: frontend/src/components/Progress.jsx
+================================================
+Error reading file with 'cp1252': 'charmap' codec can't decode byte 0x9d in position 1064: character maps to <undefined>
 
 
 ================================================
@@ -3835,18 +4274,18 @@ const ProtectedRoute = ({ children }) => {
     const { user, loading } = useAuth();
     const location = useLocation();
 
-    console.log("ProtectedRoute - Auth state:", { user: !!user, loading });
-
     if (loading) {
         return (
-            <div className="min-h-screen flex items-center justify-center">
-                <div className="text-xl text-gray-600">Loading...</div>
+            <div className="min-h-screen bg-theme-bg flex items-center justify-center">
+                <div className="text-center animate-fade-in">
+                    <div className="w-12 h-12 border-4 border-primary border-t-transparent rounded-full animate-spin mx-auto mb-4" />
+                    <p className="text-theme-text-secondary font-medium">Loading...</p>
+                </div>
             </div>
         );
     }
 
     if (!user) {
-        // Save the location they were trying to go to
         return <Navigate to="/login" state={{ from: location.pathname }} replace />;
     }
 
@@ -3859,189 +4298,7 @@ export default ProtectedRoute;
 ================================================
 FILE: frontend/src/components/Register.jsx
 ================================================
-import React, { useState } from 'react';
-import { useNavigate, Link } from 'react-router-dom';
-import { useAuth } from '../context/AuthContext';
-
-const Register = () => {
-    const [formData, setFormData] = useState({
-        username: '',
-        email: '',
-        first_name: '',
-        last_name: '',
-        password: '',
-        password2: ''
-    });
-    const [errors, setErrors] = useState({});
-    const [loading, setLoading] = useState(false);
-    
-    const { register } = useAuth();
-    const navigate = useNavigate();
-
-    const handleChange = (e) => {
-        setFormData({
-            ...formData,
-            [e.target.name]: e.target.value
-        });
-    };
-
-    const handleSubmit = async (e) => {
-        e.preventDefault();
-        setErrors({});
-        setLoading(true);
-
-        const result = await register(formData);
-        
-        if (result.success) {
-            navigate('/login', { state: { message: 'Registration successful! Please login.' } });
-        } else {
-            setErrors(result.error);
-        }
-        
-        setLoading(false);
-    };
-
-    return (
-        <div className="min-h-screen flex items-center justify-center bg-gray-50 py-12 px-4 sm:px-6 lg:px-8">
-            <div className="max-w-md w-full space-y-8">
-                <div>
-                    <h2 className="mt-6 text-center text-3xl font-extrabold text-gray-900">
-                        Create your account
-                    </h2>
-                    <p className="mt-2 text-center text-sm text-gray-600">
-                        Or{' '}
-                        <Link to="/login" className="font-medium text-blue-600 hover:text-blue-500">
-                            sign in to existing account
-                        </Link>
-                    </p>
-                </div>
-                
-                <form className="mt-8 space-y-6" onSubmit={handleSubmit}>
-                    <div className="space-y-4">
-                        <div>
-                            <label htmlFor="username" className="block text-sm font-medium text-gray-700">
-                                Username *
-                            </label>
-                            <input
-                                id="username"
-                                name="username"
-                                type="text"
-                                required
-                                className="mt-1 appearance-none relative block w-full px-3 py-2 border border-gray-300 placeholder-gray-500 text-gray-900 rounded-md focus:outline-none focus:ring-blue-500 focus:border-blue-500 focus:z-10 sm:text-sm"
-                                value={formData.username}
-                                onChange={handleChange}
-                            />
-                            {errors.username && (
-                                <p className="mt-1 text-sm text-red-600">{errors.username[0]}</p>
-                            )}
-                        </div>
-
-                        <div>
-                            <label htmlFor="email" className="block text-sm font-medium text-gray-700">
-                                Email *
-                            </label>
-                            <input
-                                id="email"
-                                name="email"
-                                type="email"
-                                required
-                                className="mt-1 appearance-none relative block w-full px-3 py-2 border border-gray-300 placeholder-gray-500 text-gray-900 rounded-md focus:outline-none focus:ring-blue-500 focus:border-blue-500 focus:z-10 sm:text-sm"
-                                value={formData.email}
-                                onChange={handleChange}
-                            />
-                            {errors.email && (
-                                <p className="mt-1 text-sm text-red-600">{errors.email[0]}</p>
-                            )}
-                        </div>
-
-                        <div className="grid grid-cols-2 gap-4">
-                            <div>
-                                <label htmlFor="first_name" className="block text-sm font-medium text-gray-700">
-                                    First Name *
-                                </label>
-                                <input
-                                    id="first_name"
-                                    name="first_name"
-                                    type="text"
-                                    required
-                                    className="mt-1 appearance-none relative block w-full px-3 py-2 border border-gray-300 placeholder-gray-500 text-gray-900 rounded-md focus:outline-none focus:ring-blue-500 focus:border-blue-500 focus:z-10 sm:text-sm"
-                                    value={formData.first_name}
-                                    onChange={handleChange}
-                                />
-                            </div>
-
-                            <div>
-                                <label htmlFor="last_name" className="block text-sm font-medium text-gray-700">
-                                    Last Name *
-                                </label>
-                                <input
-                                    id="last_name"
-                                    name="last_name"
-                                    type="text"
-                                    required
-                                    className="mt-1 appearance-none relative block w-full px-3 py-2 border border-gray-300 placeholder-gray-500 text-gray-900 rounded-md focus:outline-none focus:ring-blue-500 focus:border-blue-500 focus:z-10 sm:text-sm"
-                                    value={formData.last_name}
-                                    onChange={handleChange}
-                                />
-                            </div>
-                        </div>
-
-                        <div>
-                            <label htmlFor="password" className="block text-sm font-medium text-gray-700">
-                                Password *
-                            </label>
-                            <input
-                                id="password"
-                                name="password"
-                                type="password"
-                                required
-                                className="mt-1 appearance-none relative block w-full px-3 py-2 border border-gray-300 placeholder-gray-500 text-gray-900 rounded-md focus:outline-none focus:ring-blue-500 focus:border-blue-500 focus:z-10 sm:text-sm"
-                                value={formData.password}
-                                onChange={handleChange}
-                            />
-                            {errors.password && (
-                                <p className="mt-1 text-sm text-red-600">{errors.password[0]}</p>
-                            )}
-                        </div>
-
-                        <div>
-                            <label htmlFor="password2" className="block text-sm font-medium text-gray-700">
-                                Confirm Password *
-                            </label>
-                            <input
-                                id="password2"
-                                name="password2"
-                                type="password"
-                                required
-                                className="mt-1 appearance-none relative block w-full px-3 py-2 border border-gray-300 placeholder-gray-500 text-gray-900 rounded-md focus:outline-none focus:ring-blue-500 focus:border-blue-500 focus:z-10 sm:text-sm"
-                                value={formData.password2}
-                                onChange={handleChange}
-                            />
-                        </div>
-                    </div>
-
-                    {errors.non_field_errors && (
-                        <div className="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded relative">
-                            <span className="block sm:inline">{errors.non_field_errors[0]}</span>
-                        </div>
-                    )}
-
-                    <div>
-                        <button
-                            type="submit"
-                            disabled={loading}
-                            className="group relative w-full flex justify-center py-2 px-4 border border-transparent text-sm font-medium rounded-md text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 disabled:opacity-50"
-                        >
-                            {loading ? 'Creating account...' : 'Create account'}
-                        </button>
-                    </div>
-                </form>
-            </div>
-        </div>
-    );
-};
-
-export default Register;
+Error reading file with 'cp1252': 'charmap' codec can't decode byte 0x8f in position 4530: character maps to <undefined>
 
 
 ================================================
@@ -4064,58 +4321,58 @@ const AtomComplete = ({ atom, onContinue, recommendation = '' }) => {
         : 0;
 
     return (
-        <div className="bg-white rounded-lg shadow-lg p-8 text-center">
+        <div className="bg-surface rounded-theme-xl shadow-theme-lg p-8 text-center border border-theme-border animate-scale-in">
             {/* Success Icon */}
             <div className="mb-6">
-                <div className="inline-flex items-center justify-center w-24 h-24 bg-green-100 rounded-full">
+                <div className="inline-flex items-center justify-center w-24 h-24 bg-emerald-500/10 rounded-full">
                     <span className="text-5xl">ðŸŽ‰</span>
                 </div>
             </div>
 
-            <h2 className="text-3xl font-bold text-gray-800 mb-2">Atom Complete!</h2>
-            <p className="text-xl text-green-600 mb-8">You've mastered: {atom?.name}</p>
+            <h2 className="text-3xl font-bold text-theme-text mb-2">Atom Complete!</h2>
+            <p className="text-xl text-emerald-500 mb-8">You've mastered: {atom?.name}</p>
 
             {/* Stats Grid */}
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
-                <div className="bg-blue-50 p-4 rounded-lg">
-                    <div className="text-2xl font-bold text-blue-600">
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8 stagger">
+                <div className="bg-primary/10 p-4 rounded-theme-lg">
+                    <div className="text-2xl font-bold text-primary">
                         {Math.round(atomMastery * 100)}%
                     </div>
-                    <div className="text-sm text-gray-600">Final Mastery</div>
+                    <div className="text-sm text-theme-text-muted">Final Mastery</div>
                 </div>
                 
-                <div className="bg-purple-50 p-4 rounded-lg">
-                    <div className="text-2xl font-bold text-purple-600">
+                <div className="bg-violet-500/10 p-4 rounded-theme-lg">
+                    <div className="text-2xl font-bold text-violet-500">
                         {accuracy.toFixed(0)}%
                     </div>
-                    <div className="text-sm text-gray-600">Accuracy</div>
+                    <div className="text-sm text-theme-text-muted">Accuracy</div>
                 </div>
                 
-                <div className="bg-green-50 p-4 rounded-lg">
-                    <div className="text-2xl font-bold text-green-600">
+                <div className="bg-emerald-500/10 p-4 rounded-theme-lg">
+                    <div className="text-2xl font-bold text-emerald-500">
                         {correctCount}/{totalQuestions}
                     </div>
-                    <div className="text-sm text-gray-600">Correct</div>
+                    <div className="text-sm text-theme-text-muted">Correct</div>
                 </div>
                 
-                <div className="bg-orange-50 p-4 rounded-lg">
-                    <div className="text-2xl font-bold text-orange-600">
+                <div className="bg-orange-500/10 p-4 rounded-theme-lg">
+                    <div className="text-2xl font-bold text-orange-500">
                         {avgTime}s
                     </div>
-                    <div className="text-sm text-gray-600">Avg Time</div>
+                    <div className="text-sm text-theme-text-muted">Avg Time</div>
                 </div>
             </div>
 
             {/* Theta Change */}
-            <div className="mb-8 p-4 bg-gray-50 rounded-lg">
-                <div className="text-sm text-gray-600">Ability (Î¸) Progress</div>
-                <div className="text-2xl font-bold text-gray-800">
+            <div className="mb-8 p-4 bg-theme-bg rounded-theme-lg">
+                <div className="text-sm text-theme-text-muted">Ability (Î¸) Progress</div>
+                <div className="text-2xl font-bold text-theme-text">
                     {currentTheta.toFixed(2)}
                 </div>
             </div>
 
             {recommendation && (
-                <div className="mb-6 p-4 bg-blue-50 border border-blue-200 rounded-lg text-blue-800">
+                <div className="mb-6 p-4 bg-info/10 border border-info/20 rounded-theme-lg text-info">
                     {recommendation}
                 </div>
             )}
@@ -4123,12 +4380,12 @@ const AtomComplete = ({ atom, onContinue, recommendation = '' }) => {
             {/* Continue Button */}
             <button
                 onClick={onContinue}
-                className="px-8 py-3 bg-green-600 text-white rounded-lg font-semibold hover:bg-green-700 transition"
+                className="px-8 py-3 bg-emerald-500 text-white rounded-theme font-semibold hover:bg-emerald-600 transition-colors shadow-theme"
             >
                 Continue to Next Atom â†’
             </button>
 
-            <p className="mt-4 text-sm text-gray-500">
+            <p className="mt-4 text-sm text-theme-text-muted">
                 You're making great progress! Keep going.
             </p>
         </div>
@@ -4156,37 +4413,37 @@ const AtomList = ({ atoms, onStartAtom, conceptName, completedCount }) => {
 
     const getPhaseColor = (phase) => {
         const colors = {
-            'complete': 'text-green-600',
-            'teaching': 'text-blue-600',
-            'diagnostic': 'text-purple-600',
-            'not_started': 'text-gray-400'
+            'complete': 'text-emerald-500',
+            'teaching': 'text-primary',
+            'diagnostic': 'text-violet-500',
+            'not_started': 'text-theme-text-muted'
         };
-        return colors[phase] || 'text-gray-600';
+        return colors[phase] || 'text-theme-text-muted';
     };
 
     return (
-        <div className="bg-white rounded-lg shadow-lg p-8">
-            <h2 className="text-2xl font-bold mb-2">{conceptName}</h2>
-            <p className="text-gray-600 mb-6">
+        <div className="bg-surface rounded-theme-xl shadow-theme border border-theme-border p-8 animate-fade-in-up">
+            <h2 className="text-2xl font-bold text-theme-text mb-2">{conceptName}</h2>
+            <p className="text-theme-text-secondary mb-6">
                 Completed {completedCount} of {atoms.length} concepts
             </p>
 
             <div className="space-y-3 mb-8">
-                {atoms.map((atom) => (
+                {atoms.map((atom, idx) => (
                     <div
                         key={atom.id}
-                        className={`flex items-center justify-between p-4 rounded-lg border ${
+                        className={`flex items-center justify-between p-4 rounded-theme-lg border transition-colors ${
                             atom.phase === 'not_started'
-                                ? 'border-gray-200 bg-gray-50'
+                                ? 'border-theme-border bg-theme-bg'
                                 : atom.phase === 'complete'
-                                ? 'border-green-200 bg-green-50'
-                                : 'border-blue-200 bg-blue-50'
+                                ? 'border-emerald-500/20 bg-emerald-500/5'
+                                : 'border-primary/20 bg-primary/5'
                         }`}
                     >
                         <div className="flex items-center">
                             <span className="text-2xl mr-4">{getPhaseIcon(atom.phase)}</span>
                             <div>
-                                <p className="font-medium text-lg">{atom.name}</p>
+                                <p className="font-medium text-lg text-theme-text">{atom.name}</p>
                                 <p className={`text-sm ${getPhaseColor(atom.phase)}`}>
                                     {atom.phase === 'complete' && '✓ Mastered'}
                                     {atom.phase === 'teaching' && '📖 Learning in progress'}
@@ -4194,7 +4451,7 @@ const AtomList = ({ atoms, onStartAtom, conceptName, completedCount }) => {
                                     {atom.phase === 'not_started' && '⏳ Not started'}
                                 </p>
                                 {atom.mastery_score > 0 && (
-                                    <p className="text-xs text-gray-500 mt-1">
+                                    <p className="text-xs text-theme-text-muted mt-1">
                                         Mastery: {Math.round(atom.mastery_score * 100)}%
                                     </p>
                                 )}
@@ -4204,7 +4461,7 @@ const AtomList = ({ atoms, onStartAtom, conceptName, completedCount }) => {
                         {atom.phase === 'not_started' && (
                             <button
                                 onClick={() => onStartAtom(atom)}
-                                className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
+                                className="px-4 py-2 gradient-primary text-white rounded-theme font-medium hover:opacity-90 transition-opacity shadow-sm"
                             >
                                 Start Learning
                             </button>
@@ -4213,14 +4470,14 @@ const AtomList = ({ atoms, onStartAtom, conceptName, completedCount }) => {
                         {atom.phase === 'teaching' && (
                             <button
                                 onClick={() => onStartAtom(atom)}
-                                className="px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700"
+                                className="px-4 py-2 bg-violet-500 text-white rounded-theme font-medium hover:bg-violet-600 transition-colors"
                             >
                                 Continue
                             </button>
                         )}
                         
                         {atom.phase === 'complete' && (
-                            <span className="text-green-600 font-medium">✓ Completed</span>
+                            <span className="text-emerald-500 font-medium">✓ Completed</span>
                         )}
                     </div>
                 ))}
@@ -4240,34 +4497,34 @@ import React from 'react';
 const AtomReview = ({ atom, metrics, onComplete, onSkip }) => {
 
     return (
-        <div className="bg-white rounded-lg shadow-lg p-6">
-            <h2 className="text-2xl font-bold mb-4">Review Required: {atom.name}</h2>
+        <div className="bg-surface rounded-theme-xl shadow-theme border border-theme-border p-6 animate-fade-in-up">
+            <h2 className="text-2xl font-bold text-theme-text mb-4">Review Required: {atom.name}</h2>
             
             {/* Performance Summary */}
-            <div className="bg-red-50 border border-red-200 rounded-lg p-4 mb-6">
-                <h3 className="font-semibold text-red-800 mb-2">Performance Analysis</h3>
+            <div className="bg-error/10 border border-error/20 rounded-theme-lg p-4 mb-6">
+                <h3 className="font-semibold text-error mb-2">Performance Analysis</h3>
                 <div className="grid grid-cols-2 gap-4 text-sm">
                     <div>
-                        <p className="text-gray-600">Accuracy</p>
-                        <p className="text-xl font-bold text-red-600">
+                        <p className="text-theme-text-muted">Accuracy</p>
+                        <p className="text-xl font-bold text-error">
                             {Math.round(metrics.accuracy * 100)}%
                         </p>
                     </div>
                     <div>
-                        <p className="text-gray-600">Mastery</p>
-                        <p className="text-xl font-bold text-orange-600">
+                        <p className="text-theme-text-muted">Mastery</p>
+                        <p className="text-xl font-bold text-orange-500">
                             {Math.round(metrics.final_mastery * 100)}%
                         </p>
                     </div>
                     <div>
-                        <p className="text-gray-600">Time Ratio</p>
-                        <p className="text-xl font-bold text-blue-600">
+                        <p className="text-theme-text-muted">Time Ratio</p>
+                        <p className="text-xl font-bold text-primary">
                             {metrics.time_ratio.toFixed(2)}x
                         </p>
                     </div>
                     <div>
-                        <p className="text-gray-600">Î¸ Change</p>
-                        <p className={`text-xl font-bold ${metrics.theta_change > 0 ? 'text-green-600' : 'text-red-600'}`}>
+                        <p className="text-theme-text-muted">Î¸ Change</p>
+                        <p className={`text-xl font-bold ${metrics.theta_change > 0 ? 'text-emerald-500' : 'text-error'}`}>
                             {metrics.theta_change > 0 ? '+' : ''}{metrics.theta_change.toFixed(2)}
                         </p>
                     </div>
@@ -4277,25 +4534,25 @@ const AtomReview = ({ atom, metrics, onComplete, onSkip }) => {
             {/* Error Analysis */}
             {metrics.error_count > 0 && (
                 <div className="mb-6">
-                    <h3 className="font-semibold mb-2">Error Types:</h3>
+                    <h3 className="font-semibold text-theme-text mb-2">Error Types:</h3>
                     <div className="space-y-2">
                         {metrics.conceptual_errors > 0 && (
-                            <div className="bg-purple-50 p-2 rounded">
+                            <div className="bg-violet-500/10 p-2.5 rounded-theme text-theme-text">
                                 <span className="font-medium">Conceptual:</span> {metrics.conceptual_errors} errors
                             </div>
                         )}
                         {metrics.procedural_errors > 0 && (
-                            <div className="bg-blue-50 p-2 rounded">
+                            <div className="bg-primary/10 p-2.5 rounded-theme text-theme-text">
                                 <span className="font-medium">Procedural:</span> {metrics.procedural_errors} errors
                             </div>
                         )}
                         {metrics.factual_errors > 0 && (
-                            <div className="bg-green-50 p-2 rounded">
+                            <div className="bg-emerald-500/10 p-2.5 rounded-theme text-theme-text">
                                 <span className="font-medium">Factual:</span> {metrics.factual_errors} errors
                             </div>
                         )}
                         {metrics.guessing_errors > 0 && (
-                            <div className="bg-yellow-50 p-2 rounded">
+                            <div className="bg-amber-500/10 p-2.5 rounded-theme text-theme-text">
                                 <span className="font-medium">Guessing:</span> {metrics.guessing_errors} errors
                             </div>
                         )}
@@ -4307,19 +4564,19 @@ const AtomReview = ({ atom, metrics, onComplete, onSkip }) => {
             <div className="space-y-3">
                 <button
                     onClick={() => onComplete('reteach')}
-                    className="w-full bg-blue-600 text-white py-3 rounded-lg hover:bg-blue-700"
+                    className="w-full gradient-primary text-white py-3 rounded-theme font-semibold hover:opacity-90 transition-opacity"
                 >
                     Review Teaching Material
                 </button>
                 <button
                     onClick={() => onComplete('practice')}
-                    className="w-full bg-green-600 text-white py-3 rounded-lg hover:bg-green-700"
+                    className="w-full bg-emerald-500 text-white py-3 rounded-theme font-semibold hover:bg-emerald-600 transition-colors"
                 >
                     Practice with New Questions
                 </button>
                 <button
                     onClick={onSkip}
-                    className="w-full bg-gray-200 text-gray-800 py-3 rounded-lg hover:bg-gray-300"
+                    className="w-full bg-theme-bg text-theme-text-secondary py-3 rounded-theme font-semibold border border-theme-border hover:bg-surface-alt transition-colors"
                 >
                     Skip Review (Not Recommended)
                 </button>
@@ -4329,6 +4586,18 @@ const AtomReview = ({ atom, metrics, onComplete, onSkip }) => {
 };
 
 export default AtomReview;
+
+
+================================================
+FILE: frontend/src/components/Learning/ExternalResources.jsx
+================================================
+Error reading file with 'cp1252': 'charmap' codec can't decode byte 0x8f in position 3978: character maps to <undefined>
+
+
+================================================
+FILE: frontend/src/components/Learning/FatigueIndicator.jsx
+================================================
+Error reading file with 'cp1252': 'charmap' codec can't decode byte 0x8d in position 1779: character maps to <undefined>
 
 
 ================================================
@@ -4356,18 +4625,19 @@ const LearningProgress = ({ onContinue }) => {
 
     const getPhaseColor = (phase) => {
         const colors = {
-            'complete': 'text-green-600',
-            'teaching': 'text-blue-600',
-            'diagnostic': 'text-purple-600',
-            'not_started': 'text-gray-400'
+            'complete': 'text-emerald-500',
+            'teaching': 'text-primary',
+            'diagnostic': 'text-violet-500',
+            'not_started': 'text-theme-text-muted'
         };
-        return colors[phase] || 'text-gray-600';
+        return colors[phase] || 'text-theme-text-muted';
     };
 
     if (loading && !learningProgress) {
         return (
             <div className="text-center py-12">
-                <p className="text-gray-600">Loading progress...</p>
+                <div className="w-10 h-10 border-4 border-primary border-t-transparent rounded-full animate-spin mx-auto mb-3" />
+                <p className="text-theme-text-muted">Loading progress...</p>
             </div>
         );
     }
@@ -4375,45 +4645,45 @@ const LearningProgress = ({ onContinue }) => {
     if (!learningProgress) {
         return (
             <div className="text-center py-12">
-                <p className="text-red-600">Failed to load progress.</p>
+                <p className="text-error">Failed to load progress.</p>
             </div>
         );
     }
 
     return (
         <div className="max-w-4xl mx-auto">
-            <h2 className="text-3xl font-bold mb-8">Your Learning Progress</h2>
+            <h2 className="text-3xl font-bold text-theme-text mb-8">Your Learning Progress</h2>
 
             {/* Stats Cards */}
-            <div className="bg-white rounded-lg shadow-lg p-8 mb-8">
+            <div className="bg-surface rounded-theme-xl shadow-theme border border-theme-border p-8 mb-8">
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
-                    <div className="bg-blue-50 p-4 rounded-lg text-center">
-                        <p className="text-2xl font-bold text-blue-600">
+                    <div className="bg-primary/10 p-4 rounded-theme-lg text-center">
+                        <p className="text-2xl font-bold text-primary">
                             {Math.round(learningProgress.overall_mastery * 100)}%
                         </p>
-                        <p className="text-sm text-gray-600">Overall Mastery</p>
+                        <p className="text-sm text-theme-text-muted">Overall Mastery</p>
                     </div>
                     
-                    <div className="bg-green-50 p-4 rounded-lg text-center">
-                        <p className="text-2xl font-bold text-green-600">
+                    <div className="bg-emerald-500/10 p-4 rounded-theme-lg text-center">
+                        <p className="text-2xl font-bold text-emerald-500">
                             {learningProgress.total_atoms || 0}
                         </p>
-                        <p className="text-sm text-gray-600">Total Atoms</p>
+                        <p className="text-sm text-theme-text-muted">Total Atoms</p>
                     </div>
                     
-                    <div className="bg-orange-50 p-4 rounded-lg text-center">
-                        <p className="text-2xl font-bold text-orange-600">
+                    <div className="bg-orange-500/10 p-4 rounded-theme-lg text-center">
+                        <p className="text-2xl font-bold text-orange-500">
                             {learningProgress.learning_streak || 0} 🔥
                         </p>
-                        <p className="text-sm text-gray-600">Learning Streak</p>
+                        <p className="text-sm text-theme-text-muted">Learning Streak</p>
                     </div>
                 </div>
 
                 {/* Theta Score */}
-                <div className="border-t pt-6">
+                <div className="border-t border-theme-border pt-6">
                     <div className="flex justify-between items-center">
-                        <span className="text-gray-700 font-medium">Ability (θ):</span>
-                        <span className="text-lg font-semibold text-purple-600">
+                        <span className="text-theme-text font-medium">Ability (θ):</span>
+                        <span className="text-lg font-semibold text-violet-500">
                             {learningProgress.overall_theta?.toFixed(2) || '0.00'}
                         </span>
                     </div>
@@ -4421,25 +4691,25 @@ const LearningProgress = ({ onContinue }) => {
             </div>
 
             {/* Concepts */}
-            <h3 className="text-xl font-bold mb-4">Concepts</h3>
+            <h3 className="text-xl font-bold text-theme-text mb-4">Concepts</h3>
             
             {learningProgress.concepts?.map((concept, idx) => (
-                <div key={idx} className="bg-white rounded-lg shadow-lg p-6 mb-4">
+                <div key={idx} className="bg-surface rounded-theme-xl shadow-theme border border-theme-border p-6 mb-4">
                     <div className="flex justify-between items-center mb-4">
-                        <h4 className="text-lg font-semibold">{concept.name}</h4>
-                        <span className="text-sm text-gray-500">
+                        <h4 className="text-lg font-semibold text-theme-text">{concept.name}</h4>
+                        <span className="text-sm text-theme-text-muted">
                             {concept.mastered_count}/{concept.total_count} mastered
                         </span>
                     </div>
 
                     <div className="space-y-3">
                         {concept.atoms.map((atom, atomIdx) => (
-                            <div key={atomIdx} className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
+                            <div key={atomIdx} className="flex items-center justify-between p-3 bg-theme-bg rounded-theme">
                                 <div className="flex items-center">
                                     <span className="text-xl mr-3">{getPhaseIcon(atom.phase)}</span>
                                     <div>
-                                        <p className="font-medium">{atom.name}</p>
-                                        <p className="text-xs text-gray-500">
+                                        <p className="font-medium text-theme-text">{atom.name}</p>
+                                        <p className="text-xs text-theme-text-muted">
                                             Mastery: {Math.round(atom.mastery * 100)}%
                                             {atom.streak > 0 && ` • Streak: ${atom.streak}`}
                                         </p>
@@ -4459,7 +4729,7 @@ const LearningProgress = ({ onContinue }) => {
             <div className="flex justify-center mt-8">
                 <button
                     onClick={onContinue}
-                    className="bg-blue-600 text-white px-8 py-3 rounded-lg font-semibold hover:bg-blue-700"
+                    className="gradient-primary text-white px-8 py-3 rounded-theme-lg font-semibold hover:shadow-theme-lg transition-all duration-200"
                 >
                     Continue Learning
                 </button>
@@ -4485,14 +4755,16 @@ const LearningRoute = () => {
     
     if (!conceptId) {
         return (
-            <div className="text-center py-12">
-                <p className="text-red-600">No concept selected.</p>
-                <button 
-                    onClick={() => navigate('/dashboard')}
-                    className="mt-4 px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700"
-                >
-                    Go to Dashboard
-                </button>
+            <div className="min-h-screen bg-theme-bg flex items-center justify-center">
+                <div className="text-center">
+                    <p className="text-error mb-4">No concept selected.</p>
+                    <button 
+                        onClick={() => navigate('/dashboard')}
+                        className="px-5 py-2.5 gradient-primary text-white rounded-theme font-semibold hover:opacity-90 transition-opacity"
+                    >
+                        Go to Dashboard
+                    </button>
+                </div>
             </div>
         );
     }
@@ -4508,6 +4780,112 @@ export default LearningRoute;
 
 
 ================================================
+FILE: frontend/src/components/Learning/LearningVelocityGraph.jsx
+================================================
+import React, { useEffect, useMemo } from 'react';
+import { useLearning } from '../../context/LearningContext';
+
+/**
+ * Lightweight inline velocity sparkline + engagement badge.
+ * Uses raw canvas-free SVG so no chart library dependency.
+ */
+export default function LearningVelocityGraph({ sessionId }) {
+  const { velocityData, engagementScore, fetchVelocityGraph } = useLearning();
+
+  useEffect(() => {
+    if (sessionId) fetchVelocityGraph(sessionId);
+  }, [sessionId, fetchVelocityGraph]);
+
+  // Build points for SVG sparkline from velocity snapshots
+  const { points, masteryPoints, maxQ } = useMemo(() => {
+    if (!velocityData || velocityData.length === 0) return { points: '', masteryPoints: '', maxQ: 0 };
+
+    const maxQ = velocityData.length;
+    const W = 240;
+    const H = 60;
+    const pad = 4;
+
+    // accuracy line
+    const accPts = velocityData.map((v, i) => {
+      const x = pad + (i / Math.max(maxQ - 1, 1)) * (W - 2 * pad);
+      const acc = v.rolling_accuracy ?? v.accuracy ?? 0;
+      const y = H - pad - acc * (H - 2 * pad);
+      return `${x},${y}`;
+    });
+
+    // mastery line
+    const mPts = velocityData.map((v, i) => {
+      const x = pad + (i / Math.max(maxQ - 1, 1)) * (W - 2 * pad);
+      const m = v.mastery ?? 0;
+      const y = H - pad - m * (H - 2 * pad);
+      return `${x},${y}`;
+    });
+
+    return { points: accPts.join(' '), masteryPoints: mPts.join(' '), maxQ };
+  }, [velocityData]);
+
+  // Engagement color
+  const engColor = engagementScore >= 0.7 ? 'text-emerald-500' : engagementScore >= 0.4 ? 'text-amber-500' : 'text-error';
+
+  if (!velocityData || velocityData.length < 2) {
+    return (
+      <div className="text-xs text-theme-text-muted italic">
+        Answer a few questions to see your learning velocityâ€¦
+      </div>
+    );
+  }
+
+  return (
+    <div className="bg-surface/80 rounded-theme-lg p-3 border border-theme-border">
+      <div className="flex items-center justify-between mb-1">
+        <span className="text-xs font-semibold text-theme-text-secondary">Learning Velocity</span>
+        <span className={`text-xs font-bold ${engColor}`}>
+          Engagement {Math.round(engagementScore * 100)}%
+        </span>
+      </div>
+
+      <svg viewBox="0 0 240 60" className="w-full h-14" preserveAspectRatio="none">
+        {/* gridlines */}
+        <line x1="4" y1="30" x2="236" y2="30" stroke="#e5e7eb" strokeWidth="0.5" strokeDasharray="3,3" />
+        <line x1="4" y1="56" x2="236" y2="56" stroke="#e5e7eb" strokeWidth="0.5" />
+
+        {/* mastery line */}
+        <polyline
+          fill="none"
+          stroke="#a78bfa"
+          strokeWidth="1.5"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          points={masteryPoints}
+        />
+
+        {/* accuracy line */}
+        <polyline
+          fill="none"
+          stroke="#6366f1"
+          strokeWidth="2"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          points={points}
+        />
+      </svg>
+
+      <div className="flex items-center gap-4 mt-1 text-[10px] text-theme-text-muted">
+        <span className="flex items-center gap-1">
+          <span className="inline-block w-3 h-0.5 bg-indigo-500 rounded" /> Accuracy
+        </span>
+        <span className="flex items-center gap-1">
+          <span className="inline-block w-3 h-0.5 bg-purple-400 rounded" /> Mastery
+        </span>
+        <span className="ml-auto">{maxQ} questions</span>
+      </div>
+    </div>
+  );
+}
+
+
+
+================================================
 FILE: frontend/src/components/Learning/QuestionsFromTeaching.jsx
 ================================================
 Error reading file with 'cp1252': 'charmap' codec can't decode byte 0x9d in position 2678: character maps to <undefined>
@@ -4519,7 +4897,6 @@ FILE: frontend/src/components/Learning/StartAnyConceptSession.jsx
 import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useLearning } from '../../context/LearningContext';
-
 const StartAnyConceptSession = () => {
     const [formData, setFormData] = useState({
         subject: '',
@@ -4574,10 +4951,10 @@ const StartAnyConceptSession = () => {
     ];
 
     return (
-        <div className="min-h-screen bg-gray-50 py-12">
+        <div className="min-h-screen bg-theme-bg py-12">
             <div className="max-w-2xl mx-auto px-4">
-                <div className="bg-white rounded-lg shadow-lg p-8">
-                    <h1 className="text-2xl font-bold text-gray-800 mb-6">
+                <div className="bg-surface rounded-theme-xl shadow-theme-lg border border-theme-border p-8 animate-fade-in-up">
+                    <h1 className="text-2xl font-bold text-theme-text mb-6">
                         Start New Learning Session
                     </h1>
 
@@ -4585,7 +4962,7 @@ const StartAnyConceptSession = () => {
                         <form onSubmit={handleSubmit} className="space-y-6">
                             {/* Subject */}
                             <div>
-                                <label className="block text-sm font-medium text-gray-700 mb-2">
+                                <label className="block text-sm font-medium text-theme-text-secondary mb-2">
                                     Subject *
                                 </label>
                                 <input
@@ -4595,13 +4972,13 @@ const StartAnyConceptSession = () => {
                                     onChange={handleChange}
                                     required
                                     placeholder="e.g., Microprocessor, Mathematics, Physics"
-                                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                                    className="w-full px-4 py-2 bg-theme-bg border border-theme-border rounded-theme-lg focus:ring-2 focus:ring-primary/50 focus:border-primary text-theme-text placeholder:text-theme-text-muted transition-colors"
                                 />
                             </div>
 
                             {/* Concept */}
                             <div>
-                                <label className="block text-sm font-medium text-gray-700 mb-2">
+                                <label className="block text-sm font-medium text-theme-text-secondary mb-2">
                                     Concept *
                                 </label>
                                 <input
@@ -4611,20 +4988,20 @@ const StartAnyConceptSession = () => {
                                     onChange={handleChange}
                                     required
                                     placeholder="e.g., Memory Organization, Calculus, Quantum Mechanics"
-                                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                                    className="w-full px-4 py-2 bg-theme-bg border border-theme-border rounded-theme-lg focus:ring-2 focus:ring-primary/50 focus:border-primary text-theme-text placeholder:text-theme-text-muted transition-colors"
                                 />
                             </div>
 
                             {/* Knowledge Level */}
                             <div>
-                                <label className="block text-sm font-medium text-gray-700 mb-2">
+                                <label className="block text-sm font-medium text-theme-text-secondary mb-2">
                                     Your Knowledge Level *
                                 </label>
                                 <select
                                     name="knowledge_level"
                                     value={formData.knowledge_level}
                                     onChange={handleChange}
-                                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                                    className="w-full px-4 py-2 bg-theme-bg border border-theme-border rounded-theme-lg focus:ring-2 focus:ring-primary/50 focus:border-primary text-theme-text transition-colors"
                                 >
                                     {knowledgeLevels.map(level => (
                                         <option key={level.value} value={level.value}>
@@ -4635,7 +5012,7 @@ const StartAnyConceptSession = () => {
                             </div>
 
                             {error && (
-                                <div className="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded">
+                                <div className="bg-error/10 border border-error/30 text-error px-4 py-3 rounded-theme-lg">
                                     {error}
                                 </div>
                             )}
@@ -4643,7 +5020,7 @@ const StartAnyConceptSession = () => {
                             <button
                                 type="submit"
                                 disabled={loading}
-                                className="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 px-4 rounded-lg transition disabled:opacity-50 disabled:cursor-not-allowed"
+                                className="w-full gradient-primary text-white font-bold py-3 px-4 rounded-theme-lg hover:shadow-theme-lg transition-all disabled:opacity-50 disabled:cursor-not-allowed"
                             >
                                 {loading ? 'Generating atoms...' : 'Generate Learning Path'}
                             </button>
@@ -4651,7 +5028,7 @@ const StartAnyConceptSession = () => {
                             <button
                                 type="button"
                                 onClick={() => navigate('/dashboard')}
-                                className="w-full bg-gray-200 hover:bg-gray-300 text-gray-800 font-bold py-3 px-4 rounded-lg transition"
+                                className="w-full bg-theme-bg hover:bg-theme-border text-theme-text-secondary font-bold py-3 px-4 rounded-theme-lg transition-colors"
                             >
                                 Back to Dashboard
                             </button>
@@ -4659,28 +5036,28 @@ const StartAnyConceptSession = () => {
                     ) : (
                         <div className="space-y-6">
                             {/* Success message */}
-                            <div className="bg-green-50 border border-green-200 rounded-lg p-6">
-                                <h3 className="text-lg font-semibold text-green-800 mb-2">
+                            <div className="bg-emerald-500/10 border border-emerald-500/30 rounded-theme-lg p-6">
+                                <h3 className="text-lg font-semibold text-emerald-600 dark:text-emerald-400 mb-2">
                                     âœ“ Learning Path Generated!
                                 </h3>
-                                <p className="text-green-700">
+                                <p className="text-emerald-600 dark:text-emerald-400">
                                     We've created {generatedAtoms.atoms.length} atomic concepts for "{generatedAtoms.concept_name}".
                                 </p>
                             </div>
 
                             {/* Atoms list */}
                             <div>
-                                <h4 className="font-medium text-gray-700 mb-3">Atomic Concepts:</h4>
+                                <h4 className="font-medium text-theme-text-secondary mb-3">Atomic Concepts:</h4>
                                 <div className="space-y-2">
                                     {generatedAtoms.atoms.map((atom, index) => (
                                         <div 
                                             key={atom.id}
-                                            className="flex items-center p-3 bg-gray-50 rounded-lg"
+                                            className="flex items-center p-3 bg-theme-bg rounded-theme-lg"
                                         >
-                                            <span className="w-8 h-8 bg-blue-100 text-blue-800 rounded-full flex items-center justify-center font-bold mr-3">
+                                            <span className="w-8 h-8 bg-primary/10 text-primary rounded-full flex items-center justify-center font-bold mr-3">
                                                 {index + 1}
                                             </span>
-                                            <span className="text-gray-800">{atom.name}</span>
+                                            <span className="text-theme-text">{atom.name}</span>
                                         </div>
                                     ))}
                                 </div>
@@ -4689,19 +5066,20 @@ const StartAnyConceptSession = () => {
                             {/* Start learning button */}
                             <button
                                 onClick={handleStartLearning}
-                                className="w-full bg-green-600 hover:bg-green-700 text-white font-bold py-3 px-4 rounded-lg transition"
+                                className="w-full bg-emerald-500 hover:bg-emerald-600 text-white font-bold py-3 px-4 rounded-theme-lg transition-colors"
                             >
                                 Start Learning Now
                             </button>
 
                             {/* Note */}
-                            <p className="text-sm text-gray-500 text-center">
+                            <p className="text-sm text-theme-text-muted text-center">
                                 You'll learn each concept one by one, with teaching followed by assessment.
                             </p>
                         </div>
                     )}
                 </div>
             </div>
+            
         </div>
     );
 };
@@ -4730,13 +5108,234 @@ export default StartAnyConceptSessionRoute;
 ================================================
 FILE: frontend/src/components/Learning/TeachingFirstFlow.jsx
 ================================================
-Error reading file with 'cp1252': 'charmap' codec can't decode byte 0x8d in position 19846: character maps to <undefined>
+Error reading file with 'cp1252': 'charmap' codec can't decode byte 0x8d in position 23321: character maps to <undefined>
 
 
 ================================================
 FILE: frontend/src/components/Learning/TeachingModule.jsx
 ================================================
-Error reading file with 'cp1252': 'charmap' codec can't decode byte 0x90 in position 3033: character maps to <undefined>
+Error reading file with 'cp1252': 'charmap' codec can't decode byte 0x90 in position 3575: character maps to <undefined>
+
+
+================================================
+FILE: frontend/src/components/Learning/WeakTopicDetector.jsx
+================================================
+// frontend/src/components/Learning/WeakTopicDetector.jsx
+import React, { useState, useEffect } from 'react';
+import { AlertCircle, Target, TrendingUp, BookOpen, RefreshCw } from 'lucide-react';
+import { useLearning } from '../../context/LearningContext';
+
+const WeakTopicDetector = ({ conceptData, sessionId, onReviewStart }) => {
+  const [showDetails, setShowDetails] = useState(false);
+  const [analyzing, setAnalyzing] = useState(false);
+  const { fetchWeakTopics, weakTopics, loading } = useLearning();
+
+  // Get color based on mastery score
+  const getMasteryColor = (score) => {
+    if (score >= 0.7) return 'text-emerald-500';
+    if (score >= 0.5) return 'text-yellow-500';
+    if (score >= 0.3) return 'text-orange-500';
+    return 'text-error';
+  };
+
+  // Get background color based on mastery score
+  const getMasteryBgColor = (score) => {
+    if (score >= 0.7) return 'bg-emerald-500/10';
+    if (score >= 0.5) return 'bg-yellow-500/10';
+    if (score >= 0.3) return 'bg-orange-500/10';
+    return 'bg-error/10';
+  };
+
+  // Get progress bar color
+  const getProgressColor = (score) => {
+    if (score >= 0.7) return 'bg-emerald-500';
+    if (score >= 0.5) return 'bg-yellow-500';
+    if (score >= 0.3) return 'bg-orange-500';
+    return 'bg-error';
+  };
+
+  // If no concept data or no weakest atom, don't render
+  if (!conceptData || !conceptData.weakest_atom) {
+    return null;
+  }
+
+  const { weakest_atom, lowest_mastery, final_mastery, accuracy, passed } = conceptData;
+
+  return (
+    <div className="bg-surface rounded-theme-xl shadow-theme-lg border border-theme-border overflow-hidden animate-fade-in-up">
+      {/* Header */}
+      <div className="gradient-primary px-6 py-4 text-white flex items-center justify-between">
+        <div className="flex items-center gap-3">
+          <Target className="w-6 h-6" />
+          <div>
+            <h3 className="font-semibold text-lg">Topic Mastery Analysis</h3>
+            <p className="text-sm text-white/80">Personalized learning insights</p>
+          </div>
+        </div>
+        <button
+          onClick={() => setShowDetails(!showDetails)}
+          className="px-3 py-1 bg-white/20 rounded-theme-lg text-sm font-medium hover:bg-white/30 transition-colors"
+        >
+          {showDetails ? 'Hide Details' : 'View Details'}
+        </button>
+      </div>
+
+      {/* Main Content */}
+      <div className="p-6">
+        {/* Overall Performance */}
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+          <div className="bg-surface-alt rounded-theme-lg p-4">
+            <p className="text-sm text-theme-text-muted mb-1">Final Mastery</p>
+            <p className="text-2xl font-bold text-theme-text">
+              {Math.round(final_mastery * 100)}%
+            </p>
+            <div className="w-full h-2 bg-theme-border rounded-full mt-2">
+              <div
+                className="h-full bg-primary rounded-full transition-all duration-500"
+                style={{ width: `${final_mastery * 100}%` }}
+              />
+            </div>
+          </div>
+
+          <div className="bg-surface-alt rounded-theme-lg p-4">
+            <p className="text-sm text-theme-text-muted mb-1">Challenge Accuracy</p>
+            <p className="text-2xl font-bold text-theme-text">
+              {Math.round(accuracy * 100)}%
+            </p>
+            <div className="flex items-center gap-2 mt-2">
+              <span className={`text-sm font-medium ${passed ? 'text-emerald-500' : 'text-error'}`}>
+                {passed ? 'âœ“ Passed' : 'âœ— Needs Work'}
+              </span>
+            </div>
+          </div>
+
+          <div className="bg-surface-alt rounded-theme-lg p-4">
+            <p className="text-sm text-theme-text-muted mb-1">Concept Mastery</p>
+            <p className="text-2xl font-bold text-theme-text">
+              {Math.round(conceptData.concept_mastery * 100)}%
+            </p>
+            <p className="text-xs text-theme-text-muted mt-2">
+              Average of all atoms
+            </p>
+          </div>
+        </div>
+
+        {/* Weakest Topic Alert */}
+        <div className={`${getMasteryBgColor(lowest_mastery)} rounded-theme-lg p-5 border ${getMasteryColor(lowest_mastery).replace('text', 'border')}/20`}>
+          <div className="flex items-start gap-4">
+            <div className={`p-3 rounded-full ${getMasteryBgColor(lowest_mastery)}`}>
+              <AlertCircle className={`w-6 h-6 ${getMasteryColor(lowest_mastery)}`} />
+            </div>
+            
+            <div className="flex-1">
+              <div className="flex items-center justify-between mb-2">
+                <h4 className="font-semibold text-theme-text">Weakest Topic Identified</h4>
+                <span className={`px-3 py-1 rounded-full text-xs font-medium ${getMasteryBgColor(lowest_mastery)} ${getMasteryColor(lowest_mastery)}`}>
+                  Priority Review
+                </span>
+              </div>
+              
+              <p className="text-lg font-bold text-theme-text mb-2">
+                {weakest_atom}
+              </p>
+              
+              <div className="flex items-center gap-4 mb-3">
+                <div className="flex-1">
+                  <div className="flex justify-between text-sm mb-1">
+                    <span className="text-theme-text-muted">Current Mastery</span>
+                    <span className={`font-medium ${getMasteryColor(lowest_mastery)}`}>
+                      {Math.round(lowest_mastery * 100)}%
+                    </span>
+                  </div>
+                  <div className="w-full h-2 bg-theme-border rounded-full overflow-hidden">
+                    <div
+                      className={`h-full ${getProgressColor(lowest_mastery)} transition-all duration-500`}
+                      style={{ width: `${lowest_mastery * 100}%` }}
+                    />
+                  </div>
+                </div>
+                
+                <button
+                  onClick={() => onReviewStart?.(weakest_atom)}
+                  className="px-4 py-2 gradient-primary text-white rounded-theme-lg text-sm font-medium hover:opacity-90 transition-opacity flex items-center gap-2"
+                >
+                  <RefreshCw className="w-4 h-4" />
+                  Review Now
+                </button>
+              </div>
+
+              {/* Recommendation */}
+              <div className="mt-4 p-3 bg-theme-bg rounded-theme-lg border border-theme-border">
+                <p className="text-sm text-theme-text">
+                  {conceptData.recommendation}
+                </p>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* Detailed Analysis (Conditional) */}
+        {showDetails && (
+          <div className="mt-6 animate-fade-in">
+            <h4 className="font-semibold text-theme-text mb-3 flex items-center gap-2">
+              <BookOpen className="w-4 h-4 text-primary" />
+              Learning Recommendations
+            </h4>
+            
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div className="bg-surface-alt rounded-theme-lg p-4">
+                <h5 className="font-medium text-theme-text mb-2">Focus Areas</h5>
+                <ul className="space-y-2">
+                  <li className="flex items-start gap-2 text-sm text-theme-text-secondary">
+                    <span className="text-primary mt-1">â€¢</span>
+                    <span>Review fundamental concepts of "{weakest_atom}"</span>
+                  </li>
+                  <li className="flex items-start gap-2 text-sm text-theme-text-secondary">
+                    <span className="text-primary mt-1">â€¢</span>
+                    <span>Practice with targeted exercises</span>
+                  </li>
+                  <li className="flex items-start gap-2 text-sm text-theme-text-secondary">
+                    <span className="text-primary mt-1">â€¢</span>
+                    <span>Watch video explanations for better understanding</span>
+                  </li>
+                </ul>
+              </div>
+
+              <div className="bg-surface-alt rounded-theme-lg p-4">
+                <h5 className="font-medium text-theme-text mb-2">Mastery Gap</h5>
+                <div className="space-y-3">
+                  <div>
+                    <div className="flex justify-between text-sm mb-1">
+                      <span className="text-theme-text-muted">Current</span>
+                      <span className="text-orange-500">{Math.round(lowest_mastery * 100)}%</span>
+                    </div>
+                    <div className="w-full h-2 bg-theme-border rounded-full overflow-hidden">
+                      <div className="h-full bg-orange-500" style={{ width: `${lowest_mastery * 100}%` }} />
+                    </div>
+                  </div>
+                  <div>
+                    <div className="flex justify-between text-sm mb-1">
+                      <span className="text-theme-text-muted">Target</span>
+                      <span className="text-emerald-500">70%</span>
+                    </div>
+                    <div className="w-full h-2 bg-theme-border rounded-full overflow-hidden">
+                      <div className="h-full bg-emerald-500" style={{ width: '70%' }} />
+                    </div>
+                  </div>
+                  <p className="text-xs text-theme-text-muted mt-2">
+                    Need to improve by {Math.max(0, 70 - lowest_mastery * 100).toFixed(0)}% to reach mastery
+                  </p>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+};
+
+export default WeakTopicDetector;
 
 
 ================================================
@@ -4869,10 +5468,22 @@ export const LearningProvider = ({ children }) => {
     const [showTeaching, setShowTeaching] = useState(false);
     const [teachingContent, setTeachingContent] = useState(null);
     const [metrics, setMetrics] = useState({});
+
+    // Enhanced pacing engine state
+    const [fatigueLevel, setFatigueLevel] = useState('fresh');
+    const [velocityData, setVelocityData] = useState([]);
+    const [retentionAction, setRetentionAction] = useState(null);
+    const [hintWarning, setHintWarning] = useState(null);
+    const [engagementScore, setEngagementScore] = useState(0.7);
+    const [masteryVerdict, setMasteryVerdict] = useState(null);
+    const [showBreakModal, setShowBreakModal] = useState(false);
     
     // Timers
     const questionStartTime = useRef(null);
     const [timeSpent, setTimeSpent] = useState(0);
+
+    // Race-condition guard: track latest generation request
+    const latestQuestionGenId = useRef(0);
 
     // Generate atoms for a concept (no questions)
     const generateConcept = useCallback(async (subject, concept, knowledgeLevel = 'intermediate') => {
@@ -4969,6 +5580,7 @@ export const LearningProvider = ({ children }) => {
     // Generate questions based on teaching content
     const generateQuestionsFromTeaching = useCallback(async ({ session_id, atom_id, force_new = false }) => {
         setLoading(true);
+        const requestId = ++latestQuestionGenId.current;
         try {
             const response = await axios.post('/auth/api/generate-questions-from-teaching/', {
                 session_id: session_id,
@@ -4976,11 +5588,14 @@ export const LearningProvider = ({ children }) => {
                 force_new: force_new
             });
             
-            setCurrentQuestions(response.data.questions || []);
-            setCurrentQuestionIndex(0);
-            
-            // Start timer for first question
-            questionStartTime.current = Date.now();
+            // Only apply state if this is still the latest request (prevents race condition)
+            if (requestId === latestQuestionGenId.current) {
+                setCurrentQuestions(response.data.questions || []);
+                setCurrentQuestionIndex(0);
+                
+                // Start timer for first question
+                questionStartTime.current = Date.now();
+            }
             
             return { success: true, data: response.data };
         } catch (error) {
@@ -4989,7 +5604,9 @@ export const LearningProvider = ({ children }) => {
                 error: error.response?.data?.error || 'Failed to generate questions'
             };
         } finally {
-            setLoading(false);
+            if (requestId === latestQuestionGenId.current) {
+                setLoading(false);
+            }
         }
     }, []);
 
@@ -5044,14 +5661,17 @@ export const LearningProvider = ({ children }) => {
 
     const generateFinalChallenge = useCallback(async ({ session_id, atom_id }) => {
         setLoading(true);
+        const requestId = ++latestQuestionGenId.current;
         try {
             const response = await axios.post('/auth/api/final-challenge/', {
                 session_id,
                 atom_id
             });
-            setCurrentQuestions(response.data.questions || []);
-            setCurrentQuestionIndex(0);
-            questionStartTime.current = Date.now();
+            if (requestId === latestQuestionGenId.current) {
+                setCurrentQuestions(response.data.questions || []);
+                setCurrentQuestionIndex(0);
+                questionStartTime.current = Date.now();
+            }
             return { success: true, data: response.data };
         } catch (error) {
             return {
@@ -5059,7 +5679,9 @@ export const LearningProvider = ({ children }) => {
                 error: error.response?.data?.error || 'Failed to generate final challenge'
             };
         } finally {
-            setLoading(false);
+            if (requestId === latestQuestionGenId.current) {
+                setLoading(false);
+            }
         }
     }, []);
 
@@ -5074,6 +5696,80 @@ export const LearningProvider = ({ children }) => {
             return {
                 success: false,
                 error: error.response?.data?.error || 'Failed to complete final challenge'
+            };
+        }
+    }, []);
+
+    // â”€â”€ Concept Final Challenge â”€â”€
+
+    const generateConceptFinalChallenge = useCallback(async ({ session_id, concept_id }) => {
+        setLoading(true);
+        const requestId = ++latestQuestionGenId.current;
+        try {
+            const response = await axios.post('/auth/api/concept-final-challenge/', {
+                session_id,
+                concept_id
+            });
+            if (requestId === latestQuestionGenId.current) {
+                setCurrentQuestions(response.data.questions || []);
+                setCurrentQuestionIndex(0);
+                questionStartTime.current = Date.now();
+            }
+            return { success: true, data: response.data };
+        } catch (error) {
+            return {
+                success: false,
+                error: error.response?.data?.error || 'Failed to generate concept final challenge'
+            };
+        } finally {
+            if (requestId === latestQuestionGenId.current) {
+                setLoading(false);
+            }
+        }
+    }, []);
+
+    const submitConceptFinalAnswer = useCallback(async ({ session_id, question_index, selected, time_taken }) => {
+        let timeTaken = time_taken;
+        if (timeTaken === undefined && questionStartTime.current) {
+            timeTaken = Math.round((Date.now() - questionStartTime.current) / 1000);
+        } else if (timeTaken === undefined) {
+            timeTaken = 30;
+        }
+        try {
+            const response = await axios.post('/auth/api/submit-concept-final-answer/', {
+                session_id,
+                question_index,
+                selected,
+                time_taken: timeTaken
+            });
+            const data = response.data;
+            const newAnswer = {
+                question_index,
+                selected,
+                correct: data.correct,
+                time_taken: timeTaken,
+            };
+            setAnswers(prev => [...prev, newAnswer]);
+            return { success: true, data };
+        } catch (error) {
+            return {
+                success: false,
+                error: error.response?.data?.error || 'Failed to submit concept final answer'
+            };
+        }
+    }, []);
+
+    const completeConceptFinalChallenge = useCallback(async ({ session_id, concept_id }) => {
+        try {
+            const response = await axios.post('/auth/api/complete-concept-final-challenge/', {
+                session_id,
+                concept_id
+            });
+            return { success: true, data: response.data };
+        } catch (error) {
+            return {
+                success: false,
+                error: error.response?.data?.error || 'Failed to complete concept final challenge'
             };
         }
     }, []);
@@ -5113,6 +5809,19 @@ export const LearningProvider = ({ children }) => {
             setPacingDecision(data.pacing_decision);
             setNextAction(data.next_action);
             setMetrics(data.metrics || {});
+
+            // Enhanced pacing engine updates
+            if (data.fatigue) setFatigueLevel(data.fatigue);
+            if (data.retention_action) setRetentionAction(data.retention_action);
+            if (data.hint_warning) setHintWarning(data.hint_warning);
+            if (data.engagement_adjustment) setEngagementScore(data.engagement_adjustment.score ?? engagementScore);
+            if (data.mastery_verdict) setMasteryVerdict(data.mastery_verdict);
+            if (data.velocity_snapshot) setVelocityData(prev => [...prev, data.velocity_snapshot]);
+
+            // Auto-show break modal on high fatigue
+            if (data.fatigue === 'high' || data.fatigue === 'critical') {
+                setShowBreakModal(true);
+            }
             
             // Store answer
             const newAnswer = {
@@ -5215,6 +5924,72 @@ export const LearningProvider = ({ children }) => {
         }
     }, []);
 
+    // â”€â”€ Enhanced pacing engine API methods â”€â”€
+
+    const fetchVelocityGraph = useCallback(async (sessionId) => {
+        try {
+            const response = await axios.get('/auth/api/velocity-graph/', {
+                params: { session_id: sessionId }
+            });
+            setVelocityData(response.data.session_velocity || []);
+            setEngagementScore(response.data.engagement_score ?? 0.7);
+            return { success: true, data: response.data };
+        } catch (error) {
+            return { success: false, error: error.response?.data?.error || 'Failed to fetch velocity' };
+        }
+    }, []);
+
+    const fetchFatigueStatus = useCallback(async (sessionId) => {
+        try {
+            const response = await axios.get('/auth/api/fatigue-status/', {
+                params: { session_id: sessionId }
+            });
+            setFatigueLevel(response.data.fatigue_level || 'fresh');
+            return { success: true, data: response.data };
+        } catch (error) {
+            return { success: false, error: error.response?.data?.error || 'Failed to fetch fatigue' };
+        }
+    }, []);
+
+    const recordBreak = useCallback(async (sessionId) => {
+        try {
+            const response = await axios.post('/auth/api/record-break/', {
+                session_id: sessionId
+            });
+            setFatigueLevel('fresh');
+            setShowBreakModal(false);
+            return { success: true, data: response.data };
+        } catch (error) {
+            return { success: false, error: error.response?.data?.error || 'Failed to record break' };
+        }
+    }, []);
+
+    const checkRetention = useCallback(async ({ session_id, atom_id, passed = null }) => {
+        try {
+            const response = await axios.post('/auth/api/retention-check/', {
+                session_id, atom_id, passed
+            });
+            if (passed !== null) {
+                setRetentionAction(null); // Clear after recording
+            }
+            return { success: true, data: response.data };
+        } catch (error) {
+            return { success: false, error: error.response?.data?.error || 'Failed retention check' };
+        }
+    }, []);
+
+    const recordHint = useCallback(async ({ atom_id, hint_level = 1 }) => {
+        try {
+            const response = await axios.post('/auth/api/record-hint/', {
+                atom_id, hint_level
+            });
+            setHintWarning(response.data.hint_warning);
+            return { success: true, data: response.data };
+        } catch (error) {
+            return { success: false, error: error.response?.data?.error || 'Failed to record hint' };
+        }
+    }, []);
+
     // Reset for new atom
     const resetForNewAtom = useCallback(() => {
         setCurrentQuestions([]);
@@ -5245,10 +6020,20 @@ export const LearningProvider = ({ children }) => {
         teachingContent,
         metrics,
         timeSpent,
+
+        // Enhanced pacing engine state
+        fatigueLevel,
+        velocityData,
+        retentionAction,
+        hintWarning,
+        engagementScore,
+        masteryVerdict,
+        showBreakModal,
         
         // Setters
         setKnowledgeLevel,
         setShowTeaching,
+        setShowBreakModal,
         
         // Core methods
         generateConcept,
@@ -5264,7 +6049,19 @@ export const LearningProvider = ({ children }) => {
         completeAtom,
         loadLearningProgress,
         nextQuestion,
-        resetForNewAtom
+        resetForNewAtom,
+
+        // Enhanced pacing engine methods
+        fetchVelocityGraph,
+        fetchFatigueStatus,
+        recordBreak,
+        checkRetention,
+        recordHint,
+
+        // Concept final challenge methods
+        generateConceptFinalChallenge,
+        submitConceptFinalAnswer,
+        completeConceptFinalChallenge,
         
     }), [
         currentSession,
@@ -5283,6 +6080,13 @@ export const LearningProvider = ({ children }) => {
         teachingContent,
         metrics,
         timeSpent,
+        fatigueLevel,
+        velocityData,
+        retentionAction,
+        hintWarning,
+        engagementScore,
+        masteryVerdict,
+        showBreakModal,
         generateConcept,
         startTeachingSession,
         getTeachingContent,
@@ -5296,7 +6100,15 @@ export const LearningProvider = ({ children }) => {
         completeAtom,
         loadLearningProgress,
         nextQuestion,
-        resetForNewAtom
+        resetForNewAtom,
+        fetchVelocityGraph,
+        fetchFatigueStatus,
+        recordBreak,
+        checkRetention,
+        recordHint,
+        generateConceptFinalChallenge,
+        submitConceptFinalAnswer,
+        completeConceptFinalChallenge,
     ]);
 
     return (
@@ -5313,4 +6125,54 @@ export const useLearning = () => {
     }
     return context;
 };
+
+
+================================================
+FILE: frontend/src/context/ThemeContext.jsx
+================================================
+import React, { createContext, useContext, useEffect, useState } from 'react';
+
+const ThemeContext = createContext(null);
+
+export const ThemeProvider = ({ children }) => {
+    const [theme, setTheme] = useState(() => {
+        if (typeof window !== 'undefined') {
+            const stored = localStorage.getItem('theme');
+            if (stored) return stored;
+            return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+        }
+        return 'light';
+    });
+
+    useEffect(() => {
+        const root = document.documentElement;
+        if (theme === 'dark') {
+            root.classList.add('dark');
+        } else {
+            root.classList.remove('dark');
+        }
+        localStorage.setItem('theme', theme);
+    }, [theme]);
+
+    const toggleTheme = () => setTheme(prev => (prev === 'dark' ? 'light' : 'dark'));
+
+    return (
+        <ThemeContext.Provider value={{ theme, toggleTheme }}>
+            {children}
+        </ThemeContext.Provider>
+    );
+};
+
+export const useTheme = () => {
+    const ctx = useContext(ThemeContext);
+    if (!ctx) throw new Error('useTheme must be used within ThemeProvider');
+    return ctx;
+};
+
+
+
+================================================
+FILE: frontend/src/pages/AIAssistantPage.jsx
+================================================
+Error reading file with 'cp1252': 'charmap' codec can't decode byte 0x8f in position 7561: character maps to <undefined>
 

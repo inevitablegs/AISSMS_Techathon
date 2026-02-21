@@ -1,7 +1,7 @@
 from django.urls import path
 from .views import (
     # Auth views
-    GetConceptResourcesView, RegisterView, LoginView, DashboardView,
+    AIDoubtAssistantView, GetConceptResourcesView, RegisterView, LoginView, DashboardView,
     
     # Concept management
     ConceptListView, GenerateConceptView,
@@ -67,4 +67,5 @@ urlpatterns = [
     path('api/concept-final-challenge/', GenerateConceptFinalChallengeView.as_view(), name='generate_concept_final_challenge'),
     path('api/submit-concept-final-answer/', SubmitConceptFinalAnswerView.as_view(), name='submit_concept_final_answer'),
     path('api/complete-concept-final-challenge/', CompleteConceptFinalChallengeView.as_view(), name='complete_concept_final_challenge'),
+    path("ai-assistant/", AIDoubtAssistantView.as_view(), name="ai_assistant"),
 ]

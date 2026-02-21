@@ -9,10 +9,223 @@ import AtomComplete from './AtomComplete';
 import AtomReview from './AtomReview';
 import FatigueIndicator from './FatigueIndicator';
 import LearningVelocityGraph from './LearningVelocityGraph';
+// Inline WeakTopicDetector component
+import { AlertCircle, Target, TrendingUp, BookOpen, RefreshCw } from 'lucide-react';
+
+const WeakTopicDetector = ({ conceptData, sessionId, onReviewStart }) => {
+    const [showDetails, setShowDetails] = useState(false);
+    const [analyzing, setAnalyzing] = useState(false);
+    // NOTE: If you want to use fetchWeakTopics, weakTopics, loading from context, add:
+    // const { fetchWeakTopics, weakTopics, loading } = useLearning();
+
+    // Get color based on mastery score
+    const getMasteryColor = (score) => {
+        if (score >= 0.7) return 'text-emerald-500';
+        if (score >= 0.5) return 'text-yellow-500';
+        if (score >= 0.3) return 'text-orange-500';
+        return 'text-error';
+    };
+
+    // Get background color based on mastery score
+    const getMasteryBgColor = (score) => {
+        if (score >= 0.7) return 'bg-emerald-500/10';
+        if (score >= 0.5) return 'bg-yellow-500/10';
+        if (score >= 0.3) return 'bg-orange-500/10';
+        return 'bg-error/10';
+    };
+
+    // Get progress bar color
+    const getProgressColor = (score) => {
+        if (score >= 0.7) return 'bg-emerald-500';
+        if (score >= 0.5) return 'bg-yellow-500';
+        if (score >= 0.3) return 'bg-orange-500';
+        return 'bg-error';
+    };
+
+    // If no concept data or no weakest atom, don't render
+    if (!conceptData || !conceptData.weakest_atom) {
+        return null;
+    }
+
+    const { weakest_atom, lowest_mastery, final_mastery, accuracy, passed } = conceptData;
+
+    return (
+        <div className="bg-surface rounded-theme-xl shadow-theme-lg border border-theme-border overflow-hidden animate-fade-in-up">
+            {/* Header */}
+            <div className="gradient-primary px-6 py-4 text-white flex items-center justify-between">
+                <div className="flex items-center gap-3">
+                    <Target className="w-6 h-6" />
+                    <div>
+                        <h3 className="font-semibold text-lg">Topic Mastery Analysis</h3>
+                        <p className="text-sm text-white/80">Personalized learning insights</p>
+                    </div>
+                </div>
+                <button
+                    onClick={() => setShowDetails(!showDetails)}
+                    className="px-3 py-1 bg-white/20 rounded-theme-lg text-sm font-medium hover:bg-white/30 transition-colors"
+                >
+                    {showDetails ? 'Hide Details' : 'View Details'}
+                </button>
+            </div>
+
+            {/* Main Content */}
+            <div className="p-6">
+                {/* Overall Performance */}
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+                    <div className="bg-surface-alt rounded-theme-lg p-4">
+                        <p className="text-sm text-theme-text-muted mb-1">Final Mastery</p>
+                        <p className="text-2xl font-bold text-theme-text">
+                            {Math.round(final_mastery * 100)}%
+                        </p>
+                        <div className="w-full h-2 bg-theme-border rounded-full mt-2">
+                            <div
+                                className="h-full bg-primary rounded-full transition-all duration-500"
+                                style={{ width: `${final_mastery * 100}%` }}
+                            />
+                        </div>
+                    </div>
+
+                    <div className="bg-surface-alt rounded-theme-lg p-4">
+                        <p className="text-sm text-theme-text-muted mb-1">Challenge Accuracy</p>
+                        <p className="text-2xl font-bold text-theme-text">
+                            {Math.round(accuracy * 100)}%
+                        </p>
+                        <div className="flex items-center gap-2 mt-2">
+                            <span className={`text-sm font-medium ${passed ? 'text-emerald-500' : 'text-error'}`}>
+                                {passed ? '✓ Passed' : '✗ Needs Work'}
+                            </span>
+                        </div>
+                    </div>
+
+                    <div className="bg-surface-alt rounded-theme-lg p-4">
+                        <p className="text-sm text-theme-text-muted mb-1">Concept Mastery</p>
+                        <p className="text-2xl font-bold text-theme-text">
+                            {Math.round(conceptData.concept_mastery * 100)}%
+                        </p>
+                        <p className="text-xs text-theme-text-muted mt-2">
+                            Average of all atoms
+                        </p>
+                    </div>
+                </div>
+
+                {/* Weakest Topic Alert */}
+                <div className={`${getMasteryBgColor(lowest_mastery)} rounded-theme-lg p-5 border ${getMasteryColor(lowest_mastery).replace('text', 'border')}/20`}>
+                    <div className="flex items-start gap-4">
+                        <div className={`p-3 rounded-full ${getMasteryBgColor(lowest_mastery)}`}>
+                            <AlertCircle className={`w-6 h-6 ${getMasteryColor(lowest_mastery)}`} />
+                        </div>
+
+                        <div className="flex-1">
+                            <div className="flex items-center justify-between mb-2">
+                                <h4 className="font-semibold text-theme-text">Weakest Topic Identified</h4>
+                                <span className={`px-3 py-1 rounded-full text-xs font-medium ${getMasteryBgColor(lowest_mastery)} ${getMasteryColor(lowest_mastery)}`}>
+                                    Priority Review
+                                </span>
+                            </div>
+
+                            <p className="text-lg font-bold text-theme-text mb-2">
+                                {weakest_atom}
+                            </p>
+
+                            <div className="flex items-center gap-4 mb-3">
+                                <div className="flex-1">
+                                    <div className="flex justify-between text-sm mb-1">
+                                        <span className="text-theme-text-muted">Current Mastery</span>
+                                        <span className={`font-medium ${getMasteryColor(lowest_mastery)}`}>
+                                            {Math.round(lowest_mastery * 100)}%
+                                        </span>
+                                    </div>
+                                    <div className="w-full h-2 bg-theme-border rounded-full overflow-hidden">
+                                        <div
+                                            className={`h-full ${getProgressColor(lowest_mastery)} transition-all duration-500`}
+                                            style={{ width: `${lowest_mastery * 100}%` }}
+                                        />
+                                    </div>
+                                </div>
+
+                                <button
+                                    onClick={() => onReviewStart?.(weakest_atom)}
+                                    className="px-4 py-2 gradient-primary text-white rounded-theme-lg text-sm font-medium hover:opacity-90 transition-opacity flex items-center gap-2"
+                                >
+                                    <RefreshCw className="w-4 h-4" />
+                                    Review Now
+                                </button>
+                            </div>
+
+                            {/* Recommendation */}
+                            <div className="mt-4 p-3 bg-theme-bg rounded-theme-lg border border-theme-border">
+                                <p className="text-sm text-theme-text">
+                                    {conceptData.recommendation}
+                                </p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                {/* Detailed Analysis (Conditional) */}
+                {showDetails && (
+                    <div className="mt-6 animate-fade-in">
+                        <h4 className="font-semibold text-theme-text mb-3 flex items-center gap-2">
+                            <BookOpen className="w-4 h-4 text-primary" />
+                            Learning Recommendations
+                        </h4>
+
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                            <div className="bg-surface-alt rounded-theme-lg p-4">
+                                <h5 className="font-medium text-theme-text mb-2">Focus Areas</h5>
+                                <ul className="space-y-2">
+                                    <li className="flex items-start gap-2 text-sm text-theme-text-secondary">
+                                        <span className="text-primary mt-1">•</span>
+                                        <span>Review fundamental concepts of "{weakest_atom}"</span>
+                                    </li>
+                                    <li className="flex items-start gap-2 text-sm text-theme-text-secondary">
+                                        <span className="text-primary mt-1">•</span>
+                                        <span>Practice with targeted exercises</span>
+                                    </li>
+                                    <li className="flex items-start gap-2 text-sm text-theme-text-secondary">
+                                        <span className="text-primary mt-1">•</span>
+                                        <span>Watch video explanations for better understanding</span>
+                                    </li>
+                                </ul>
+                            </div>
+
+                            <div className="bg-surface-alt rounded-theme-lg p-4">
+                                <h5 className="font-medium text-theme-text mb-2">Mastery Gap</h5>
+                                <div className="space-y-3">
+                                    <div>
+                                        <div className="flex justify-between text-sm mb-1">
+                                            <span className="text-theme-text-muted">Current</span>
+                                            <span className="text-orange-500">{Math.round(lowest_mastery * 100)}%</span>
+                                        </div>
+                                        <div className="w-full h-2 bg-theme-border rounded-full overflow-hidden">
+                                            <div className="h-full bg-orange-500" style={{ width: `${lowest_mastery * 100}%` }} />
+                                        </div>
+                                    </div>
+                                    <div>
+                                        <div className="flex justify-between text-sm mb-1">
+                                            <span className="text-theme-text-muted">Target</span>
+                                            <span className="text-emerald-500">70%</span>
+                                        </div>
+                                        <div className="w-full h-2 bg-theme-border rounded-full overflow-hidden">
+                                            <div className="h-full bg-emerald-500" style={{ width: '70%' }} />
+                                        </div>
+                                    </div>
+                                    <p className="text-xs text-theme-text-muted mt-2">
+                                        Need to improve by {Math.max(0, 70 - lowest_mastery * 100).toFixed(0)}% to reach mastery
+                                    </p>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                )}
+            </div>
+        </div>
+    );
+};
 
 const TeachingFirstFlow = ({ conceptId }) => {
     const navigate = useNavigate();
-    
+
     // Core state
     const [currentAtomData, setCurrentAtomData] = useState(null);
     const [sessionStarted, setSessionStarted] = useState(false);
@@ -24,9 +237,9 @@ const TeachingFirstFlow = ({ conceptId }) => {
     const [finalRecommendation, setFinalRecommendation] = useState('');
     const [nextAtomAfterFinal, setNextAtomAfterFinal] = useState(null);
     const [conceptFinalResult, setConceptFinalResult] = useState(null);
-    
+
     // Get all context values
-    const { 
+    const {
         // State
         currentSession,
         currentAtom,
@@ -41,7 +254,7 @@ const TeachingFirstFlow = ({ conceptId }) => {
         answers,
         metrics,
         loading,
-        
+
         // Methods
         startTeachingSession,
         getTeachingContent,
@@ -74,21 +287,21 @@ const TeachingFirstFlow = ({ conceptId }) => {
     } = useLearning();
 
     const [currentSubject, setCurrentSubject] = useState('');
-const [currentConceptName, setCurrentConceptName] = useState('');
+    const [currentConceptName, setCurrentConceptName] = useState('');
 
-// When starting the session, store the subject and concept
-useEffect(() => {
-    if (currentSession) {
-        setCurrentSubject(currentSession.subject || '');
-        setCurrentConceptName(currentSession.concept_name || '');
-    }
-}, [currentSession]);
+    // When starting the session, store the subject and concept
+    useEffect(() => {
+        if (currentSession) {
+            setCurrentSubject(currentSession.subject || '');
+            setCurrentConceptName(currentSession.concept_name || '');
+        }
+    }, [currentSession]);
 
     // Refs for tracking
     const sessionIdRef = useRef(null);
     const conceptIdRef = useRef(conceptId);
     const flowStateRef = useRef(flowState);
-    
+
     // Update ref when flowState changes
     useEffect(() => {
         flowStateRef.current = flowState;
@@ -98,14 +311,14 @@ useEffect(() => {
     useEffect(() => {
         const initSession = async () => {
             if (!conceptId || sessionStarted) return;
-            
+
             setFlowState('initializing');
             setError(null);
-            
+
             try {
                 console.log('Starting teaching session for concept:', conceptId);
                 const result = await startTeachingSession(conceptId, 'intermediate');
-                
+
                 if (result.success && result.data) {
                     console.log('Session started:', result.data);
                     sessionIdRef.current = result.data.session_id;
@@ -146,7 +359,7 @@ useEffect(() => {
                 setFlowState('error');
             }
         };
-        
+
         initSession();
     }, [conceptId, sessionStarted, startTeachingSession, generateInitialQuiz, getTeachingContent]);
 
@@ -156,17 +369,17 @@ useEffect(() => {
             console.error('No active session');
             return;
         }
-        
+
         setFlowState('loading');
         setError(null);
-        
+
         try {
             console.log('Getting teaching content for atom:', atom.id);
             const result = await getTeachingContent({
                 session_id: currentSession.session_id,
                 atom_id: atom.id
             });
-            
+
             if (result.success) {
                 setCurrentAtomData(atom);
                 setFlowState('teaching');
@@ -187,17 +400,17 @@ useEffect(() => {
             console.error('Missing session or atom data');
             return;
         }
-        
+
         setFlowState('loading');
         setError(null);
-        
+
         try {
             console.log('Generating questions for atom:', currentAtomData.id);
             const result = await generateQuestionsFromTeaching({
                 session_id: currentSession.session_id,
                 atom_id: currentAtomData.id
             });
-            
+
             if (result.success && result.data.questions?.length > 0) {
                 setFlowState('questions');
             } else {
@@ -438,13 +651,13 @@ useEffect(() => {
     // Handle review complete
     const handleReviewComplete = useCallback(async (action) => {
         if (!currentSession?.session_id || !currentAtomData?.id) return;
-        
+
         console.log('Review complete with action:', action);
-        
+
         if (action === 'reteach') {
             // Show teaching again (with focus on problem areas)
             setFlowState('loading');
-            
+
             try {
                 await getTeachingContent({
                     session_id: currentSession.session_id,
@@ -456,11 +669,11 @@ useEffect(() => {
                 setError('Failed to load teaching content');
                 setFlowState('error');
             }
-            
+
         } else if (action === 'practice') {
             // Generate new practice questions
             setFlowState('loading');
-            
+
             try {
                 await generateQuestionsFromTeaching({
                     session_id: currentSession.session_id,
@@ -473,11 +686,11 @@ useEffect(() => {
                 setError('Failed to generate questions');
                 setFlowState('error');
             }
-            
+
         } else if (action === 'skip') {
             // Force continue despite low mastery
             setFlowState('completing');
-            
+
             try {
                 const completeResult = await completeAtom({
                     session_id: currentSession.session_id,
@@ -485,7 +698,7 @@ useEffect(() => {
                     continue_learning: true,
                     force_continue: true
                 });
-                
+
                 if (completeResult.success) {
                     if (completeResult.data.next_atom) {
                         setCurrentAtomData(completeResult.data.next_atom);
@@ -553,13 +766,13 @@ useEffect(() => {
                     <h2 className="text-2xl font-bold text-error mb-2">Something went wrong</h2>
                     <p className="text-theme-text-secondary mb-6">{error}</p>
                     <div className="space-y-3">
-                        <button 
+                        <button
                             onClick={handleRetry}
                             className="w-full px-4 py-2 gradient-primary text-white rounded-theme-lg hover:shadow-theme-lg transition-all"
                         >
                             Try Again
                         </button>
-                        <button 
+                        <button
                             onClick={handleBackToDashboard}
                             className="w-full px-4 py-2 bg-theme-bg text-theme-text-secondary rounded-theme-lg hover:bg-theme-border transition-colors"
                         >
@@ -579,7 +792,7 @@ useEffect(() => {
                     <div className="text-5xl mb-4">🔍</div>
                     <h2 className="text-2xl font-bold text-theme-text mb-2">No Active Session</h2>
                     <p className="text-theme-text-secondary mb-6">We couldn't find an active learning session.</p>
-                    <button 
+                    <button
                         onClick={handleBackToDashboard}
                         className="px-4 py-2 gradient-primary text-white rounded-theme-lg hover:shadow-theme-lg transition-all"
                     >
@@ -610,7 +823,7 @@ useEffect(() => {
                                 {flowState === 'loading' && '⏳ Loading...'}
                             </p>
                         </div>
-                        
+
                         {/* Real-time Stats */}
                         <div className="flex space-x-4">
                             <div className="text-center">
@@ -619,36 +832,35 @@ useEffect(() => {
                                     {Math.round(atomMastery * 100)}%
                                 </div>
                                 <div className="w-20 h-1 bg-theme-border rounded-full mt-1">
-                                    <div 
+                                    <div
                                         className="h-1 gradient-primary rounded-full transition-all duration-300"
                                         style={{ width: `${atomMastery * 100}%` }}
                                     ></div>
                                 </div>
                             </div>
-                            
+
                             <div className="text-center">
                                 <div className="text-xs text-theme-text-muted">Ability (θ)</div>
                                 <div className="text-xl font-bold text-violet-500">
                                     {currentTheta.toFixed(2)}
                                 </div>
                             </div>
-                            
+
                             {pacingDecision && pacingDecision !== 'stay' && (
                                 <div className="text-center">
                                     <div className="text-xs text-theme-text-muted">Pace</div>
-                                    <div className={`text-sm font-bold px-2 py-1 rounded-theme ${
-                                        pacingDecision === 'speed_up' ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400' :
-                                        pacingDecision === 'slow_down' ? 'bg-amber-500/10 text-amber-600 dark:text-amber-400' :
-                                        pacingDecision === 'sharp_slowdown' ? 'bg-error/10 text-error' :
-                                        'bg-theme-bg text-theme-text'
-                                    }`}>
+                                    <div className={`text-sm font-bold px-2 py-1 rounded-theme ${pacingDecision === 'speed_up' ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400' :
+                                            pacingDecision === 'slow_down' ? 'bg-amber-500/10 text-amber-600 dark:text-amber-400' :
+                                                pacingDecision === 'sharp_slowdown' ? 'bg-error/10 text-error' :
+                                                    'bg-theme-bg text-theme-text'
+                                        }`}>
                                         {pacingDecision === 'speed_up' && '⚡ Speed Up'}
                                         {pacingDecision === 'slow_down' && '🐢 Slow Down'}
                                         {pacingDecision === 'sharp_slowdown' && '⚠️ Careful'}
                                     </div>
                                 </div>
                             )}
-                            
+
                             {answers.length > 0 && (
                                 <div className="text-center">
                                     <div className="text-xs text-theme-text-muted">Questions</div>
@@ -709,7 +921,7 @@ useEffect(() => {
                             currentMastery={atomMastery}
                         />
                     )}
-                    
+
                     {/* Questions Module */}
                     {flowState === 'questions' && currentQuestions?.length > 0 && currentAtomData && (
                         <QuestionsFromTeaching
@@ -724,7 +936,7 @@ useEffect(() => {
                             pacingDecision={pacingDecision}
                         />
                     )}
-                    
+
                     {/* Review Module */}
                     {flowState === 'review' && reviewMetrics && currentAtomData && (
                         <AtomReview
@@ -748,7 +960,7 @@ useEffect(() => {
                             showMetrics={false}
                         />
                     )}
-                    
+
                     {/* Atom Complete Module */}
                     {flowState === 'complete' && currentAtomData && (
                         <AtomComplete
@@ -760,7 +972,7 @@ useEffect(() => {
                             totalQuestions={answers.length}
                         />
                     )}
-                    
+
                     {/* Concept Final Challenge */}
                     {flowState === 'concept_final_challenge' && currentQuestions?.length > 0 && (
                         <QuestionsFromTeaching
@@ -781,7 +993,7 @@ useEffect(() => {
                             showMetrics={false}
                         />
                     )}
-                    
+
                     {/* Concept Complete */}
                     {flowState === 'concept_complete' && (
                         <div className="bg-surface rounded-theme-xl shadow-theme-lg border border-theme-border p-12 text-center animate-scale-in">
@@ -792,7 +1004,7 @@ useEffect(() => {
                             <p className="text-lg text-theme-text-secondary mb-6">
                                 {conceptFinalResult?.recommendation || "You've completed all atoms in this concept."}
                             </p>
-                            
+
                             {/* Final Stats */}
                             {conceptFinalResult && (
                                 <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 max-w-xl mx-auto mb-8">
@@ -845,7 +1057,7 @@ useEffect(() => {
                                     </div>
                                 </div>
                             )}
-                            
+
                             <div className="flex justify-center space-x-4">
                                 <button
                                     onClick={handleBackToDashboard}
@@ -862,7 +1074,7 @@ useEffect(() => {
                             </div>
                         </div>
                     )}
-                    
+
                     {/* Loading State for transitions */}
                     {flowState === 'loading' && (
                         <div className="bg-surface rounded-theme-xl shadow-theme border border-theme-border p-12 text-center">

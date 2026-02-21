@@ -1,10 +1,13 @@
 import json
+from django.http import JsonResponse
+from django.views.decorators.csrf import csrf_exempt
+from learning_engine.ai_assistant import generate_ai_response
 import logging
 from django.utils import timezone
 from django.contrib.auth import authenticate
 from django.contrib.auth.models import User
 from rest_framework import status
-from rest_framework.views import APIView
+from rest_framework.views import APIView, csrf_exempt
 from rest_framework.response import Response
 from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework_simplejwt.tokens import RefreshToken
@@ -2294,12 +2297,23 @@ class CompleteConceptFinalChallengeView(APIView):
         # Overall concept mastery from atoms
         concept_atoms = TeachingAtom.objects.filter(concept=concept)
         atom_masteries = []
+        weakest_atom = None
+        lowest_mastery = 1.0
+
         for atom in concept_atoms:
             try:
                 prog = StudentProgress.objects.get(user=request.user, atom=atom)
-                atom_masteries.append(float(prog.mastery_score))
+
+                mastery = float(prog.mastery_score)
+                
             except StudentProgress.DoesNotExist:
-                atom_masteries.append(0.0)
+                 mastery = 0.0
+            atom_masteries.append(0.0)
+
+            if mastery < lowest_mastery:
+                lowest_mastery = mastery
+                weakest_atom = atom
+
         concept_mastery = sum(atom_masteries) / max(len(atom_masteries), 1)
 
         # Blend atom mastery with final challenge accuracy
@@ -2327,11 +2341,18 @@ class CompleteConceptFinalChallengeView(APIView):
             'final_mastery': final_mastery,
             'passed': passed,
             'xp_earned': concept_xp,
+            'weakest_atom': weakest_atom.title if weakest_atom else None,
+            'lowest_mastery': lowest_mastery,
         }
         session.session_data = session_data
         session.save()
+        if accuracy < 0.6 and weakest_atom:
+            recommendation = (
+                f" We recommend revising '{weakest_atom.title}' "
+                f"(Mastery: {lowest_mastery:.0%}) before continuing."
+            )
 
-        if passed:
+        elif passed:
             recommendation = f"🎉 Congratulations! You passed with {accuracy:.0%} accuracy and earned {concept_xp} XP!"
         elif accuracy >= 0.4:
             recommendation = f"Almost there! You scored {accuracy:.0%}. Review weaker atoms and try again."
@@ -2347,4 +2368,52 @@ class CompleteConceptFinalChallengeView(APIView):
             'final_mastery': final_mastery,
             'concept_xp': concept_xp,
             'recommendation': recommendation,
+            weakest_atom: weakest_atom.title if weakest_atom else None,
         })
+    # ==================== AI Assistance ====================
+
+class AIDoubtAssistantView(APIView):
+    """
+    AI-Based Doubt Solver
+    Personalized explanation based on student mastery and accuracy
+    """
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        question = request.data.get("question")
+        topic = request.data.get("topic")
+        level = request.data.get("level")
+        accuracy = request.data.get("accuracy")
+
+        if not question or not topic:
+            return Response(
+                {"error": "Question and topic are required"},
+                status=400
+            )
+
+        try:
+            # Generate AI Response
+            answer = generate_ai_response(
+                question=question,
+                topic=topic,
+                level=level,
+                accuracy=accuracy
+            )
+
+            # Optional: Save doubt to session or database
+            # Example: Attach to LearningSession if needed
+
+            return Response({
+                "question": question,
+                "topic": topic,
+                "level_used": level,
+                "ai_answer": answer,
+                "timestamp": timezone.now(),
+                "message": "AI explanation generated successfully"
+            })
+
+        except Exception as e:
+            return Response(
+                {"error": str(e)},
+                status=500
+            )
