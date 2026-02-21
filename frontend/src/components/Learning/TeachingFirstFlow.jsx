@@ -1,4 +1,4 @@
-// frontend/src/components/Learning/TeachingFirstFlow.jsx - COMPLETE REWRITTEN VERSION
+// frontend/src/components/Learning/TeachingFirstFlow.jsx - COMPLETE ADAPTIVE FLOW
 
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
@@ -222,14 +222,16 @@ const WeakTopicDetector = ({ conceptData, sessionId, onReviewStart }) => {
         </div>
     );
 };
+import ConceptOverview from './ConceptOverview';
+import AtomSummary from './AtomSummary';
 
-const TeachingFirstFlow = ({ conceptId }) => {
+const TeachingFirstFlow = ({ conceptId, knowledgeLevel = 'intermediate' }) => {
     const navigate = useNavigate();
 
     // Core state
     const [currentAtomData, setCurrentAtomData] = useState(null);
     const [sessionStarted, setSessionStarted] = useState(false);
-    const [flowState, setFlowState] = useState('initializing'); // initializing, initial_quiz, teaching, questions, review, final_challenge, concept_final_challenge, complete, concept_complete
+    const [flowState, setFlowState] = useState('initializing'); // initializing, concept_overview, initial_quiz, teaching, questions, review, atom_summary, all_atoms_mastery, final_challenge, concept_final_challenge, complete, concept_complete
     const [reviewMetrics, setReviewMetrics] = useState(null);
     const [error, setError] = useState(null);
     const [retryCount, setRetryCount] = useState(0);
@@ -284,6 +286,15 @@ const TeachingFirstFlow = ({ conceptId }) => {
         generateConceptFinalChallenge,
         submitConceptFinalAnswer,
         completeConceptFinalChallenge,
+
+        // Adaptive flow
+        generateConceptOverview,
+        generateAtomSummary,
+        adaptiveReteach,
+        getAllAtomsMastery,
+        conceptOverview,
+        atomSummaries,
+        allAtomsMastery,
     } = useLearning();
 
     const [currentSubject, setCurrentSubject] = useState('');
@@ -296,6 +307,8 @@ const TeachingFirstFlow = ({ conceptId }) => {
             setCurrentConceptName(currentSession.concept_name || '');
         }
     }, [currentSession]);
+
+    const [quizEvaluation, setQuizEvaluation] = useState(null);
 
     // Refs for tracking
     const sessionIdRef = useRef(null);
@@ -316,8 +329,8 @@ const TeachingFirstFlow = ({ conceptId }) => {
             setError(null);
 
             try {
-                console.log('Starting teaching session for concept:', conceptId);
-                const result = await startTeachingSession(conceptId, 'intermediate');
+                console.log('Starting teaching session for concept:', conceptId, 'level:', knowledgeLevel);
+                const result = await startTeachingSession(conceptId, knowledgeLevel);
 
                 if (result.success && result.data) {
                     console.log('Session started:', result.data);
@@ -336,18 +349,56 @@ const TeachingFirstFlow = ({ conceptId }) => {
                         return;
                     }
 
-                    // Generate initial quiz before teaching
-                    const quizResult = await generateInitialQuiz({
-                        session_id: result.data.session_id
-                    });
+                    setCurrentAtomData(firstAtom);
 
-                    if (quizResult.success && quizResult.data?.questions?.length > 0) {
-                        setInitialQuestions(quizResult.data.questions);
-                        setCurrentAtomData(firstAtom);
-                        setFlowState('initial_quiz');
+                    // ADAPTIVE BRANCHING: Check knowledge level
+                    const level = knowledgeLevel || result.data.knowledge_level || 'intermediate';
+
+                    if (level === 'zero') {
+                        // Zero knowledge: Show concept overview first, then quiz
+                        console.log('Zero knowledge detected — generating concept overview');
+                        const overviewResult = await generateConceptOverview({
+                            session_id: result.data.session_id
+                        });
+
+                        if (overviewResult.success) {
+                            setFlowState('concept_overview');
+                        } else {
+                            // Fallback: skip overview and go directly to quiz
+                            console.warn('Overview generation failed, falling back to quiz');
+                            const quizResult = await generateInitialQuiz({
+                                session_id: result.data.session_id
+                            });
+                            if (quizResult.success && quizResult.data?.questions?.length > 0) {
+                                setInitialQuestions(quizResult.data.questions);
+                                setFlowState('initial_quiz');
+                            } else {
+                                // Even quiz failed, go to teaching
+                                const contentResult = await getTeachingContent({
+                                    session_id: result.data.session_id,
+                                    atom_id: firstAtom.id
+                                });
+                                if (contentResult.success) {
+                                    setFlowState('teaching');
+                                } else {
+                                    setError('Failed to start learning session');
+                                    setFlowState('error');
+                                }
+                            }
+                        }
                     } else {
-                        setError(quizResult.error || 'Failed to generate initial quiz');
-                        setFlowState('error');
+                        // Non-zero knowledge: go directly to diagnostic quiz
+                        const quizResult = await generateInitialQuiz({
+                            session_id: result.data.session_id
+                        });
+
+                        if (quizResult.success && quizResult.data?.questions?.length > 0) {
+                            setInitialQuestions(quizResult.data.questions);
+                            setFlowState('initial_quiz');
+                        } else {
+                            setError(quizResult.error || 'Failed to generate initial quiz');
+                            setFlowState('error');
+                        }
                     }
                 } else {
                     setError(result.error || 'Failed to start session');
@@ -361,7 +412,7 @@ const TeachingFirstFlow = ({ conceptId }) => {
         };
 
         initSession();
-    }, [conceptId, sessionStarted, startTeachingSession, generateInitialQuiz, getTeachingContent]);
+    }, [conceptId, sessionStarted, knowledgeLevel, startTeachingSession, generateInitialQuiz, getTeachingContent, generateConceptOverview]);
 
     // Handle starting an atom
     const handleStartAtom = useCallback(async (atom) => {
@@ -393,6 +444,47 @@ const TeachingFirstFlow = ({ conceptId }) => {
             setFlowState('error');
         }
     }, [currentSession, getTeachingContent]);
+
+    // Handle concept overview continue → go to diagnostic quiz
+    const handleConceptOverviewContinue = useCallback(async () => {
+        if (!currentSession?.session_id) return;
+
+        setFlowState('loading');
+        setError(null);
+
+        try {
+            const quizResult = await generateInitialQuiz({
+                session_id: currentSession.session_id
+            });
+
+            if (quizResult.success && quizResult.data?.questions?.length > 0) {
+                setInitialQuestions(quizResult.data.questions);
+                setFlowState('initial_quiz');
+            } else {
+                // If quiz generation fails, go directly to teaching
+                console.warn('Quiz generation failed after overview, going to teaching');
+                if (currentAtomData?.id) {
+                    const contentResult = await getTeachingContent({
+                        session_id: currentSession.session_id,
+                        atom_id: currentAtomData.id
+                    });
+                    if (contentResult.success) {
+                        setFlowState('teaching');
+                    } else {
+                        setError('Failed to load content');
+                        setFlowState('error');
+                    }
+                } else {
+                    setError('No atoms available');
+                    setFlowState('error');
+                }
+            }
+        } catch (err) {
+            console.error('Error after concept overview:', err);
+            setError('Failed to generate quiz');
+            setFlowState('error');
+        }
+    }, [currentSession, currentAtomData, generateInitialQuiz, getTeachingContent]);
 
     // Handle continue to questions
     const handleContinueToQuestions = useCallback(async () => {
@@ -434,7 +526,31 @@ const TeachingFirstFlow = ({ conceptId }) => {
             return;
         }
 
-        // After initial quiz, load teaching content
+        const evalData = result.data;
+        setQuizEvaluation(evalData);
+
+        console.log('Quiz evaluation:', evalData);
+
+        // Adaptive routing based on quiz mastery
+        const nextStep = evalData.next_step || 'normal_teaching';
+
+        if (nextStep === 'skip_to_practice') {
+            // High mastery — skip teaching, go directly to practice questions
+            try {
+                const qResult = await generateQuestionsFromTeaching({
+                    session_id: currentSession.session_id,
+                    atom_id: currentAtomData.id
+                });
+                if (qResult.success && qResult.data.questions?.length > 0) {
+                    setFlowState('questions');
+                    return;
+                }
+            } catch (err) {
+                console.warn('Skip-to-practice failed, falling back to teaching:', err);
+            }
+        }
+
+        // Default: load teaching content (adapted by backend based on mastery/pacing)
         const contentResult = await getTeachingContent({
             session_id: currentSession.session_id,
             atom_id: currentAtomData.id
@@ -446,7 +562,7 @@ const TeachingFirstFlow = ({ conceptId }) => {
             setError(contentResult.error || 'Failed to load teaching content');
             setFlowState('error');
         }
-    }, [currentSession, currentAtomData, completeInitialQuiz, getTeachingContent]);
+    }, [currentSession, currentAtomData, completeInitialQuiz, getTeachingContent, generateQuestionsFromTeaching]);
 
     // Handle back to teaching
     const handleBackToTeaching = useCallback(() => {
@@ -492,8 +608,16 @@ const TeachingFirstFlow = ({ conceptId }) => {
             const data = completeResult.data;
 
             if (data.all_completed || data.next_action?.action === 'concept_complete' || data.concept_final_challenge_ready) {
-                // All atoms done — trigger concept final challenge
-                await launchConceptFinalChallenge();
+                // All atoms done — generate atom summary first, then go to all_atoms_mastery
+                try {
+                    await generateAtomSummary({
+                        session_id: currentSession.session_id,
+                        atom_id: currentAtomData.id
+                    });
+                } catch (e) {
+                    console.warn('Atom summary generation failed:', e);
+                }
+                setFlowState('atom_summary');
                 return;
             }
 
@@ -553,9 +677,17 @@ const TeachingFirstFlow = ({ conceptId }) => {
             }
 
             if (data.next_atom) {
-                setCurrentAtomData(data.next_atom);
-                setFlowState('teaching');
-                resetForNewAtom();
+                // Generate atom summary before going to next atom
+                setNextAtomAfterFinal(data.next_atom);
+                try {
+                    await generateAtomSummary({
+                        session_id: currentSession.session_id,
+                        atom_id: currentAtomData.id
+                    });
+                } catch (e) {
+                    console.warn('Atom summary generation failed:', e);
+                }
+                setFlowState('atom_summary');
                 return;
             }
 
@@ -566,7 +698,7 @@ const TeachingFirstFlow = ({ conceptId }) => {
             setError('Failed to complete atom');
             setFlowState('error');
         }
-    }, [currentSession, currentAtomData, answers, atomMastery, metrics, completeAtom, resetForNewAtom, generateFinalChallenge]);
+    }, [currentSession, currentAtomData, answers, atomMastery, metrics, completeAtom, resetForNewAtom, generateFinalChallenge, generateAtomSummary]);
 
     // Launch concept final challenge (after all atoms done)
     const launchConceptFinalChallenge = useCallback(async () => {
@@ -607,7 +739,16 @@ const TeachingFirstFlow = ({ conceptId }) => {
         }
 
         if (result.data.all_completed || result.data.concept_final_challenge_ready) {
-            await launchConceptFinalChallenge();
+            // Generate atom summary before all_atoms_mastery
+            try {
+                await generateAtomSummary({
+                    session_id: currentSession.session_id,
+                    atom_id: currentAtomData.id
+                });
+            } catch (e) {
+                console.warn('Atom summary failed:', e);
+            }
+            setFlowState('atom_summary');
             return;
         }
 
@@ -617,10 +758,19 @@ const TeachingFirstFlow = ({ conceptId }) => {
             return;
         }
 
+        // Generate atom summary before next atom
         setFinalRecommendation(result.data.recommendation || '');
         setNextAtomAfterFinal(result.data.next_atom || null);
-        setFlowState('complete');
-    }, [currentSession, currentAtomData, completeFinalChallenge, launchConceptFinalChallenge]);
+        try {
+            await generateAtomSummary({
+                session_id: currentSession.session_id,
+                atom_id: currentAtomData.id
+            });
+        } catch (e) {
+            console.warn('Atom summary failed:', e);
+        }
+        setFlowState('atom_summary');
+    }, [currentSession, currentAtomData, completeFinalChallenge, generateAtomSummary]);
 
     // Handle concept final challenge questions complete
     const handleConceptFinalChallengeComplete = useCallback(async () => {
@@ -655,15 +805,25 @@ const TeachingFirstFlow = ({ conceptId }) => {
         console.log('Review complete with action:', action);
 
         if (action === 'reteach') {
-            // Show teaching again (with focus on problem areas)
+            // Use adaptive reteach API for different teaching approach
             setFlowState('loading');
 
             try {
-                await getTeachingContent({
+                const reteachResult = await adaptiveReteach({
                     session_id: currentSession.session_id,
                     atom_id: currentAtomData.id
                 });
-                setFlowState('teaching');
+
+                if (reteachResult.success) {
+                    setFlowState('teaching');
+                } else {
+                    // Fallback to regular teaching content
+                    await getTeachingContent({
+                        session_id: currentSession.session_id,
+                        atom_id: currentAtomData.id
+                    });
+                    setFlowState('teaching');
+                }
             } catch (err) {
                 console.error('Error reteaching:', err);
                 setError('Failed to load teaching content');
@@ -717,7 +877,58 @@ const TeachingFirstFlow = ({ conceptId }) => {
                 setFlowState('error');
             }
         }
-    }, [currentSession, currentAtomData, getTeachingContent, generateQuestionsFromTeaching, completeAtom, resetForNewAtom]);
+    }, [currentSession, currentAtomData, getTeachingContent, generateQuestionsFromTeaching, completeAtom, resetForNewAtom, adaptiveReteach]);
+
+    // Handle atom summary continue → next atom or all_atoms_mastery
+    const handleAtomSummaryContinue = useCallback(async () => {
+        if (!currentSession?.session_id) return;
+
+        // Check if there's a next atom queued
+        if (nextAtomAfterFinal) {
+            setCurrentAtomData(nextAtomAfterFinal);
+            setNextAtomAfterFinal(null);
+            setFinalRecommendation('');
+            resetForNewAtom();
+
+            // Load teaching content for next atom
+            setFlowState('loading');
+            try {
+                const contentResult = await getTeachingContent({
+                    session_id: currentSession.session_id,
+                    atom_id: nextAtomAfterFinal.id
+                });
+                if (contentResult.success) {
+                    setFlowState('teaching');
+                } else {
+                    setError('Failed to load teaching content');
+                    setFlowState('error');
+                }
+            } catch (err) {
+                setError('Failed to load next atom');
+                setFlowState('error');
+            }
+            return;
+        }
+
+        // No next atom — all atoms completed, show mastery overview
+        setFlowState('loading');
+        try {
+            await getAllAtomsMastery({
+                session_id: currentSession.session_id,
+                concept_id: conceptId
+            });
+            setFlowState('all_atoms_mastery');
+        } catch (err) {
+            console.error('Error getting all atoms mastery:', err);
+            // Fallback: go directly to concept final challenge
+            await launchConceptFinalChallenge();
+        }
+    }, [currentSession, conceptId, nextAtomAfterFinal, resetForNewAtom, getTeachingContent, getAllAtomsMastery]);
+
+    // Handle all atoms mastery continue → concept final challenge
+    const handleAllAtomsMasteryContinue = useCallback(async () => {
+        await launchConceptFinalChallenge();
+    }, []);
 
     // Handle atom complete - continue or go to dashboard
     const handleAtomCompleteContinue = useCallback(() => {
@@ -814,9 +1025,13 @@ const TeachingFirstFlow = ({ conceptId }) => {
                                 {currentSession.concept_name || 'Learning Session'}
                             </h1>
                             <p className="text-sm text-theme-text-muted">
+                                {flowState === 'concept_overview' && '📘 Concept Overview'}
+                                {flowState === 'initial_quiz' && '📝 Diagnostic Quiz'}
                                 {flowState === 'teaching' && '📖 Learning new concept'}
                                 {flowState === 'questions' && '✍️ Answering questions'}
                                 {flowState === 'review' && '🔄 Reviewing material'}
+                                {flowState === 'atom_summary' && '📋 Atom Summary'}
+                                {flowState === 'all_atoms_mastery' && '🎯 All Atoms Mastery'}
                                 {flowState === 'complete' && '✅ Atom complete'}
                                 {flowState === 'concept_final_challenge' && '🏆 Concept Final Challenge'}
                                 {flowState === 'concept_complete' && '🎉 Concept mastered!'}
@@ -850,9 +1065,9 @@ const TeachingFirstFlow = ({ conceptId }) => {
                                 <div className="text-center">
                                     <div className="text-xs text-theme-text-muted">Pace</div>
                                     <div className={`text-sm font-bold px-2 py-1 rounded-theme ${pacingDecision === 'speed_up' ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400' :
-                                            pacingDecision === 'slow_down' ? 'bg-amber-500/10 text-amber-600 dark:text-amber-400' :
-                                                pacingDecision === 'sharp_slowdown' ? 'bg-error/10 text-error' :
-                                                    'bg-theme-bg text-theme-text'
+                                        pacingDecision === 'slow_down' ? 'bg-amber-500/10 text-amber-600 dark:text-amber-400' :
+                                            pacingDecision === 'sharp_slowdown' ? 'bg-error/10 text-error' :
+                                                'bg-theme-bg text-theme-text'
                                         }`}>
                                         {pacingDecision === 'speed_up' && '⚡ Speed Up'}
                                         {pacingDecision === 'slow_down' && '🐢 Slow Down'}
@@ -893,6 +1108,15 @@ const TeachingFirstFlow = ({ conceptId }) => {
 
                 {/* Main Content - Flow-based rendering */}
                 <div className="transition-all duration-300">
+                    {/* Concept Overview (zero knowledge) */}
+                    {flowState === 'concept_overview' && conceptOverview && (
+                        <ConceptOverview
+                            overview={conceptOverview}
+                            onContinue={handleConceptOverviewContinue}
+                            loading={loading}
+                        />
+                    )}
+
                     {/* Initial Diagnostic Quiz */}
                     {flowState === 'initial_quiz' && initialQuestions.length > 0 && (
                         <QuestionsFromTeaching
@@ -905,6 +1129,68 @@ const TeachingFirstFlow = ({ conceptId }) => {
                             onSubmitAnswer={submitInitialQuizAnswer}
                             showMetrics={false}
                         />
+                    )}
+
+                    {/* Quiz Evaluation Summary (shows above teaching/questions after quiz) */}
+                    {quizEvaluation && (flowState === 'teaching' || flowState === 'questions') && (
+                        <div className="mb-4 bg-surface rounded-theme-xl shadow-theme border border-theme-border p-4">
+                            <div className="flex items-center justify-between mb-3">
+                                <h3 className="text-sm font-semibold text-theme-text">
+                                    📊 Diagnostic Quiz Results
+                                </h3>
+                                <button
+                                    onClick={() => setQuizEvaluation(null)}
+                                    className="text-xs text-theme-text-muted hover:text-theme-text"
+                                >
+                                    Dismiss
+                                </button>
+                            </div>
+                            <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-center">
+                                <div>
+                                    <div className="text-xs text-theme-text-muted">Accuracy</div>
+                                    <div className={`text-lg font-bold ${quizEvaluation.accuracy >= 0.7 ? 'text-emerald-500' :
+                                        quizEvaluation.accuracy >= 0.4 ? 'text-amber-500' : 'text-error'
+                                        }`}>
+                                        {Math.round((quizEvaluation.accuracy || 0) * 100)}%
+                                    </div>
+                                </div>
+                                <div>
+                                    <div className="text-xs text-theme-text-muted">Mastery</div>
+                                    <div className="text-lg font-bold text-primary">
+                                        {Math.round((quizEvaluation.mastery || 0) * 100)}%
+                                    </div>
+                                </div>
+                                <div>
+                                    <div className="text-xs text-theme-text-muted">Ability</div>
+                                    <div className="text-lg font-bold text-violet-500">
+                                        {(quizEvaluation.theta || 0).toFixed(2)}
+                                    </div>
+                                </div>
+                                <div>
+                                    <div className="text-xs text-theme-text-muted">Pace</div>
+                                    <div className={`text-sm font-bold ${quizEvaluation.initial_pacing === 'speed_up' ? 'text-emerald-500' :
+                                        quizEvaluation.initial_pacing === 'slow_down' ? 'text-amber-500' :
+                                            quizEvaluation.initial_pacing === 'sharp_slowdown' ? 'text-error' :
+                                                'text-theme-text'
+                                        }`}>
+                                        {quizEvaluation.initial_pacing === 'speed_up' && '⚡ Speed Up'}
+                                        {quizEvaluation.initial_pacing === 'slow_down' && '🐢 Slow Down'}
+                                        {quizEvaluation.initial_pacing === 'sharp_slowdown' && '⚠️ Careful'}
+                                        {quizEvaluation.initial_pacing === 'stay' && '➡️ Steady'}
+                                    </div>
+                                </div>
+                            </div>
+                            {quizEvaluation.next_step_message && (
+                                <p className="mt-3 text-sm text-center text-theme-text-muted italic">
+                                    {quizEvaluation.next_step_message}
+                                </p>
+                            )}
+                            {quizEvaluation.error_analysis?.dominant_error && (
+                                <p className="mt-1 text-xs text-center text-amber-500">
+                                    Focus area: {quizEvaluation.error_analysis.dominant_error} errors detected
+                                </p>
+                            )}
+                        </div>
                     )}
 
                     {/* Teaching Module */}
@@ -973,6 +1259,113 @@ const TeachingFirstFlow = ({ conceptId }) => {
                         />
                     )}
 
+                    {/* Atom Summary (after each atom) */}
+                    {flowState === 'atom_summary' && currentAtomData && (
+                        <AtomSummary
+                            summary={atomSummaries[currentAtomData.id]}
+                            atomName={currentAtomData.name}
+                            masteryScore={atomMastery}
+                            onContinue={handleAtomSummaryContinue}
+                            isLastAtom={!nextAtomAfterFinal}
+                            loading={loading}
+                        />
+                    )}
+
+                    {/* All Atoms Mastery Overview */}
+                    {flowState === 'all_atoms_mastery' && allAtomsMastery && (
+                        <div className="max-w-3xl mx-auto space-y-6 animate-fade-in-up">
+                            <div className="bg-gradient-to-r from-violet-600 to-purple-600 rounded-2xl p-6 text-white shadow-lg">
+                                <h2 className="text-2xl font-bold mb-2">🎯 All Atoms Mastery Overview</h2>
+                                <p className="text-violet-100">Here's how you performed across all atomic concepts</p>
+                            </div>
+
+                            {/* Overall stats */}
+                            <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+                                <div className="bg-surface rounded-xl p-4 text-center border border-theme-border shadow">
+                                    <div className="text-2xl font-bold text-primary">
+                                        {Math.round((allAtomsMastery.overall_mastery || 0) * 100)}%
+                                    </div>
+                                    <div className="text-xs text-theme-text-muted">Overall Mastery</div>
+                                </div>
+                                <div className="bg-surface rounded-xl p-4 text-center border border-theme-border shadow">
+                                    <div className="text-2xl font-bold text-emerald-500">
+                                        {allAtomsMastery.atoms_mastered || 0}/{allAtomsMastery.total_atoms || 0}
+                                    </div>
+                                    <div className="text-xs text-theme-text-muted">Atoms Mastered</div>
+                                </div>
+                                <div className="bg-surface rounded-xl p-4 text-center border border-theme-border shadow">
+                                    <div className="text-2xl font-bold text-violet-500">
+                                        {(allAtomsMastery.theta || 0).toFixed(2)}
+                                    </div>
+                                    <div className="text-xs text-theme-text-muted">Ability (θ)</div>
+                                </div>
+                                <div className="bg-surface rounded-xl p-4 text-center border border-theme-border shadow">
+                                    <div className="text-2xl font-bold text-amber-500">
+                                        +{allAtomsMastery.total_xp || 0}
+                                    </div>
+                                    <div className="text-xs text-theme-text-muted">Total XP</div>
+                                </div>
+                            </div>
+
+                            {/* Individual atom mastery */}
+                            {allAtomsMastery.atoms && (
+                                <div className="bg-surface rounded-xl p-6 border border-theme-border shadow">
+                                    <h3 className="text-lg font-semibold text-theme-text mb-4">Atom-by-Atom Performance</h3>
+                                    <div className="space-y-3">
+                                        {allAtomsMastery.atoms.map((atom, i) => (
+                                            <div key={atom.id || i} className="flex items-center gap-4">
+                                                <span className="w-8 h-8 bg-primary/10 text-primary rounded-full flex items-center justify-center font-bold text-sm flex-shrink-0">
+                                                    {i + 1}
+                                                </span>
+                                                <div className="flex-1 min-w-0">
+                                                    <div className="flex justify-between items-center mb-1">
+                                                        <span className="text-sm font-medium text-theme-text truncate">{atom.name}</span>
+                                                        <span className={`text-sm font-bold ${atom.mastery >= 0.8 ? 'text-emerald-500' :
+                                                            atom.mastery >= 0.5 ? 'text-amber-500' : 'text-red-500'
+                                                            }`}>
+                                                            {Math.round((atom.mastery || 0) * 100)}%
+                                                        </span>
+                                                    </div>
+                                                    <div className="w-full h-2 bg-theme-border rounded-full overflow-hidden">
+                                                        <div
+                                                            className={`h-full rounded-full transition-all ${atom.mastery >= 0.8 ? 'bg-emerald-500' :
+                                                                atom.mastery >= 0.5 ? 'bg-amber-500' : 'bg-red-500'
+                                                                }`}
+                                                            style={{ width: `${(atom.mastery || 0) * 100}%` }}
+                                                        />
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        ))}
+                                    </div>
+                                </div>
+                            )}
+
+                            {/* Suggestions */}
+                            {allAtomsMastery.suggestions && (
+                                <div className="bg-indigo-50 dark:bg-indigo-900/20 rounded-xl p-6 border border-indigo-200 dark:border-indigo-700">
+                                    <h3 className="text-lg font-semibold text-indigo-800 dark:text-indigo-300 mb-3">💡 Suggestions</h3>
+                                    <p className="text-indigo-900 dark:text-indigo-200 whitespace-pre-line">
+                                        {Array.isArray(allAtomsMastery.suggestions) ? allAtomsMastery.suggestions.join('\n') : allAtomsMastery.suggestions}
+                                    </p>
+                                </div>
+                            )}
+
+                            {/* Continue to final challenge */}
+                            <div className="flex justify-center pt-4 pb-6">
+                                <button
+                                    onClick={handleAllAtomsMasteryContinue}
+                                    disabled={loading}
+                                    className="px-8 py-3 bg-gradient-to-r from-violet-600 to-purple-600 text-white font-semibold rounded-xl
+                                        hover:from-violet-700 hover:to-purple-700 transition-all shadow-lg hover:shadow-xl
+                                        disabled:opacity-50 disabled:cursor-not-allowed transform hover:scale-105"
+                                >
+                                    {loading ? 'Preparing Final Challenge...' : 'Take Final Challenge →'}
+                                </button>
+                            </div>
+                        </div>
+                    )}
+
                     {/* Concept Final Challenge */}
                     {flowState === 'concept_final_challenge' && currentQuestions?.length > 0 && (
                         <QuestionsFromTeaching
@@ -1035,42 +1428,119 @@ const TeachingFirstFlow = ({ conceptId }) => {
                                 </div>
                             )}
 
-                            {!conceptFinalResult && (
-                                <div className="grid grid-cols-3 gap-4 max-w-md mx-auto mb-8">
-                                    <div className="bg-primary/10 p-4 rounded-theme-lg">
-                                        <div className="text-2xl font-bold text-primary">
-                                            {Math.round(atomMastery * 100)}%
-                                        </div>
-                                        <div className="text-sm text-theme-text-muted">Mastery</div>
+                            {/* Weak Topic Detector - Mastery Analysis */}
+                            <div className="max-w-3xl mx-auto my-8">
+                                <WeakTopicDetector
+                                    conceptData={conceptFinalResult}
+                                    sessionId={currentSession?.session_id}
+                                    onReviewStart={handleBackToTeaching}
+                                />
+                            </div>
+
+                            {/* Certificate Card */}
+                            <div className="max-w-3xl mx-auto space-y-6 animate-scale-in">
+                                <div className="relative bg-gradient-to-br from-amber-50 via-white to-amber-50 dark:from-gray-800 dark:via-gray-900 dark:to-gray-800 rounded-2xl shadow-2xl border-2 border-amber-300 dark:border-amber-600 p-8 text-center overflow-hidden">
+                                    {/* Decorative corners */}
+                                    <div className="absolute top-0 left-0 w-16 h-16 border-t-4 border-l-4 border-amber-400 rounded-tl-2xl" />
+                                    <div className="absolute top-0 right-0 w-16 h-16 border-t-4 border-r-4 border-amber-400 rounded-tr-2xl" />
+                                    <div className="absolute bottom-0 left-0 w-16 h-16 border-b-4 border-l-4 border-amber-400 rounded-bl-2xl" />
+                                    <div className="absolute bottom-0 right-0 w-16 h-16 border-b-4 border-r-4 border-amber-400 rounded-br-2xl" />
+
+                                    <div className="text-6xl mb-3">
+                                        {conceptFinalResult?.passed ? '🏆' : '📚'}
                                     </div>
-                                    <div className="bg-emerald-500/10 p-4 rounded-theme-lg">
-                                        <div className="text-2xl font-bold text-emerald-500">
-                                            {currentTheta.toFixed(2)}
+
+                                    <p className="text-sm uppercase tracking-widest text-amber-600 dark:text-amber-400 font-semibold mb-1">
+                                        Certificate of Completion
+                                    </p>
+
+                                    <h2 className="text-3xl font-bold text-theme-text mb-2">
+                                        {conceptFinalResult?.passed ? 'Concept Mastered!' : 'Learning Complete!'}
+                                    </h2>
+
+                                    <p className="text-lg text-theme-text-secondary mb-1">
+                                        {currentSession?.concept_name || 'Concept'}
+                                    </p>
+                                    <p className="text-sm text-theme-text-muted mb-6">
+                                        {currentSubject || 'Subject'}
+                                    </p>
+
+                                    <p className="text-theme-text-secondary mb-6 max-w-md mx-auto">
+                                        {conceptFinalResult?.recommendation || "Congratulations! You've completed all atoms in this concept."}
+                                    </p>
+
+                                    {/* Final Stats (again for certificate) */}
+                                    {conceptFinalResult && (
+                                        <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 max-w-xl mx-auto mb-6">
+                                            <div className="bg-primary/10 p-4 rounded-xl">
+                                                <div className="text-2xl font-bold text-primary">
+                                                    {Math.round((conceptFinalResult.accuracy || 0) * 100)}%
+                                                </div>
+                                                <div className="text-xs text-theme-text-muted">Challenge Score</div>
+                                            </div>
+                                            <div className="bg-emerald-500/10 p-4 rounded-xl">
+                                                <div className="text-2xl font-bold text-emerald-500">
+                                                    {conceptFinalResult.correct}/{conceptFinalResult.total}
+                                                </div>
+                                                <div className="text-xs text-theme-text-muted">Correct</div>
+                                            </div>
+                                            <div className="bg-violet-500/10 p-4 rounded-xl">
+                                                <div className="text-2xl font-bold text-violet-500">
+                                                    {Math.round((conceptFinalResult.final_mastery || 0) * 100)}%
+                                                </div>
+                                                <div className="text-xs text-theme-text-muted">Final Mastery</div>
+                                            </div>
+                                            <div className="bg-amber-500/10 p-4 rounded-xl">
+                                                <div className="text-2xl font-bold text-amber-500">
+                                                    +{conceptFinalResult.concept_xp || 0}
+                                                </div>
+                                                <div className="text-xs text-theme-text-muted">XP Earned</div>
+                                            </div>
                                         </div>
-                                        <div className="text-sm text-theme-text-muted">Ability (θ)</div>
-                                    </div>
-                                    <div className="bg-violet-500/10 p-4 rounded-theme-lg">
-                                        <div className="text-2xl font-bold text-violet-500">
-                                            {answers.length}
+                                    )}
+
+                                    {!conceptFinalResult && (
+                                        <div className="grid grid-cols-3 gap-4 max-w-md mx-auto mb-6">
+                                            <div className="bg-primary/10 p-4 rounded-xl">
+                                                <div className="text-2xl font-bold text-primary">
+                                                    {Math.round(atomMastery * 100)}%
+                                                </div>
+                                                <div className="text-xs text-theme-text-muted">Mastery</div>
+                                            </div>
+                                            <div className="bg-emerald-500/10 p-4 rounded-xl">
+                                                <div className="text-2xl font-bold text-emerald-500">
+                                                    {currentTheta.toFixed(2)}
+                                                </div>
+                                                <div className="text-xs text-theme-text-muted">Ability (θ)</div>
+                                            </div>
+                                            <div className="bg-violet-500/10 p-4 rounded-xl">
+                                                <div className="text-2xl font-bold text-violet-500">
+                                                    {answers.length}
+                                                </div>
+                                                <div className="text-xs text-theme-text-muted">Questions</div>
+                                            </div>
                                         </div>
-                                        <div className="text-sm text-theme-text-muted">Questions</div>
+                                    )}
+
+                                    <div className="text-xs text-theme-text-muted">
+                                        {new Date().toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' })}
                                     </div>
                                 </div>
-                            )}
 
-                            <div className="flex justify-center space-x-4">
-                                <button
-                                    onClick={handleBackToDashboard}
-                                    className="px-8 py-3 bg-emerald-500 text-white rounded-theme-lg font-semibold hover:bg-emerald-600 transition-colors"
-                                >
-                                    Return to Dashboard
-                                </button>
-                                <button
-                                    onClick={() => navigate('/leaderboard')}
-                                    className="px-8 py-3 bg-amber-500 text-white rounded-theme-lg font-semibold hover:bg-amber-600 transition-colors"
-                                >
-                                    🏆 Leaderboard
-                                </button>
+                                <div className="flex justify-center space-x-4 pt-2">
+                                    <button
+                                        onClick={handleBackToDashboard}
+                                        className="px-8 py-3 bg-emerald-500 text-white rounded-xl font-semibold hover:bg-emerald-600 transition-colors shadow-lg"
+                                    >
+                                        Return to Dashboard
+                                    </button>
+                                    <button
+                                        onClick={() => navigate('/leaderboard')}
+                                        className="px-8 py-3 bg-amber-500 text-white rounded-xl font-semibold hover:bg-amber-600 transition-colors shadow-lg"
+                                    >
+                                        🏆 Leaderboard
+                                    </button>
+                                </div>
                             </div>
                         </div>
                     )}

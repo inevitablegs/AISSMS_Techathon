@@ -3,6 +3,7 @@ from django.http import JsonResponse
 from django.views.decorators.csrf import csrf_exempt
 from learning_engine.ai_assistant import generate_ai_response
 import logging
+from django.db import models
 from django.utils import timezone
 from django.contrib.auth import authenticate
 from django.contrib.auth.models import User
@@ -14,11 +15,17 @@ from rest_framework_simplejwt.tokens import RefreshToken
 
 from .models import (
     Concept, TeachingAtom, Question, StudentProgress, 
-    LearningSession, LearningProfile, KnowledgeLevel, UserXP
+    LearningSession, LearningProfile, KnowledgeLevel, UserXP,
+    TeacherProfile, TeacherContent, QuestionApproval,
+    TeacherOverride, TeacherGoal
 )
 from .serializers import (
     RegisterSerializer, UserSerializer, ConceptSerializer,
-    TeachingAtomSerializer, QuestionSerializer
+    TeachingAtomSerializer, QuestionSerializer,
+    TeacherProfileSerializer, TeacherRegisterSerializer,
+    TeacherContentSerializer, QuestionApprovalSerializer,
+    TeacherOverrideSerializer, TeacherGoalSerializer,
+    StudentDetailSerializer, StudentProgressSerializer
 )
 from learning_engine.question_generator import QuestionGenerator
 from learning_engine.adaptive_flow import AdaptiveLearningEngine
@@ -367,10 +374,12 @@ class GenerateInitialQuizView(APIView):
 
 
 class SubmitInitialQuizAnswerView(APIView):
-    """Submit answer for initial diagnostic quiz."""
+    """Submit answer for initial diagnostic quiz — with real-time mastery update per question."""
     permission_classes = [IsAuthenticated]
 
     def post(self, request):
+        from learning_engine.knowledge_tracing import calculate_updated_mastery, classify_error_type
+
         session_id = request.data.get('session_id')
         question_index = request.data.get('question_index')
         selected = request.data.get('selected')
@@ -405,13 +414,73 @@ class SubmitInitialQuizAnswerView(APIView):
 
         correct = (selected_int is not None and selected_int == correct_index_int)
 
+        # ── Real-time mastery update per question ──
+        # Retrieve running mastery & theta from session data (or defaults)
+        running = session.session_data.get('quiz_running_state', {
+            'mastery': 0.3,
+            'theta': 0.0,
+            'streak': 0,
+            'error_types': []
+        })
+        current_mastery = float(running.get('mastery', 0.3))
+        current_theta = float(running.get('theta', 0.0))
+
+        # Get user profile theta if this is the first question
+        if question_index == 0 and current_theta == 0.0:
+            try:
+                profile = request.user.learning_profile
+                current_theta = float(profile.overall_theta)
+            except LearningProfile.DoesNotExist:
+                pass
+
+        # Classify error if wrong
+        error_type = None
+        if not correct and selected_int is not None:
+            error_type = classify_error_type(
+                question, selected_int, float(time_taken),
+                atom_name='initial_quiz'
+            )
+
+        # Calculate updated mastery & theta
+        new_mastery, new_theta, mastery_metrics = calculate_updated_mastery(
+            current_mastery=current_mastery,
+            current_theta=current_theta,
+            question=question,
+            correct=correct,
+            time_taken=float(time_taken),
+            error_type=error_type,
+        )
+
+        # Update streak
+        streak = int(running.get('streak', 0))
+        if correct:
+            streak = max(streak + 1, 1)
+        else:
+            streak = min(streak - 1, -1)
+
+        # Accumulate error types
+        error_types = running.get('error_types', [])
+        if error_type:
+            error_types.append(error_type)
+
+        # Persist running state in session data
+        session.session_data['quiz_running_state'] = {
+            'mastery': round(new_mastery, 4),
+            'theta': round(new_theta, 4),
+            'streak': streak,
+            'error_types': error_types
+        }
+
         # Store answer
         answers = session.session_data.get('initial_quiz_answers', [])
         answers.append({
             'question_index': question_index,
             'correct': correct,
             'time_taken': time_taken,
-            'selected': selected_int
+            'selected': selected_int,
+            'mastery_after': round(new_mastery, 4),
+            'theta_after': round(new_theta, 4),
+            'error_type': error_type
         })
         session.session_data['initial_quiz_answers'] = answers
         session.save()
@@ -425,12 +494,18 @@ class SubmitInitialQuizAnswerView(APIView):
         return Response({
             'correct': correct,
             'correct_index': question.get('correct_index') if not correct else None,
-            'explanation': explanation
+            'explanation': explanation,
+            'updated_mastery': round(new_mastery, 4),
+            'updated_theta': round(new_theta, 4),
+            'error_type': error_type,
+            'streak': streak,
+            'mastery_change': round(mastery_metrics.get('mastery_change', 0), 4),
+            'theta_change': round(mastery_metrics.get('theta_change', 0), 4),
         })
 
 
 class CompleteInitialQuizView(APIView):
-    """Finalize initial quiz to set pacing recommendation."""
+    """Finalize initial quiz with full adaptive flow — mastery seeding, theta update, error analysis."""
     permission_classes = [IsAuthenticated]
 
     def post(self, request):
@@ -442,52 +517,89 @@ class CompleteInitialQuizView(APIView):
             return Response({'error': 'Session not found'}, status=404)
 
         answers = session.session_data.get('initial_quiz_answers', [])
+        questions = session.session_data.get('initial_quiz_questions', [])
         if not answers:
             return Response({'error': 'No initial quiz answers'}, status=400)
 
-        correct_count = sum(1 for a in answers if a.get('correct'))
-        accuracy = correct_count / len(answers)
-
+        # ── Get or create learning profile ──
         try:
             profile = request.user.learning_profile
         except LearningProfile.DoesNotExist:
             profile = LearningProfile.objects.create(user=request.user)
 
-        pacing_engine = PacingEngine()
-        context = PacingContext(
-            accuracy=accuracy,
-            mastery_score=0.3,
-            streak=0,
-            error_types=[],
-            theta=profile.overall_theta,
-            questions_answered=len(answers),
+        # ── Run full adaptive evaluation ──
+        engine = AdaptiveLearningEngine()
+        evaluation = engine.evaluate_initial_quiz(
+            quiz_questions=questions,
+            quiz_answers=answers,
             knowledge_level=session.knowledge_level,
-            phase='initial_quiz'
+            current_theta=profile.overall_theta,
         )
-        pacing_result = pacing_engine.decide_pacing(context)
-        pacing = pacing_result.decision
-        next_action = pacing_result.next_action
-        reasoning = pacing_result.reasoning
 
-        session.session_data['pacing_history'] = session.session_data.get('pacing_history', []) + [{
+        seeded_mastery = evaluation['mastery']
+        updated_theta = evaluation['theta']
+        pacing = evaluation['pacing']
+        next_step = evaluation['next_step']
+        adjusted_level = evaluation['adjusted_knowledge_level']
+
+        # ── Update LearningProfile theta ──
+        profile.overall_theta = updated_theta
+        profile.save()
+
+        # ── Seed mastery on every atom's StudentProgress ──
+        concept = session.concept
+        atoms = TeachingAtom.objects.filter(concept=concept).order_by('order')
+        for atom in atoms:
+            progress, _ = StudentProgress.objects.get_or_create(
+                user=request.user,
+                atom=atom,
+                defaults={'phase': 'diagnostic'}
+            )
+            progress.mastery_score = seeded_mastery
+            progress.error_history = evaluation.get('error_types', [])
+            progress.save()
+
+        # ── Update session knowledge level if adjusted ──
+        if adjusted_level != session.knowledge_level:
+            session.knowledge_level = adjusted_level
+
+        # ── Store pacing + evaluation in session data ──
+        session_data = session.session_data or {}
+        session_data['pacing_history'] = session_data.get('pacing_history', []) + [{
             'phase': 'initial_quiz',
-            'pacing': pacing.value if hasattr(pacing, 'value') else pacing,
-            'accuracy': accuracy,
-            'timestamp': str(timezone.now())
+            'pacing': pacing,
+            'accuracy': evaluation['accuracy'],
+            'mastery': seeded_mastery,
+            'theta': updated_theta,
+            'next_step': next_step,
+            'timestamp': str(timezone.now()),
         }]
+        session_data['initial_quiz_evaluation'] = evaluation
+        session_data['current_phase'] = 'teaching'
+        session.session_data = session_data
         session.save()
 
+        # ── Friendly recommendation ──
         friendly = {
             'speed_up': 'Great start! You can move faster.',
             'stay': 'Good start. Keep a steady pace.',
             'slow_down': 'Take it slowly and build confidence.',
-            'sharp_slowdown': 'Focus on basics first; go step by step.'
+            'sharp_slowdown': 'Focus on basics first; go step by step.',
         }
 
         return Response({
-            'accuracy': accuracy,
-            'initial_pacing': pacing.value if hasattr(pacing, 'value') else pacing,
-            'recommendation': friendly.get(pacing.value if hasattr(pacing, 'value') else pacing, 'Learn at your own pace')
+            'accuracy': evaluation['accuracy'],
+            'mastery': seeded_mastery,
+            'theta': updated_theta,
+            'initial_pacing': pacing,
+            'next_step': next_step,
+            'next_step_message': evaluation['next_step_message'],
+            'adjusted_knowledge_level': adjusted_level,
+            'error_analysis': evaluation['error_analysis'],
+            'mastery_verdict': evaluation.get('mastery_verdict', ''),
+            'recommended_difficulty': evaluation.get('recommended_difficulty', 'medium'),
+            'reasoning': evaluation.get('reasoning', ''),
+            'recommendation': friendly.get(pacing, 'Learn at your own pace'),
         })
     
     def _get_pacing_message(self, pacing):
@@ -528,8 +640,15 @@ class GetTeachingContentView(APIView):
         pacing_history = session_data.get('pacing_history', [])
         current_pacing = _normalize_pacing_value(pacing_history[-1], 'stay') if pacing_history else 'stay'
         
-        # Generate teaching content if not already cached
-        if not atom.explanation:
+        # ── Derive quiz mastery for teaching depth adaptation ──
+        quiz_eval = session_data.get('initial_quiz_evaluation', {})
+        quiz_running = session_data.get('quiz_running_state', {})
+        quiz_mastery = float(
+            quiz_eval.get('mastery', quiz_running.get('mastery', 0.3))
+        )
+
+        # Generate teaching content if not already cached (or force_new)
+        if not atom.explanation or force_new:
             engine = AdaptiveLearningEngine()
             
             # Adjust teaching based on pacing
@@ -539,7 +658,8 @@ class GetTeachingContentView(APIView):
                 atom_name=atom.name,
                 subject=atom.concept.subject,
                 concept=atom.concept.name,
-                knowledge_level=level_adjustment
+                knowledge_level=level_adjustment,
+                mastery_score=quiz_mastery
             )
             
             # Save to atom for future use
@@ -554,6 +674,19 @@ class GetTeachingContentView(APIView):
                 'examples': atom.examples
             }
         
+        # Fetch external resources (videos + images) for the atom
+        from learning_engine.external_resources import ExternalResourceFetcher
+        try:
+            fetcher = ExternalResourceFetcher()
+            resources = fetcher.get_resources_for_concept(
+                subject=atom.concept.subject,
+                concept=atom.concept.name,
+                atom_name=atom.name
+            )
+        except Exception as e:
+            logger.warning(f"External resource fetch failed: {e}")
+            resources = {'videos': [], 'images': []}
+
         # Update session data
         session_data['current_atom_index'] = atom.order
         session_data['current_phase'] = 'teaching'
@@ -564,6 +697,8 @@ class GetTeachingContentView(APIView):
             'atom_id': atom.id,
             'atom_name': atom.name,
             'teaching_content': teaching_content,
+            'videos': resources.get('videos', []),
+            'images': resources.get('images', []),
             'phase': progress.phase,
             'current_pacing': current_pacing
         })
@@ -639,11 +774,17 @@ class GenerateQuestionsFromTeachingView(APIView):
 
         if not teaching_content['explanation']:
             engine = AdaptiveLearningEngine()
+            # Get quiz mastery for depth adaptation
+            session_data = session.session_data or {}
+            quiz_eval = session_data.get('initial_quiz_evaluation', {})
+            quiz_running = session_data.get('quiz_running_state', {})
+            quiz_mastery = float(quiz_eval.get('mastery', quiz_running.get('mastery', 0.3)))
             generated_teaching = engine.generate_teaching_content(
                 atom_name=atom.name,
                 subject=atom.concept.subject,
                 concept=atom.concept.name,
-                knowledge_level=session.knowledge_level
+                knowledge_level=session.knowledge_level,
+                mastery_score=quiz_mastery
             )
             teaching_content = {
                 'explanation': generated_teaching.get('explanation', ''),
@@ -1453,6 +1594,246 @@ class CompleteAtomView(APIView):
             response_data['concept_mastery'] = concept_mastery
         
         return Response(response_data)
+
+
+class GenerateConceptOverviewView(APIView):
+    """Generate a beginner-friendly overview when knowledge_level is zero."""
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        session_id = request.data.get('session_id')
+        try:
+            session = LearningSession.objects.get(id=session_id, user=request.user)
+        except LearningSession.DoesNotExist:
+            return Response({'error': 'Session not found'}, status=404)
+
+        concept = session.concept
+        atoms = TeachingAtom.objects.filter(concept=concept).order_by('order')
+        atom_names = [a.name for a in atoms]
+
+        generator = QuestionGenerator()
+        overview = generator.generate_concept_overview(
+            subject=concept.subject,
+            concept=concept.name,
+            atoms=atom_names
+        )
+
+        # Store in session
+        session_data = session.session_data or {}
+        session_data['concept_overview'] = overview
+        session_data['current_phase'] = 'concept_overview'
+        session.session_data = session_data
+        session.save()
+
+        return Response({
+            'overview': overview,
+            'concept_name': concept.name,
+            'subject': concept.subject,
+            'atom_names': atom_names,
+        })
+
+
+class GenerateAtomSummaryView(APIView):
+    """Generate end-of-atom summary with quick notes, must-remember, suggestions."""
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        session_id = request.data.get('session_id')
+        atom_id = request.data.get('atom_id')
+
+        try:
+            session = LearningSession.objects.get(id=session_id, user=request.user)
+            atom = TeachingAtom.objects.get(id=atom_id)
+            progress = StudentProgress.objects.get(user=request.user, atom=atom)
+        except (LearningSession.DoesNotExist, TeachingAtom.DoesNotExist, StudentProgress.DoesNotExist):
+            return Response({'error': 'Not found'}, status=404)
+
+        teaching_content = {
+            'explanation': atom.explanation or '',
+            'analogy': atom.analogy or '',
+            'examples': atom.examples or []
+        }
+
+        generator = QuestionGenerator()
+        summary = generator.generate_atom_summary(
+            subject=atom.concept.subject,
+            concept=atom.concept.name,
+            atom_name=atom.name,
+            teaching_content=teaching_content,
+            mastery_score=float(progress.mastery_score),
+            error_types=progress.error_history or []
+        )
+
+        # Store in session
+        session_data = session.session_data or {}
+        atom_summaries = session_data.get('atom_summaries', {})
+        atom_summaries[str(atom.id)] = summary
+        session_data['atom_summaries'] = atom_summaries
+        session.session_data = session_data
+        session.save()
+
+        return Response({
+            'atom_id': atom.id,
+            'atom_name': atom.name,
+            'mastery_score': float(progress.mastery_score),
+            'phase': progress.phase,
+            'summary': summary,
+        })
+
+
+class AdaptiveReteachView(APIView):
+    """Re-teach an atom with a DIFFERENT approach based on error history + mastery."""
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        session_id = request.data.get('session_id')
+        atom_id = request.data.get('atom_id')
+
+        try:
+            session = LearningSession.objects.get(id=session_id, user=request.user)
+            atom = TeachingAtom.objects.get(id=atom_id)
+            progress = StudentProgress.objects.get(user=request.user, atom=atom)
+        except (LearningSession.DoesNotExist, TeachingAtom.DoesNotExist, StudentProgress.DoesNotExist):
+            return Response({'error': 'Not found'}, status=404)
+
+        engine = AdaptiveLearningEngine()
+
+        # Force regen with error focus
+        error_history = progress.error_history or []
+
+        # Determine adjusted knowledge level based on mastery
+        mastery = float(progress.mastery_score)
+        if mastery < 0.3:
+            adjusted_level = 'zero'
+        elif mastery < 0.5:
+            adjusted_level = 'beginner'
+        elif mastery < 0.7:
+            adjusted_level = 'intermediate'
+        else:
+            adjusted_level = session.knowledge_level
+
+        teaching_content = engine.generate_teaching_content(
+            atom_name=atom.name,
+            subject=atom.concept.subject,
+            concept=atom.concept.name,
+            knowledge_level=adjusted_level,
+            error_history=error_history,
+            mastery_score=mastery
+        )
+
+        # Save updated content
+        atom.explanation = teaching_content.get('explanation', '')
+        atom.analogy = teaching_content.get('analogy', '')
+        atom.examples = [teaching_content.get('example', '')]
+        atom.save()
+
+        # Reset progress phase to teaching for this reteach cycle
+        progress.phase = 'teaching'
+        progress.times_practiced = (progress.times_practiced or 0) + 1
+        progress.save()
+
+        # Fetch external resources
+        from learning_engine.external_resources import ExternalResourceFetcher
+        try:
+            fetcher = ExternalResourceFetcher()
+            resources = fetcher.get_resources_for_concept(
+                subject=atom.concept.subject,
+                concept=atom.concept.name,
+                atom_name=atom.name
+            )
+        except Exception:
+            resources = {'videos': [], 'images': []}
+
+        return Response({
+            'atom_id': atom.id,
+            'atom_name': atom.name,
+            'teaching_content': teaching_content,
+            'videos': resources.get('videos', []),
+            'images': resources.get('images', []),
+            'adjusted_level': adjusted_level,
+            'mastery_score': mastery,
+            'reteach_count': progress.times_practiced,
+            'message': f"Here's a fresh explanation of {atom.name}, adapted to address your specific difficulties."
+        })
+
+
+class GetAllAtomsMasteryView(APIView):
+    """Get mastery overview for all atoms in a concept — used for end-of-concept dashboard."""
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        session_id = request.data.get('session_id')
+        concept_id = request.data.get('concept_id')
+
+        try:
+            session = LearningSession.objects.get(id=session_id, user=request.user)
+            concept = Concept.objects.get(id=concept_id)
+        except (LearningSession.DoesNotExist, Concept.DoesNotExist):
+            return Response({'error': 'Not found'}, status=404)
+
+        atoms = TeachingAtom.objects.filter(concept=concept).order_by('order')
+        atom_data = []
+        total_mastery = 0.0
+
+        for atom in atoms:
+            try:
+                progress = StudentProgress.objects.get(user=request.user, atom=atom)
+                mastery = float(progress.mastery_score)
+                phase = progress.phase
+                streak = progress.streak
+                errors = len(progress.error_history or [])
+            except StudentProgress.DoesNotExist:
+                mastery = 0.0
+                phase = 'not_started'
+                streak = 0
+                errors = 0
+
+            total_mastery += mastery
+
+            # Retrieve stored atom summary if available
+            session_data = session.session_data or {}
+            atom_summaries = session_data.get('atom_summaries', {})
+            summary = atom_summaries.get(str(atom.id))
+
+            atom_data.append({
+                'id': atom.id,
+                'name': atom.name,
+                'order': atom.order,
+                'mastery_score': round(mastery, 4),
+                'phase': phase,
+                'streak': streak,
+                'error_count': errors,
+                'summary': summary,
+            })
+
+        avg_mastery = total_mastery / max(len(atoms), 1)
+
+        # Suggestions based on overall performance
+        weak_atoms = [a for a in atom_data if a['mastery_score'] < 0.6]
+        strong_atoms = [a for a in atom_data if a['mastery_score'] >= 0.8]
+
+        suggestions = []
+        if weak_atoms:
+            names = ", ".join([a['name'] for a in weak_atoms[:3]])
+            suggestions.append(f"Focus on reviewing: {names}")
+        if avg_mastery < 0.6:
+            suggestions.append("Consider revisiting the concept overview before the final challenge.")
+        if avg_mastery >= 0.8:
+            suggestions.append("Excellent overall mastery! You're well prepared for the final challenge.")
+        if not suggestions:
+            suggestions.append("Good progress! Keep practicing the weaker areas.")
+
+        return Response({
+            'concept_name': concept.name,
+            'subject': concept.subject,
+            'atoms': atom_data,
+            'avg_mastery': round(avg_mastery, 4),
+            'total_atoms': len(atoms),
+            'completed_atoms': sum(1 for a in atom_data if a['phase'] == 'complete'),
+            'strong_atoms': len(strong_atoms),
+            'weak_atoms': len(weak_atoms),
+            'suggestions': suggestions,
+        })
 
 
 class GenerateFinalChallengeView(APIView):
@@ -2417,3 +2798,883 @@ class AIDoubtAssistantView(APIView):
                 {"error": str(e)},
                 status=500
             )
+
+
+# ==================== TEACHER PERMISSION MIXIN ====================
+
+class IsTeacher:
+    """Check if user has a teacher profile"""
+    @staticmethod
+    def check(user):
+        return hasattr(user, 'teacher_profile') and user.teacher_profile.is_active
+
+
+# ==================== TEACHER AUTH VIEWS ====================
+
+class TeacherRegisterView(APIView):
+    permission_classes = [AllowAny]
+
+    def post(self, request):
+        serializer = TeacherRegisterSerializer(data=request.data)
+        if serializer.is_valid():
+            user = serializer.save()
+            return Response({
+                'pending_approval': True,
+                'message': 'Teacher account created successfully. Your account is pending admin approval. You will be able to login once approved.'
+            }, status=status.HTTP_201_CREATED)
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+
+class TeacherLoginView(APIView):
+    permission_classes = [AllowAny]
+
+    def post(self, request):
+        username = request.data.get('username')
+        password = request.data.get('password')
+        user = authenticate(username=username, password=password)
+
+        if user:
+            if not IsTeacher.check(user):
+                return Response({'error': 'This account is not a teacher account'},
+                                status=status.HTTP_403_FORBIDDEN)
+            # Check if teacher is approved by admin
+            try:
+                profile = user.teacher_profile
+                if not profile.is_active:
+                    return Response({
+                        'error': 'Your account is pending admin approval. Please wait for an administrator to activate your account.',
+                        'pending_approval': True
+                    }, status=status.HTTP_403_FORBIDDEN)
+            except Exception:
+                return Response({'error': 'Teacher profile not found'}, status=status.HTTP_403_FORBIDDEN)
+
+            refresh = RefreshToken.for_user(user)
+            return Response({
+                'access': str(refresh.access_token),
+                'refresh': str(refresh),
+                'user': UserSerializer(user).data,
+                'is_teacher': True,
+                'teacher_profile': TeacherProfileSerializer(user.teacher_profile).data
+            })
+        return Response({'error': 'Invalid credentials'}, status=status.HTTP_401_UNAUTHORIZED)
+
+
+class TeacherDashboardView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        if not IsTeacher.check(request.user):
+            return Response({'error': 'Not a teacher'}, status=403)
+
+        teacher = request.user
+        profile = teacher.teacher_profile
+
+        # Get all students (non-teachers)
+        all_students = User.objects.filter(
+            is_staff=False, is_superuser=False
+        ).exclude(id=teacher.id)
+
+        # Student count
+        total_students = all_students.count()
+
+        # Get all concepts (teacher should see full class data)
+        teacher_concepts = Concept.objects.all().order_by('subject', 'order')
+
+        # Class-level analytics: average mastery per concept
+        class_analytics = []
+        for concept in teacher_concepts:
+            atoms = TeachingAtom.objects.filter(concept=concept)
+            if not atoms.exists():
+                continue
+            progresses = StudentProgress.objects.filter(atom__in=atoms)
+            if progresses.exists():
+                avg_mastery = progresses.aggregate(
+                    avg=models.Avg('mastery_score')
+                )['avg'] or 0
+                student_count = progresses.values('user').distinct().count()
+                weak_count = progresses.filter(mastery_score__lt=0.5).values('user').distinct().count()
+            else:
+                avg_mastery = 0
+                student_count = 0
+                weak_count = 0
+
+            class_analytics.append({
+                'concept_id': concept.id,
+                'concept_name': concept.name,
+                'subject': concept.subject,
+                'avg_mastery': round(avg_mastery, 3),
+                'student_count': student_count,
+                'weak_students': weak_count,
+                'atom_count': atoms.count(),
+            })
+
+        # Pending question approvals
+        pending_questions = QuestionApproval.objects.filter(
+            status='pending'
+        ).count()
+
+        # Active overrides
+        active_overrides = TeacherOverride.objects.filter(
+            teacher=teacher, is_active=True
+        ).count()
+
+        # Active goals
+        active_goals = TeacherGoal.objects.filter(
+            teacher=teacher, status='active'
+        ).count()
+
+        # Struggling students (mastery < 0.4 on any atom)
+        struggling_students = []
+        for student in all_students[:50]:  # Limit for performance
+            weak_progress = StudentProgress.objects.filter(
+                user=student, mastery_score__lt=0.4
+            ).select_related('atom__concept').order_by('mastery_score')[:3]
+            if weak_progress.exists():
+                struggling_students.append({
+                    'student_id': student.id,
+                    'student_name': student.get_full_name() or student.username,
+                    'username': student.username,
+                    'weak_areas': [{
+                        'atom': p.atom.name,
+                        'concept': p.atom.concept.name,
+                        'mastery': round(p.mastery_score, 3),
+                    } for p in weak_progress]
+                })
+
+        return Response({
+            'teacher': TeacherProfileSerializer(profile).data,
+            'stats': {
+                'total_students': total_students,
+                'total_concepts': teacher_concepts.count(),
+                'pending_questions': pending_questions,
+                'active_overrides': active_overrides,
+                'active_goals': active_goals,
+            },
+            'class_analytics': class_analytics,
+            'struggling_students': struggling_students[:20],
+        })
+
+
+# ==================== STUDENT ANALYTICS (for teacher) ====================
+
+class TeacherStudentListView(APIView):
+    """List all students with summary stats"""
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        if not IsTeacher.check(request.user):
+            return Response({'error': 'Not a teacher'}, status=403)
+
+        students = User.objects.filter(
+            is_staff=False, is_superuser=False
+        ).order_by('username')
+
+        student_data = []
+        for student in students:
+            progress = StudentProgress.objects.filter(user=student)
+            total_atoms = progress.count()
+            avg_mastery = progress.aggregate(avg=models.Avg('mastery_score'))['avg'] or 0
+            completed_atoms = progress.filter(phase='complete').count()
+            weak_count = progress.filter(mastery_score__lt=0.5).count()
+
+            try:
+                xp = student.xp_profile.total_xp
+            except Exception:
+                xp = 0
+
+            sessions = LearningSession.objects.filter(user=student)
+            total_questions = sessions.aggregate(total=models.Sum('questions_answered'))['total'] or 0
+            total_correct = sessions.aggregate(total=models.Sum('correct_answers'))['total'] or 0
+
+            student_data.append({
+                'id': student.id,
+                'username': student.username,
+                'name': student.get_full_name() or student.username,
+                'email': student.email,
+                'total_atoms': total_atoms,
+                'completed_atoms': completed_atoms,
+                'avg_mastery': round(avg_mastery, 3),
+                'weak_areas': weak_count,
+                'total_xp': xp,
+                'total_questions': total_questions,
+                'total_correct': total_correct,
+                'accuracy': round(total_correct / max(total_questions, 1), 3),
+            })
+
+        return Response(student_data)
+
+
+class TeacherStudentDetailView(APIView):
+    """Detailed view of a specific student"""
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        if not IsTeacher.check(request.user):
+            return Response({'error': 'Not a teacher'}, status=403)
+
+        student_id = request.query_params.get('student_id')
+        if not student_id:
+            return Response({'error': 'student_id required'}, status=400)
+
+        try:
+            student = User.objects.get(id=student_id)
+        except User.DoesNotExist:
+            return Response({'error': 'Student not found'}, status=404)
+
+        serializer = StudentDetailSerializer(student)
+        
+        # Also include sessions
+        sessions = LearningSession.objects.filter(user=student).select_related('concept').order_by('-start_time')[:20]
+        session_data = [{
+            'id': s.id,
+            'concept': s.concept.name,
+            'start_time': s.start_time,
+            'end_time': s.end_time,
+            'questions_answered': s.questions_answered,
+            'correct_answers': s.correct_answers,
+            'knowledge_level': s.knowledge_level,
+            'fatigue_level': s.fatigue_level,
+            'engagement_score': s.engagement_score,
+        } for s in sessions]
+
+        # Get overrides for this student
+        overrides = TeacherOverride.objects.filter(
+            student=student, teacher=request.user
+        ).order_by('-created_at')[:10]
+
+        return Response({
+            'student': serializer.data,
+            'sessions': session_data,
+            'overrides': TeacherOverrideSerializer(overrides, many=True).data,
+        })
+
+
+# ==================== CONTENT MANAGEMENT ====================
+
+class TeacherContentListView(APIView):
+    """List and create teacher content"""
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        if not IsTeacher.check(request.user):
+            return Response({'error': 'Not a teacher'}, status=403)
+
+        contents = TeacherContent.objects.filter(
+            teacher=request.user
+        ).select_related('atom__concept')
+
+        serializer = TeacherContentSerializer(contents, many=True)
+        return Response(serializer.data)
+
+    def post(self, request):
+        if not IsTeacher.check(request.user):
+            return Response({'error': 'Not a teacher'}, status=403)
+
+        serializer = TeacherContentSerializer(data=request.data)
+        if serializer.is_valid():
+            serializer.save(teacher=request.user)
+            return Response(serializer.data, status=status.HTTP_201_CREATED)
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+
+class TeacherContentDetailView(APIView):
+    """Update or delete teacher content"""
+    permission_classes = [IsAuthenticated]
+
+    def put(self, request):
+        if not IsTeacher.check(request.user):
+            return Response({'error': 'Not a teacher'}, status=403)
+
+        content_id = request.data.get('content_id')
+        try:
+            content = TeacherContent.objects.get(id=content_id, teacher=request.user)
+        except TeacherContent.DoesNotExist:
+            return Response({'error': 'Content not found'}, status=404)
+
+        serializer = TeacherContentSerializer(content, data=request.data, partial=True)
+        if serializer.is_valid():
+            serializer.save()
+            return Response(serializer.data)
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+    def delete(self, request):
+        if not IsTeacher.check(request.user):
+            return Response({'error': 'Not a teacher'}, status=403)
+
+        content_id = request.query_params.get('content_id')
+        try:
+            content = TeacherContent.objects.get(id=content_id, teacher=request.user)
+        except TeacherContent.DoesNotExist:
+            return Response({'error': 'Content not found'}, status=404)
+
+        content.delete()
+        return Response({'message': 'Content deleted'}, status=status.HTTP_204_NO_CONTENT)
+
+
+# ==================== QUESTION MANAGEMENT ====================
+
+class TeacherQuestionListView(APIView):
+    """List all questions for teacher review"""
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        if not IsTeacher.check(request.user):
+            return Response({'error': 'Not a teacher'}, status=403)
+
+        filter_status = request.query_params.get('status', 'all')
+        concept_id = request.query_params.get('concept_id')
+
+        questions = Question.objects.all().select_related('atom__concept')
+
+        if concept_id:
+            questions = questions.filter(atom__concept_id=concept_id)
+
+        question_data = []
+        for q in questions:
+            approval = QuestionApproval.objects.filter(question=q).first()
+            question_data.append({
+                'id': q.id,
+                'question_text': q.question_text,
+                'options': q.options,
+                'correct_index': q.correct_index,
+                'difficulty': q.difficulty,
+                'cognitive_operation': q.cognitive_operation,
+                'atom_name': q.atom.name,
+                'atom_id': q.atom.id,
+                'concept_name': q.atom.concept.name,
+                'concept_id': q.atom.concept.id,
+                'subject': q.atom.concept.subject,
+                'approval_status': approval.status if approval else 'pending',
+                'approval_feedback': approval.feedback if approval else '',
+            })
+
+        if filter_status != 'all':
+            question_data = [q for q in question_data if q['approval_status'] == filter_status]
+
+        return Response(question_data)
+
+
+class TeacherQuestionApproveView(APIView):
+    """Approve, reject, edit, or disable a question"""
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        if not IsTeacher.check(request.user):
+            return Response({'error': 'Not a teacher'}, status=403)
+
+        question_id = request.data.get('question_id')
+        action = request.data.get('action')  # approve, reject, edit, disable
+        feedback = request.data.get('feedback', '')
+
+        if not question_id or not action:
+            return Response({'error': 'question_id and action required'}, status=400)
+
+        try:
+            question = Question.objects.get(id=question_id)
+        except Question.DoesNotExist:
+            return Response({'error': 'Question not found'}, status=404)
+
+        approval, created = QuestionApproval.objects.get_or_create(
+            question=question,
+            defaults={'teacher': request.user, 'status': 'pending'}
+        )
+
+        if action == 'approve':
+            approval.status = 'approved'
+        elif action == 'reject':
+            approval.status = 'rejected'
+        elif action == 'disable':
+            approval.status = 'disabled'
+        elif action == 'edit':
+            approval.status = 'edited'
+            edited_text = request.data.get('edited_question_text')
+            edited_options = request.data.get('edited_options')
+            edited_correct = request.data.get('edited_correct_index')
+            if edited_text:
+                approval.edited_question_text = edited_text
+                question.question_text = edited_text
+            if edited_options:
+                approval.edited_options = edited_options
+                question.options = edited_options
+            if edited_correct is not None:
+                approval.edited_correct_index = edited_correct
+                question.correct_index = edited_correct
+            question.save()
+        else:
+            return Response({'error': 'Invalid action'}, status=400)
+
+        approval.teacher = request.user
+        approval.feedback = feedback
+        approval.reviewed_at = timezone.now()
+        approval.save()
+
+        return Response({
+            'message': f'Question {action}d successfully',
+            'question_id': question.id,
+            'status': approval.status,
+        })
+
+
+class TeacherAddQuestionView(APIView):
+    """Teacher manually adds a question"""
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        if not IsTeacher.check(request.user):
+            return Response({'error': 'Not a teacher'}, status=403)
+
+        atom_id = request.data.get('atom_id')
+        question_text = request.data.get('question_text')
+        options = request.data.get('options', [])
+        correct_index = request.data.get('correct_index')
+        difficulty = request.data.get('difficulty', 'medium')
+        cognitive_operation = request.data.get('cognitive_operation', 'apply')
+
+        if not all([atom_id, question_text, options, correct_index is not None]):
+            return Response({'error': 'All fields required'}, status=400)
+
+        try:
+            atom = TeachingAtom.objects.get(id=atom_id)
+        except TeachingAtom.DoesNotExist:
+            return Response({'error': 'Atom not found'}, status=404)
+
+        question = Question.objects.create(
+            atom=atom,
+            question_text=question_text,
+            options=options,
+            correct_index=correct_index,
+            difficulty=difficulty,
+            cognitive_operation=cognitive_operation,
+        )
+
+        # Auto-approve teacher-created questions
+        QuestionApproval.objects.create(
+            question=question,
+            teacher=request.user,
+            status='approved',
+            feedback='Teacher-created question',
+            reviewed_at=timezone.now(),
+        )
+
+        return Response({
+            'message': 'Question created and approved',
+            'question_id': question.id,
+        }, status=status.HTTP_201_CREATED)
+
+
+# ==================== STUDENT INTERVENTION ====================
+
+class TeacherOverrideListView(APIView):
+    """List and create teacher overrides"""
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        if not IsTeacher.check(request.user):
+            return Response({'error': 'Not a teacher'}, status=403)
+
+        overrides = TeacherOverride.objects.filter(
+            teacher=request.user
+        ).select_related('student', 'atom', 'concept')
+
+        return Response(TeacherOverrideSerializer(overrides, many=True).data)
+
+    def post(self, request):
+        if not IsTeacher.check(request.user):
+            return Response({'error': 'Not a teacher'}, status=403)
+
+        student_id = request.data.get('student')
+        action = request.data.get('action')
+        atom_id = request.data.get('atom')
+        concept_id = request.data.get('concept')
+        parameters = request.data.get('parameters', {})
+        reason = request.data.get('reason', '')
+
+        if not student_id or not action:
+            return Response({'error': 'student and action required'}, status=400)
+
+        try:
+            student = User.objects.get(id=student_id)
+        except User.DoesNotExist:
+            return Response({'error': 'Student not found'}, status=404)
+
+        override = TeacherOverride.objects.create(
+            teacher=request.user,
+            student=student,
+            atom_id=atom_id,
+            concept_id=concept_id,
+            action=action,
+            parameters=parameters,
+            reason=reason,
+        )
+
+        # Apply the override immediately
+        if action == 'reset_mastery' and atom_id:
+            try:
+                progress = StudentProgress.objects.get(user=student, atom_id=atom_id)
+                progress.mastery_score = 0.3
+                progress.phase = 'diagnostic'
+                progress.streak = 0
+                progress.save()
+            except StudentProgress.DoesNotExist:
+                pass
+
+        elif action == 'set_mastery' and atom_id:
+            mastery_value = parameters.get('mastery', 0.5)
+            try:
+                progress = StudentProgress.objects.get(user=student, atom_id=atom_id)
+                progress.mastery_score = mastery_value
+                progress.save()
+            except StudentProgress.DoesNotExist:
+                pass
+
+        elif action == 'force_review' and atom_id:
+            try:
+                progress = StudentProgress.objects.get(user=student, atom_id=atom_id)
+                progress.phase = 'reinforcement'
+                progress.retention_verified = False
+                progress.save()
+            except StudentProgress.DoesNotExist:
+                pass
+
+        return Response(TeacherOverrideSerializer(override).data, status=status.HTTP_201_CREATED)
+
+
+class TeacherOverrideDeactivateView(APIView):
+    """Deactivate an override"""
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        if not IsTeacher.check(request.user):
+            return Response({'error': 'Not a teacher'}, status=403)
+
+        override_id = request.data.get('override_id')
+        try:
+            override = TeacherOverride.objects.get(id=override_id, teacher=request.user)
+        except TeacherOverride.DoesNotExist:
+            return Response({'error': 'Override not found'}, status=404)
+
+        override.is_active = False
+        override.save()
+        return Response({'message': 'Override deactivated'})
+
+
+# ==================== GOALS & DEADLINES ====================
+
+class TeacherGoalListView(APIView):
+    """List and create teacher goals"""
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        if not IsTeacher.check(request.user):
+            return Response({'error': 'Not a teacher'}, status=403)
+
+        goals = TeacherGoal.objects.filter(
+            teacher=request.user
+        ).select_related('student', 'concept')
+
+        return Response(TeacherGoalSerializer(goals, many=True).data)
+
+    def post(self, request):
+        if not IsTeacher.check(request.user):
+            return Response({'error': 'Not a teacher'}, status=403)
+
+        serializer = TeacherGoalSerializer(data=request.data)
+        if serializer.is_valid():
+            serializer.save(teacher=request.user)
+            return Response(serializer.data, status=status.HTTP_201_CREATED)
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+
+class TeacherGoalUpdateView(APIView):
+    """Update goal status"""
+    permission_classes = [IsAuthenticated]
+
+    def put(self, request):
+        if not IsTeacher.check(request.user):
+            return Response({'error': 'Not a teacher'}, status=403)
+
+        goal_id = request.data.get('goal_id')
+        try:
+            goal = TeacherGoal.objects.get(id=goal_id, teacher=request.user)
+        except TeacherGoal.DoesNotExist:
+            return Response({'error': 'Goal not found'}, status=404)
+
+        new_status = request.data.get('status')
+        if new_status:
+            goal.status = new_status
+        title = request.data.get('title')
+        if title:
+            goal.title = title
+        deadline = request.data.get('deadline')
+        if deadline:
+            goal.deadline = deadline
+        
+        goal.save()
+        return Response(TeacherGoalSerializer(goal).data)
+
+
+# ==================== CLASS ANALYTICS ====================
+
+class TeacherClassAnalyticsView(APIView):
+    """Detailed class-level analytics"""
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        if not IsTeacher.check(request.user):
+            return Response({'error': 'Not a teacher'}, status=403)
+
+        from django.db.models import Avg, Count, Sum, Q
+
+        teacher = request.user
+        profile = teacher.teacher_profile
+
+        # Get all concepts (teacher should see full class analytics)
+        concepts = Concept.objects.all().order_by('subject', 'order')
+
+        # Per-concept breakdown
+        concept_analytics = []
+        for concept in concepts:
+            atoms = TeachingAtom.objects.filter(concept=concept)
+            atom_analytics = []
+            for atom in atoms:
+                progresses = StudentProgress.objects.filter(atom=atom)
+                if progresses.exists():
+                    stats = progresses.aggregate(
+                        avg_mastery=Avg('mastery_score'),
+                        total_students=Count('user', distinct=True),
+                        completed=Count('id', filter=Q(phase='complete')),
+                        struggling=Count('id', filter=Q(mastery_score__lt=0.4)),
+                    )
+                else:
+                    stats = {'avg_mastery': 0, 'total_students': 0, 'completed': 0, 'struggling': 0}
+
+                atom_analytics.append({
+                    'atom_id': atom.id,
+                    'atom_name': atom.name,
+                    'avg_mastery': round(stats['avg_mastery'] or 0, 3),
+                    'total_students': stats['total_students'],
+                    'completed': stats['completed'],
+                    'struggling': stats['struggling'],
+                })
+
+            overall_mastery = sum(a['avg_mastery'] for a in atom_analytics) / max(len(atom_analytics), 1)
+            concept_analytics.append({
+                'concept_id': concept.id,
+                'concept_name': concept.name,
+                'subject': concept.subject,
+                'overall_mastery': round(overall_mastery, 3),
+                'atoms': atom_analytics,
+            })
+
+        # Overall class stats
+        all_progress = StudentProgress.objects.all()
+        overall_stats = all_progress.aggregate(
+            avg_mastery=Avg('mastery_score'),
+            total_completions=Count('id', filter=Q(phase='complete')),
+        )
+
+        total_sessions = LearningSession.objects.count()
+        total_questions_answered = LearningSession.objects.aggregate(
+            total=Sum('questions_answered')
+        )['total'] or 0
+
+        return Response({
+            'concepts': concept_analytics,
+            'overall': {
+                'avg_mastery': round(overall_stats['avg_mastery'] or 0, 3),
+                'total_completions': overall_stats['total_completions'],
+                'total_sessions': total_sessions,
+                'total_questions_answered': total_questions_answered,
+            }
+        })
+
+
+# ==================== KNOWLEDGE GRAPH MANAGEMENT ====================
+
+class TeacherConceptManageView(APIView):
+    """Teacher creates/edits/deletes concepts and atoms"""
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        """Get all concepts with atoms for management"""
+        if not IsTeacher.check(request.user):
+            return Response({'error': 'Not a teacher'}, status=403)
+
+        concepts = Concept.objects.filter(
+            created_by=request.user
+        ).prefetch_related('atoms')
+
+        data = []
+        for concept in concepts:
+            atoms = concept.atoms.all().order_by('order')
+            data.append({
+                'id': concept.id,
+                'name': concept.name,
+                'subject': concept.subject,
+                'description': concept.description,
+                'difficulty': concept.difficulty,
+                'order': concept.order,
+                'atoms': [{
+                    'id': a.id, 'name': a.name, 'order': a.order,
+                    'explanation': a.explanation, 'analogy': a.analogy,
+                    'examples': a.examples,
+                    'question_count': a.questions.count(),
+                } for a in atoms],
+                'prerequisites': list(concept.prerequisites.values_list('id', flat=True)),
+            })
+
+        return Response(data)
+
+    def post(self, request):
+        """Create a new concept"""
+        if not IsTeacher.check(request.user):
+            return Response({'error': 'Not a teacher'}, status=403)
+
+        name = request.data.get('name')
+        subject = request.data.get('subject')
+        description = request.data.get('description', '')
+        difficulty = request.data.get('difficulty', 'medium')
+        prerequisite_ids = request.data.get('prerequisites', [])
+
+        if not name or not subject:
+            return Response({'error': 'name and subject required'}, status=400)
+
+        concept = Concept.objects.create(
+            name=name,
+            subject=subject,
+            description=description,
+            difficulty=difficulty,
+            created_by=request.user,
+        )
+
+        if prerequisite_ids:
+            concept.prerequisites.set(prerequisite_ids)
+
+        return Response({
+            'id': concept.id,
+            'name': concept.name,
+            'subject': concept.subject,
+            'message': 'Concept created'
+        }, status=status.HTTP_201_CREATED)
+
+    def put(self, request):
+        """Update a concept"""
+        if not IsTeacher.check(request.user):
+            return Response({'error': 'Not a teacher'}, status=403)
+
+        concept_id = request.data.get('concept_id')
+        try:
+            concept = Concept.objects.get(id=concept_id, created_by=request.user)
+        except Concept.DoesNotExist:
+            return Response({'error': 'Concept not found'}, status=404)
+
+        for field in ['name', 'subject', 'description', 'difficulty']:
+            if field in request.data:
+                setattr(concept, field, request.data[field])
+        concept.save()
+
+        prerequisite_ids = request.data.get('prerequisites')
+        if prerequisite_ids is not None:
+            concept.prerequisites.set(prerequisite_ids)
+
+        return Response({'message': 'Concept updated'})
+
+    def delete(self, request):
+        """Delete a concept"""
+        if not IsTeacher.check(request.user):
+            return Response({'error': 'Not a teacher'}, status=403)
+
+        concept_id = request.query_params.get('concept_id')
+        try:
+            concept = Concept.objects.get(id=concept_id, created_by=request.user)
+        except Concept.DoesNotExist:
+            return Response({'error': 'Concept not found'}, status=404)
+
+        concept.delete()
+        return Response({'message': 'Concept deleted'}, status=status.HTTP_204_NO_CONTENT)
+
+
+class TeacherAtomManageView(APIView):
+    """Teacher creates/edits/deletes atoms"""
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        """Create atom"""
+        if not IsTeacher.check(request.user):
+            return Response({'error': 'Not a teacher'}, status=403)
+
+        concept_id = request.data.get('concept_id')
+        name = request.data.get('name')
+        explanation = request.data.get('explanation', '')
+        analogy = request.data.get('analogy', '')
+        examples = request.data.get('examples', [])
+        order = request.data.get('order', 0)
+
+        if not concept_id or not name:
+            return Response({'error': 'concept_id and name required'}, status=400)
+
+        try:
+            concept = Concept.objects.get(id=concept_id)
+        except Concept.DoesNotExist:
+            return Response({'error': 'Concept not found'}, status=404)
+
+        atom = TeachingAtom.objects.create(
+            concept=concept,
+            name=name,
+            explanation=explanation,
+            analogy=analogy,
+            examples=examples,
+            order=order,
+        )
+
+        return Response({
+            'id': atom.id,
+            'name': atom.name,
+            'message': 'Atom created'
+        }, status=status.HTTP_201_CREATED)
+
+    def put(self, request):
+        """Update atom"""
+        if not IsTeacher.check(request.user):
+            return Response({'error': 'Not a teacher'}, status=403)
+
+        atom_id = request.data.get('atom_id')
+        try:
+            atom = TeachingAtom.objects.get(id=atom_id)
+        except TeachingAtom.DoesNotExist:
+            return Response({'error': 'Atom not found'}, status=404)
+
+        for field in ['name', 'explanation', 'analogy', 'examples', 'order']:
+            if field in request.data:
+                setattr(atom, field, request.data[field])
+        atom.save()
+
+        return Response({'message': 'Atom updated'})
+
+    def delete(self, request):
+        """Delete atom"""
+        if not IsTeacher.check(request.user):
+            return Response({'error': 'Not a teacher'}, status=403)
+
+        atom_id = request.query_params.get('atom_id')
+        try:
+            atom = TeachingAtom.objects.get(id=atom_id)
+        except TeachingAtom.DoesNotExist:
+            return Response({'error': 'Atom not found'}, status=404)
+
+        atom.delete()
+        return Response({'message': 'Atom deleted'}, status=status.HTTP_204_NO_CONTENT)
+
+
+# ==================== CHECK IF USER IS TEACHER ====================
+
+class CheckTeacherView(APIView):
+    """Check if the current user is a teacher"""
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        is_teacher = IsTeacher.check(request.user)
+        data = {'is_teacher': is_teacher}
+        if is_teacher:
+            data['teacher_profile'] = TeacherProfileSerializer(request.user.teacher_profile).data
+        return Response(data)

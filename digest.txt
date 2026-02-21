@@ -31,7 +31,10 @@ Directory structure:
     │   └── learning_engine/
     │       ├── __init__.py
     │       ├── adaptive_flow.py
+<<<<<<< HEAD
     │       ├── ai_assistant.py
+=======
+>>>>>>> 27ca5f792972d0c6644ef01c0171d1c6ce25ce32
     │       ├── external_resources.py
     │       ├── knowledge_tracing.py
     │       ├── models.py
@@ -74,6 +77,7 @@ Directory structure:
             │       ├── StartAnyConceptSession.jsx
             │       ├── StartAnyConceptSessionRoute.jsx
             │       ├── TeachingFirstFlow.jsx
+<<<<<<< HEAD
             │       ├── TeachingModule.jsx
             │       └── WeakTopicDetector.jsx
             ├── context/
@@ -82,6 +86,13 @@ Directory structure:
             │   └── ThemeContext.jsx
             └── pages/
                 └── AIAssistantPage.jsx
+=======
+            │       └── TeachingModule.jsx
+            └── context/
+                ├── AuthContext.jsx
+                ├── LearningContext.jsx
+                └── ThemeContext.jsx
+>>>>>>> 27ca5f792972d0c6644ef01c0171d1c6ce25ce32
 
 ================================================
 FILE: tempCodeRunnerFile.python
@@ -268,10 +279,13 @@ pip install djangorestframework-simplejwt
 pip install django-cors-headers
 pip install youtube-search-python
 pip install serpapi
+<<<<<<< HEAD
 pip install google.generativeai
 pip install youtube-search
 pip install dotenv groq numpy
 
+=======
+>>>>>>> 27ca5f792972d0c6644ef01c0171d1c6ce25ce32
 
 
 ================================================
@@ -606,7 +620,11 @@ FILE: backend/accounts/urls.py
 from django.urls import path
 from .views import (
     # Auth views
+<<<<<<< HEAD
     AIDoubtAssistantView, GetConceptResourcesView, RegisterView, LoginView, DashboardView,
+=======
+    GetConceptResourcesView, RegisterView, LoginView, DashboardView,
+>>>>>>> 27ca5f792972d0c6644ef01c0171d1c6ce25ce32
     
     # Concept management
     ConceptListView, GenerateConceptView,
@@ -672,14 +690,21 @@ urlpatterns = [
     path('api/concept-final-challenge/', GenerateConceptFinalChallengeView.as_view(), name='generate_concept_final_challenge'),
     path('api/submit-concept-final-answer/', SubmitConceptFinalAnswerView.as_view(), name='submit_concept_final_answer'),
     path('api/complete-concept-final-challenge/', CompleteConceptFinalChallengeView.as_view(), name='complete_concept_final_challenge'),
+<<<<<<< HEAD
     path("ai-assistant/", AIDoubtAssistantView.as_view(), name="ai_assistant"),
+=======
+>>>>>>> 27ca5f792972d0c6644ef01c0171d1c6ce25ce32
 ]
 
 
 ================================================
 FILE: backend/accounts/views.py
 ================================================
+<<<<<<< HEAD
 Error reading file with 'cp1252': 'charmap' codec can't decode byte 0x8f in position 42578: character maps to <undefined>
+=======
+Error reading file with 'cp1252': 'charmap' codec can't decode byte 0x8f in position 48342: character maps to <undefined>
+>>>>>>> 27ca5f792972d0c6644ef01c0171d1c6ce25ce32
 
 
 ================================================
@@ -1232,8 +1257,12 @@ LEARNING_ENGINE = {
 }
 
 # API Keys (set these in environment variables)
+<<<<<<< HEAD
 GOOGLE_API_KEY = os.environ.get('GOOGLE_API_KEY',  '')
 GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")
+=======
+GOOGLE_API_KEY = os.getenv('GOOGLE_API_KEY', '')
+>>>>>>> 27ca5f792972d0c6644ef01c0171d1c6ce25ce32
 GROQ_API_KEY = os.environ.get('GROQ_API_KEY', '')
 
 
@@ -1348,12 +1377,24 @@ __all__ = [
 ================================================
 FILE: backend/learning_engine/adaptive_flow.py
 ================================================
+<<<<<<< HEAD
 # backend/learning_engine/adaptive_flow.py - Enhanced with robust 10-feature pacing engine
+=======
+Error reading file with 'cp1252': 'charmap' codec can't decode byte 0x9d in position 30221: character maps to <undefined>
+>>>>>>> 27ca5f792972d0c6644ef01c0171d1c6ce25ce32
 
-import json
-import random
-from typing import Dict, List, Optional, Tuple, Any
+
+================================================
+FILE: backend/learning_engine/external_resources.py
+================================================
+# backend/learning_engine/external_resources.py
+
+import os
+import requests
+from youtube_search import YoutubeSearch
+from serpapi import Client  # Changed import
 from django.conf import settings
+<<<<<<< HEAD
 from groq import Groq
 from .models import TeachingAtomState, LearningPhase
 from .knowledge_tracing import calculate_updated_mastery, classify_error_type
@@ -1361,11 +1402,18 @@ from .pacing_engine import (
     PacingEngine, PacingContext, PacingDecision, NextAction,
     PacingResult, FatigueLevel,
 )
+=======
+import logging
+import json
+>>>>>>> 27ca5f792972d0c6644ef01c0171d1c6ce25ce32
 
-class AdaptiveLearningEngine:
-    """Enhanced adaptive learning engine with real-time mastery and strict pacing"""
+logger = logging.getLogger(__name__)
+
+class ExternalResourceFetcher:
+    """Fetch external learning resources (images, videos) for concepts"""
     
     def __init__(self):
+<<<<<<< HEAD
         self.groq_client = None
         groq_key = getattr(settings, 'GROQ_API_KEY', '')
         if groq_key:
@@ -1478,30 +1526,17 @@ class AdaptiveLearningEngine:
             'engagement_adjustment': result.engagement_adjustment,
             'reasoning': result.reasoning,
         }
+=======
+        self.serpapi_key = getattr(settings, 'SERPAPI_KEY', os.getenv('SERPAPI_KEY', ''))
+        self.download_folder = os.path.join(settings.BASE_DIR, 'media', 'concept_images')
+        os.makedirs(self.download_folder, exist_ok=True)
+>>>>>>> 27ca5f792972d0c6644ef01c0171d1c6ce25ce32
     
-    def process_answer(self, 
-                      atom_state: TeachingAtomState,
-                      theta: float,
-                      question: Dict[str, Any],
-                      selected_answer: int,
-                      time_taken: float,
-                      knowledge_level: str,
-                      questions_history: List[Dict]) -> Dict[str, Any]:
+    def get_youtube_videos(self, topic, max_results=3):
         """
-        Process a single answer with real-time mastery update and pacing decision
-        
-        Args:
-            atom_state: Current atom state
-            theta: Current ability estimate
-            question: Question that was answered
-            selected_answer: User's answer index
-            time_taken: Time taken in seconds
-            knowledge_level: Self-reported knowledge level
-            questions_history: List of previous questions/answers
-        
-        Returns:
-            Dict with updated state and next actions
+        Search YouTube for videos related to the given topic
         """
+<<<<<<< HEAD
         # Determine correctness
         correct = (selected_answer == question.get('correct_index', -1))
         
@@ -1756,105 +1791,178 @@ class AdaptiveLearningEngine:
             error_context = f"""
             The student has struggled with these types of errors recently:
             {', '.join(error_focus)}
+=======
+        try:
+            # Enhance the search query for better educational content
+            search_query = f"{topic} tutorial explanation"
+>>>>>>> 27ca5f792972d0c6644ef01c0171d1c6ce25ce32
             
-            Please address these specific difficulties in your explanation.
-            """
-        
-        prompt = f"""
-        You are creating a personalized teaching module for a single atomic concept.
-        
-        Subject: {subject}
-        Concept: {concept}
-        Atomic Concept: {atom_name}
-        Student Knowledge Level: {level_descriptions.get(knowledge_level, 'intermediate')}
-        
-        {error_context}
-        
-        Generate:
-        1. A clear explanation tailored to their knowledge level (2-4 sentences)
-        2. A concrete example relevant to their level
-        3. An analogy from everyday life that matches their understanding
-        4. A common misconception to watch out for
-        5. A practical application or "why this matters"
-        
-        Rules:
-        - ONE idea only
-        - No jargon without explanation
-        - Make it memorable and relevant
-        - If advanced, include edge cases or limitations
-        - If reteaching, explain in a different way than before
-        
-        Return STRICT JSON:
-        {{
-            "explanation": "Clear explanation here",
-            "example": "Concrete example here",
-            "analogy": "Everyday analogy here",
-            "misconception": "Common mistake students make",
-            "practical_application": "Why this matters in real life"
-        }}
+            # Try-except for youtube-search which might have issues
+            try:
+                results = YoutubeSearch(search_query, max_results=max_results).to_dict()
+            except Exception as e:
+                logger.error(f"YouTube search failed: {e}")
+                # Fallback: return empty list
+                return []
+            
+            videos = []
+            for result in results:
+                video = {
+                    'title': result.get('title', ''),
+                    'url': f"https://youtube.com{result.get('url_suffix', '')}",
+                    'channel': result.get('channel', ''),
+                    'duration': result.get('duration', ''),
+                    'thumbnail': result.get('thumbnails', [''])[0] if result.get('thumbnails') else '',
+                    'views': result.get('views', '')
+                }
+                videos.append(video)
+            return videos
+        except Exception as e:
+            logger.error(f"Error in get_youtube_videos: {e}")
+            return []
+    
+    def get_images(self, query, max_images=3):
         """
+        Fetch relevant images/diagrams for a concept using SerpAPI
+        """
+        if not self.serpapi_key:
+            logger.warning("SERPAPI_KEY not set, skipping image fetch")
+            return self.get_fallback_images(query, max_images)
         
         try:
-            response = self.groq_client.chat.completions.create(
-                model="llama-3.3-70b-versatile",
-                messages=[{"role": "user", "content": prompt}],
-                temperature=0.3,
-                max_tokens=800,
-            )
+            # Priority sites for educational content
+            priority_sites = [
+                "geeksforgeeks.org",
+                "medium.com",
+                "tutorialspoint.com",
+                "javatpoint.com",
+                "programiz.com",
+                "w3schools.com"
+            ]
             
-            raw_text = response.choices[0].message.content
-            if "```" in raw_text:
-                raw_text = raw_text.split("```")[1]
-                if raw_text.startswith("json"):
-                    raw_text = raw_text[4:]
+            image_urls = []
             
-            return json.loads(raw_text.strip())
+            # First try to get images from priority sites
+            for site in priority_sites[:max_images]:
+                if len(image_urls) >= max_images:
+                    break
+                
+                try:
+                    # Using the Client approach for serpapi
+                    client = Client(api_key=self.serpapi_key)
+                    
+                    full_query = f"{query} diagram OR illustration site:{site}"
+                    
+                    # Create params for image search
+                    params = {
+                        "engine": "google_images",
+                        "q": full_query,
+                        "num": 1,
+                        "ijn": 0,
+                        "api_key": self.serpapi_key
+                    }
+                    
+                    # Make the request
+                    result = client.search(params)
+                    
+                    if hasattr(result, 'get') and result.get('images_results'):
+                        images = result['images_results']
+                        if images and len(images) > 0:
+                            image_urls.append({
+                                'url': images[0].get('original', ''),
+                                'title': images[0].get('title', ''),
+                                'source': site,
+                                'thumbnail': images[0].get('thumbnail', '')
+                            })
+                            logger.info(f"Found image from {site}")
+                except Exception as e:
+                    logger.error(f"Error fetching image from {site}: {e}")
+                    continue
+            
+            # If we still need more images, do a general search
+            if len(image_urls) < max_images:
+                try:
+                    client = Client(api_key=self.serpapi_key)
+                    params = {
+                        "engine": "google_images",
+                        "q": f"{query} educational diagram",
+                        "num": max_images - len(image_urls),
+                        "ijn": 0,
+                        "api_key": self.serpapi_key
+                    }
+                    
+                    result = client.search(params)
+                    
+                    if hasattr(result, 'get') and result.get('images_results'):
+                        images = result['images_results']
+                        for img in images:
+                            if len(image_urls) >= max_images:
+                                break
+                            image_urls.append({
+                                'url': img.get('original', ''),
+                                'title': img.get('title', ''),
+                                'source': img.get('source', ''),
+                                'thumbnail': img.get('thumbnail', '')
+                            })
+                except Exception as e:
+                    logger.error(f"Error in general image search: {e}")
+            
+            return image_urls
+            
         except Exception as e:
-            print(f"Warning: Could not generate teaching content: {e}")
-            return self._get_fallback_content(atom_name, concept, knowledge_level, error_focus)
+            logger.error(f"Error in get_images: {e}")
+            return self.get_fallback_images(query, max_images)
     
-    def _get_error_focus(self, error_types: List[str]) -> List[str]:
-        """Convert error types to focus areas for teaching"""
-        focus_map = {
-            'conceptual': 'fundamental concepts',
-            'structural': 'relationships between ideas',
-            'procedural': 'step-by-step processes',
-            'factual': 'key facts and definitions',
-            'guessing': 'building confidence with basics'
-        }
-        return [focus_map.get(e, e) for e in error_types if e in focus_map]
+    def get_fallback_images(self, query, max_images=3):
+        """Provide fallback placeholder images when API fails"""
+        fallback_images = []
+        for i in range(min(max_images, 3)):
+            fallback_images.append({
+                'url': f'https://via.placeholder.com/600x400?text={query.replace(" ", "+")}+Diagram+{i+1}',
+                'title': f'{query} - Diagram {i+1}',
+                'source': 'placeholder',
+                'thumbnail': f'https://via.placeholder.com/300x200?text={query.replace(" ", "+")}+{i+1}'
+            })
+        return fallback_images
     
-    def _get_fallback_content(self, atom_name: str, concept: str, level: str, 
-                             error_focus: List[str] = None) -> Dict:
-        """Enhanced fallback content"""
-        focus_text = ""
-        if error_focus:
-            focus_text = f" focusing on {', '.join(error_focus)}"
+    def get_resources_for_concept(self, subject, concept, atom_name=None):
+        """
+        Get both videos and images for a concept
+        """
+        # Create search queries
+        if atom_name:
+            main_query = f"{subject} {concept} {atom_name}"
+            specific_query = f"{atom_name} in {concept}"
+        else:
+            main_query = f"{subject} {concept}"
+            specific_query = concept
         
-        if level == 'advanced':
-            return {
-                "explanation": f"{atom_name} represents an advanced aspect of {concept} with complex interactions and edge cases{focus_text}.",
-                "example": f"Advanced example: In production systems, {atom_name} manifests through...",
-                "analogy": f"Think of {atom_name} like a sophisticated system where multiple components interact.",
-                "misconception": f"Even experts sometimes confuse {atom_name} with similar advanced concepts.",
-                "practical_application": f"Understanding {atom_name} helps in optimizing system performance."
-            }
-        elif level == 'intermediate':
-            return {
-                "explanation": f"{atom_name} is a key component of {concept} that builds on foundational knowledge{focus_text}.",
-                "example": f"Example: When working with {concept}, {atom_name} helps you...",
-                "analogy": f"Think of {atom_name} like a well-organized tool in your toolkit.",
-                "misconception": f"Don't confuse {atom_name} with its related concepts.",
-                "practical_application": f"Mastering {atom_name} improves your problem-solving efficiency."
-            }
-        else:  # zero or beginner
-            return {
-                "explanation": f"{atom_name} is a fundamental building block of {concept}. It's like learning a basic rule{focus_text}.",
-                "example": f"Simple example: Just like learning the alphabet before writing words, {atom_name} comes first.",
-                "analogy": f"Think of {atom_name} like learning to crawl before you walk.",
-                "misconception": f"Beginners often think {atom_name} is harder than it really is.",
-                "practical_application": f"Understanding {atom_name} opens the door to mastering {concept}."
-            }
+        # Fetch resources with error handling
+        videos = []
+        images = []
+        
+        try:
+            videos = self.get_youtube_videos(main_query, max_results=2)
+        except Exception as e:
+            logger.error(f"Error fetching videos: {e}")
+        
+        try:
+            images = self.get_images(main_query, max_images=3)
+        except Exception as e:
+            logger.error(f"Error fetching images: {e}")
+        
+        # If no results, try more specific query
+        if not videos and not images:
+            try:
+                videos = self.get_youtube_videos(specific_query, max_results=2)
+                images = self.get_images(specific_query, max_images=3)
+            except Exception as e:
+                logger.error(f"Error in fallback search: {e}")
+        
+        return {
+            'videos': videos,
+            'images': images
+        }
 
 
 ================================================
@@ -3698,7 +3806,10 @@ import LearningRoute from './components/Learning/LearningRoute';
 import StartAnyConceptSessionRoute from './components/Learning/StartAnyConceptSessionRoute';
 import Leaderboard from './components/Leaderboard';
 import Progress from './components/Progress';
+<<<<<<< HEAD
 import AIAssistantPage from './pages/AIAssistantPage.jsx';
+=======
+>>>>>>> 27ca5f792972d0c6644ef01c0171d1c6ce25ce32
 
 function App() {
     return (
@@ -3755,7 +3866,10 @@ function App() {
                             }
                         />
                     </Routes>
+<<<<<<< HEAD
                          <AIAssistantPage /> 
+=======
+>>>>>>> 27ca5f792972d0c6644ef01c0171d1c6ce25ce32
                 </AuthProvider>
             </Router>
         </ThemeProvider>
@@ -5108,12 +5222,17 @@ export default StartAnyConceptSessionRoute;
 ================================================
 FILE: frontend/src/components/Learning/TeachingFirstFlow.jsx
 ================================================
+<<<<<<< HEAD
 Error reading file with 'cp1252': 'charmap' codec can't decode byte 0x8d in position 23321: character maps to <undefined>
+=======
+Error reading file with 'cp1252': 'charmap' codec can't decode byte 0x8d in position 24381: character maps to <undefined>
+>>>>>>> 27ca5f792972d0c6644ef01c0171d1c6ce25ce32
 
 
 ================================================
 FILE: frontend/src/components/Learning/TeachingModule.jsx
 ================================================
+<<<<<<< HEAD
 Error reading file with 'cp1252': 'charmap' codec can't decode byte 0x90 in position 3575: character maps to <undefined>
 
 
@@ -5336,6 +5455,9 @@ const WeakTopicDetector = ({ conceptData, sessionId, onReviewStart }) => {
 };
 
 export default WeakTopicDetector;
+=======
+Error reading file with 'cp1252': 'charmap' codec can't decode byte 0x90 in position 1488: character maps to <undefined>
+>>>>>>> 27ca5f792972d0c6644ef01c0171d1c6ce25ce32
 
 
 ================================================
@@ -5557,7 +5679,9 @@ export const LearningProvider = ({ children }) => {
                 analogy: raw.analogy || '',
                 misconception: raw.misconception || examples[2] || '',
                 practical_application: raw.practical_application || examples[1] || '',
-                examples: examples
+                examples: examples,
+                videos: Array.isArray(response.data?.videos) ? response.data.videos : [],
+                images: Array.isArray(response.data?.images) ? response.data.images : [],
             };
 
             setTeachingContent(normalized);
@@ -5636,7 +5760,18 @@ export const LearningProvider = ({ children }) => {
                 selected,
                 time_taken
             });
-            return { success: true, data: response.data };
+
+            const data = response.data;
+
+            // Real-time mastery & theta update from initial quiz
+            if (data.updated_mastery !== undefined) {
+                setAtomMastery(data.updated_mastery);
+            }
+            if (data.updated_theta !== undefined) {
+                setCurrentTheta(data.updated_theta);
+            }
+
+            return { success: true, data };
         } catch (error) {
             return {
                 success: false,
@@ -6170,9 +6305,12 @@ export const useTheme = () => {
 };
 
 
+<<<<<<< HEAD
 
 ================================================
 FILE: frontend/src/pages/AIAssistantPage.jsx
 ================================================
 Error reading file with 'cp1252': 'charmap' codec can't decode byte 0x8f in position 7561: character maps to <undefined>
 
+=======
+>>>>>>> 27ca5f792972d0c6644ef01c0171d1c6ce25ce32

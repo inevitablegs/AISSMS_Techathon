@@ -43,7 +43,9 @@ const StartAnyConceptSession = () => {
 
     const handleStartLearning = () => {
         if (generatedAtoms) {
-            navigate(`/learn/${generatedAtoms.concept_id}`);
+            navigate(`/learn/${generatedAtoms.concept_id}`, {
+                state: { knowledge_level: formData.knowledge_level }
+            });
         }
     };
 

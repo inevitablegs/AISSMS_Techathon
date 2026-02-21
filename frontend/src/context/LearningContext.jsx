@@ -32,6 +32,11 @@ export const LearningProvider = ({ children }) => {
     const [engagementScore, setEngagementScore] = useState(0.7);
     const [masteryVerdict, setMasteryVerdict] = useState(null);
     const [showBreakModal, setShowBreakModal] = useState(false);
+
+    // Adaptive flow state
+    const [conceptOverview, setConceptOverview] = useState(null);
+    const [atomSummaries, setAtomSummaries] = useState({});
+    const [allAtomsMastery, setAllAtomsMastery] = useState(null);
     
     // Timers
     const questionStartTime = useRef(null);
@@ -112,7 +117,9 @@ export const LearningProvider = ({ children }) => {
                 analogy: raw.analogy || '',
                 misconception: raw.misconception || examples[2] || '',
                 practical_application: raw.practical_application || examples[1] || '',
-                examples: examples
+                examples: examples,
+                videos: Array.isArray(response.data?.videos) ? response.data.videos : [],
+                images: Array.isArray(response.data?.images) ? response.data.images : [],
             };
 
             setTeachingContent(normalized);
@@ -191,7 +198,18 @@ export const LearningProvider = ({ children }) => {
                 selected,
                 time_taken
             });
-            return { success: true, data: response.data };
+
+            const data = response.data;
+
+            // Real-time mastery & theta update from initial quiz
+            if (data.updated_mastery !== undefined) {
+                setAtomMastery(data.updated_mastery);
+            }
+            if (data.updated_theta !== undefined) {
+                setCurrentTheta(data.updated_theta);
+            }
+
+            return { success: true, data };
         } catch (error) {
             return {
                 success: false,
@@ -545,6 +563,100 @@ export const LearningProvider = ({ children }) => {
         }
     }, []);
 
+    // ── Adaptive flow API methods ──
+
+    const generateConceptOverview = useCallback(async ({ session_id }) => {
+        setLoading(true);
+        try {
+            const response = await axios.post('/auth/api/concept-overview/', {
+                session_id
+            });
+            setConceptOverview(response.data.overview);
+            return { success: true, data: response.data };
+        } catch (error) {
+            return {
+                success: false,
+                error: error.response?.data?.error || 'Failed to generate concept overview'
+            };
+        } finally {
+            setLoading(false);
+        }
+    }, []);
+
+    const generateAtomSummary = useCallback(async ({ session_id, atom_id }) => {
+        setLoading(true);
+        try {
+            const response = await axios.post('/auth/api/atom-summary/', {
+                session_id,
+                atom_id
+            });
+            const summary = response.data.summary;
+            setAtomSummaries(prev => ({ ...prev, [atom_id]: summary }));
+            return { success: true, data: response.data };
+        } catch (error) {
+            return {
+                success: false,
+                error: error.response?.data?.error || 'Failed to generate atom summary'
+            };
+        } finally {
+            setLoading(false);
+        }
+    }, []);
+
+    const adaptiveReteach = useCallback(async ({ session_id, atom_id }) => {
+        setLoading(true);
+        try {
+            const response = await axios.post('/auth/api/adaptive-reteach/', {
+                session_id,
+                atom_id
+            });
+            // Update teaching content with reteach content
+            const raw = response.data?.teaching_content || {};
+            const examples = Array.isArray(raw.examples) ? raw.examples : [];
+            const normalized = {
+                explanation: raw.explanation || '',
+                example: raw.example || examples[0] || '',
+                analogy: raw.analogy || '',
+                misconception: raw.misconception || examples[2] || '',
+                practical_application: raw.practical_application || examples[1] || '',
+                examples: examples,
+                videos: [],
+                images: [],
+            };
+            setTeachingContent(normalized);
+            if (response.data.updated_mastery !== undefined) {
+                setAtomMastery(response.data.updated_mastery);
+            }
+            return { success: true, data: response.data };
+        } catch (error) {
+            return {
+                success: false,
+                error: error.response?.data?.error || 'Failed to reteach'
+            };
+        } finally {
+            setLoading(false);
+        }
+    }, []);
+
+    const getAllAtomsMastery = useCallback(async ({ session_id, concept_id }) => {
+        setLoading(true);
+        try {
+            const response = await axios.post('/auth/api/all-atoms-mastery/', {
+                session_id,
+                concept_id
+            });
+            setAllAtomsMastery(response.data);
+            return { success: true, data: response.data };
+        } catch (error) {
+            return {
+                success: false,
+                error: error.response?.data?.error || 'Failed to get atoms mastery'
+            };
+        } finally {
+            setLoading(false);
+        }
+    }, []);
+
     // Reset for new atom
     const resetForNewAtom = useCallback(() => {
         setCurrentQuestions([]);
@@ -584,6 +696,11 @@ export const LearningProvider = ({ children }) => {
         engagementScore,
         masteryVerdict,
         showBreakModal,
+
+        // Adaptive flow state
+        conceptOverview,
+        atomSummaries,
+        allAtomsMastery,
         
         // Setters
         setKnowledgeLevel,
@@ -617,6 +734,12 @@ export const LearningProvider = ({ children }) => {
         generateConceptFinalChallenge,
         submitConceptFinalAnswer,
         completeConceptFinalChallenge,
+
+        // Adaptive flow methods
+        generateConceptOverview,
+        generateAtomSummary,
+        adaptiveReteach,
+        getAllAtomsMastery,
         
     }), [
         currentSession,
@@ -642,6 +765,9 @@ export const LearningProvider = ({ children }) => {
         engagementScore,
         masteryVerdict,
         showBreakModal,
+        conceptOverview,
+        atomSummaries,
+        allAtomsMastery,
         generateConcept,
         startTeachingSession,
         getTeachingContent,
@@ -664,6 +790,10 @@ export const LearningProvider = ({ children }) => {
         generateConceptFinalChallenge,
         submitConceptFinalAnswer,
         completeConceptFinalChallenge,
+        generateConceptOverview,
+        generateAtomSummary,
+        adaptiveReteach,
+        getAllAtomsMastery,
     ]);
 
     return (
