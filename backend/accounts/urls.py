@@ -38,6 +38,9 @@ from .views import (
     TeacherClassAnalyticsView,
     TeacherConceptManageView, TeacherAtomManageView,
     CheckTeacherView,
+
+    # AI planner views 
+    CreateStudyPlannerView , GetMyPlannerView, TodayStudyView
 )
 
 urlpatterns = [
@@ -123,4 +126,10 @@ urlpatterns = [
     # Knowledge graph management
     path('api/teacher/concepts/', TeacherConceptManageView.as_view(), name='teacher_concepts'),
     path('api/teacher/atoms/', TeacherAtomManageView.as_view(), name='teacher_atoms'),
+
+    # AI planner 
+    path('create-planner/', CreateStudyPlannerView.as_view(), name='create_planner'),
+    path('my-planner/', GetMyPlannerView.as_view(), name='my_planner'),
+    path("today-study/", TodayStudyView.as_view(), name="today_study"),
+
 ]

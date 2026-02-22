@@ -320,3 +320,55 @@ class TeacherGoal(models.Model):
     def __str__(self):
         target = 'All Students' if self.is_class_wide else self.student.username if self.student else 'N/A'
         return f"Goal: {self.title} → {target}"
+
+
+# ==================== AI STUDY PLANNER ====================
+
+class StudyPlanner(models.Model):
+    GOAL_CHOICES = [
+        ('study', 'Regular Study'),
+        ('exam', 'Exam Preparation'),
+        ('other', 'Other'),
+    ]
+
+    DAY_OPTION_CHOICES = [
+        ('mon_fri', 'Monday to Friday'),
+        ('mon_sun', 'Monday to Sunday'),
+    ]
+
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='study_planners')
+    goal_type = models.CharField(max_length=20, choices=GOAL_CHOICES)
+    day_option = models.CharField(max_length=20, choices=DAY_OPTION_CHOICES)
+    free_hours_per_day = models.IntegerField(default=2)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    # Store generated timetable
+    timetable = models.JSONField(default=dict)
+
+    class Meta:
+        ordering = ['-created_at']
+
+
+class PlannerSubject(models.Model):
+    planner = models.ForeignKey(StudyPlanner, on_delete=models.CASCADE, related_name='subjects')
+    subject_name = models.CharField(max_length=200)
+    priority = models.IntegerField(default=1)  # 1 = high, 2 = medium, 3 = low
+
+class StudyPlanItem(models.Model):
+    planner = models.ForeignKey(
+        StudyPlanner,
+        on_delete=models.CASCADE,
+        related_name="items"
+    )
+
+    date = models.DateField()
+    subject = models.CharField(max_length=255)
+    topic = models.CharField(max_length=255)
+    hours = models.FloatField(default=1)
+
+    completed = models.BooleanField(default=False)
+
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    def __str__(self):
+        return f"{self.date} - {self.subject} - {self.topic}"

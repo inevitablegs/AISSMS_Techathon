@@ -25,6 +25,9 @@ import ClassAnalytics from './components/Teacher/ClassAnalytics';
 import GoalsManagement from './components/Teacher/GoalsManagement';
 import TeacherProtectedRoute from './components/Teacher/TeacherProtectedRoute';
 
+// StudyPlanner import
+import StudyPlanner from './components/Planner/StudyPlanner';
+
 function App() {
     return (
         <ThemeProvider>
@@ -35,7 +38,7 @@ function App() {
                         <Route path="/" element={<Home />} />
                         <Route path="/login" element={<Login />} />
                         <Route path="/register" element={<Register />} />
-                        
+
                         <Route
                             path="/dashboard"
                             element={
@@ -106,8 +109,16 @@ function App() {
                         <Route path="/teacher/goals" element={
                             <TeacherProvider><TeacherProtectedRoute><GoalsManagement /></TeacherProtectedRoute></TeacherProvider>
                         } />
+                        <Route
+                            path="/planner"
+                            element={
+                                <ProtectedRoute>
+                                    <StudyPlanner />
+                                </ProtectedRoute>
+                            }
+                        />
                     </Routes>
-                         <AIAssistantPage /> 
+                    <AIAssistantPage />
                 </AuthProvider>
             </Router>
         </ThemeProvider>
