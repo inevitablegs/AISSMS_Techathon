@@ -1,7 +1,7 @@
 import axios from 'axios';
 
 const axiosInstance = axios.create({
-    baseURL: 'https://hackathon-gcoeara.onrender.com/',
+    baseURL: 'https://hackathon-gcoeara.onrender.com/auth/api',
     headers: {
         'Content-Type': 'application/json',
     },
