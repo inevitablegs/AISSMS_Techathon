@@ -16,6 +16,13 @@ from rest_framework.views import APIView, csrf_exempt
 from rest_framework.response import Response
 from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework_simplejwt.tokens import RefreshToken
+from .models import StudyPlanner, PlannerSubject
+from .planner_engine import generate_timetable
+from learning_engine.ai_study_planner import generate_subtopics, distribute_topics
+from .models import StudyPlanItem
+from datetime import datetime
+
+
 
 from .models import (
     Concept, TeachingAtom, Question, StudentProgress,
@@ -4877,4 +4884,181 @@ class LearningCalendarView(APIView):
             'streak_days': streak_days,
             'streak_count': streak_count,
             'this_week_summary': this_week_summary,
+        })
+    
+    
+    # Planner View
+
+class CreateStudyPlannerView(APIView):
+    permission_classes = [IsAuthenticated]
+    
+    def post(self, request):
+        try:
+            data = request.data
+            
+            # Create the planner
+            planner = StudyPlanner.objects.create(
+                user=request.user,
+                goal_type=data.get('goal_type', 'study'),
+                day_option=data.get('day_option', 'mon_fri'),
+                free_hours_per_day=data.get('free_hours_per_day', 2)
+            )
+            
+            # Add subjects and generate topics for each
+            subjects_data = data.get('subjects', [])
+            subjects_with_topics = []
+            
+            for subject_data in subjects_data:
+                subject_name = subject_data.get('subject_name')
+                priority = subject_data.get('priority', 1)
+                
+                # Create the subject
+                planner_subject = PlannerSubject.objects.create(
+                    planner=planner,
+                    subject_name=subject_name,
+                    priority=priority
+                )
+                
+                # Generate AI topics for this subject
+                topics = generate_subtopics(
+                    subject=subject_name,
+                    goal=data.get('goal_type', 'study'),
+                    num_topics=8  # Generate 8 topics per subject
+                )
+                
+                subjects_with_topics.append({
+                    "subject_name": subject_name,
+                    "topics": topics,
+                    "priority": priority
+                })
+            
+            # Distribute topics across days
+            schedule = distribute_topics(planner, subjects_with_topics)
+            
+            # Convert schedule to timetable format for storage
+            timetable = {}
+            for day_schedule in schedule:
+                day_name = day_schedule['day']
+                timetable[day_name] = []
+                for session in day_schedule['sessions']:
+                    timetable[day_name].append({
+                        "hour": len(timetable[day_name]) + 1,
+                        "subject": session['subject'],
+                        "topic": session['topic'],
+                        "hours": session['hours'],
+                        "status": "pending"
+                    })
+            
+            # Save the timetable
+            planner.timetable = timetable
+            planner.save()
+            
+            # Return the created planner with topics
+            response_data = {
+                'id': planner.id,
+                'goal_type': planner.goal_type,
+                'day_option': planner.day_option,
+                'free_hours_per_day': planner.free_hours_per_day,
+                'created_at': planner.created_at,
+                'subjects': subjects_with_topics,
+                'timetable': timetable
+            }
+            
+            return Response(response_data, status=201)
+            
+        except Exception as e:
+            print(f"Error creating planner: {str(e)}")
+            return Response({'error': str(e)}, status=500)
+
+# backend/accounts/views.py - Add this view
+
+class TodayStudyView(APIView):
+    permission_classes = [IsAuthenticated]
+    
+    def get(self, request):
+        try:
+            planner_id = request.query_params.get('planner_id')
+            if not planner_id:
+                return Response({'error': 'Planner ID required'}, status=400)
+            
+            # Get the planner
+            planner = StudyPlanner.objects.get(id=planner_id, user=request.user)
+            
+            # Get today's day name
+            today = datetime.now().strftime('%A')
+            
+            # Get today's schedule from planner timetable
+            timetable = planner.timetable or {}
+            today_schedule = timetable.get(today, [])
+            
+            # Build subjects with topics
+            subjects = {}
+            completed_subjects = {}
+            total_topics = 0
+            completed_topics = 0
+            
+            for session in today_schedule:
+                subject_name = session.get('subject')
+                topic_name = session.get('topic', f"Study {subject_name}")
+                hour = session.get('hour')
+                
+                if subject_name not in subjects:
+                    subjects[subject_name] = []
+                
+                # Check if this topic is completed
+                is_completed = False  # You can track this in a separate model
+                
+                subjects[subject_name].append({
+                    'id': hash(f"{subject_name}_{topic_name}") % 10000,  # Temporary ID
+                    'name': topic_name,
+                    'description': f"Study {topic_name}",
+                    'difficulty': 'medium',  # Default
+                    'estimated_time': session.get('hours', 1) * 60,  # Convert to minutes
+                    'completed': is_completed,
+                    'concept_id': hour,  # Use hour as temporary concept_id
+                })
+                
+                total_topics += 1
+                if is_completed:
+                    completed_topics += 1
+                    
+                # Track completed hours
+                if is_completed:
+                    if subject_name not in completed_subjects:
+                        completed_subjects[subject_name] = []
+                    completed_subjects[subject_name].append(hour)
+            
+            response_data = {
+                'total_topics': total_topics,
+                'completed_topics': completed_topics,
+                'completed_subjects': completed_subjects,
+                'subjects': subjects,
+                'date': today,
+                'planner_id': planner.id,
+                'schedule': today_schedule
+            }
+            
+            return Response(response_data)
+            
+        except StudyPlanner.DoesNotExist:
+            return Response({'error': 'Planner not found'}, status=404)
+        except Exception as e:
+            print(f"Error in TodayStudyView: {str(e)}")
+            return Response({'error': str(e)}, status=500)
+
+        
+class GetMyPlannerView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        planner = StudyPlanner.objects.filter(user=request.user).first()
+
+        if not planner:
+            return Response({"message": "No planner found"}, status=404)
+
+        return Response({
+            "goal_type": planner.goal_type,
+            "day_option": planner.day_option,
+            "free_hours_per_day": planner.free_hours_per_day,
+            "timetable": planner.timetable
         })

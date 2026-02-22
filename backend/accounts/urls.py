@@ -45,6 +45,9 @@ from .views import (
     ParentChildrenView, ParentLinkChildView, ParentInviteCodeView,
     ParentChildInsightsView,
     LinkParentView,
+
+    # AI planner views 
+    CreateStudyPlannerView , GetMyPlannerView, TodayStudyView
 )
 
 urlpatterns = [
@@ -145,4 +148,10 @@ urlpatterns = [
 
     # Student links to parent (invite code)
     path('api/link-parent/', LinkParentView.as_view(), name='link_parent'),
+
+    # AI planner 
+    path('create-planner/', CreateStudyPlannerView.as_view(), name='create_planner'),
+    path('my-planner/', GetMyPlannerView.as_view(), name='my_planner'),
+    path("today-study/", TodayStudyView.as_view(), name="today_study"),
+
 ]

@@ -44,6 +44,7 @@ const Navbar = ({ variant = 'default' }) => {
             { path: '/calendar', label: 'Calendar', icon: '📅' },
             { path: '/leaderboard', label: 'Leaderboard', icon: '🏆' },
             { path: '/learn/start', label: 'New Session', icon: '▶️' },
+            { path: '/planner', label: 'Planner', icon: '📅' }, 
           ]
         : [];
 

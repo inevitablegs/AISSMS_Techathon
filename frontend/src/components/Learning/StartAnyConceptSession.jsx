@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useLocation } from 'react-router-dom';
 import { useLearning } from '../../context/LearningContext';
 import axios from '../../axiosConfig';
 
@@ -144,11 +144,22 @@ const SuggestionDropdown = ({ suggestions, loading, visible, onSelect, highlight
 };
 
 const StartAnyConceptSession = () => {
+    const location = useLocation();
     const [formData, setFormData] = useState({
         subject: '',
         concept: '',
         knowledge_level: 'intermediate'
     });
+    // Autofill subject/concept if passed from navigation state
+    useEffect(() => {
+        if (location.state) {
+            setFormData(prev => ({
+                ...prev,
+                subject: location.state.subject || prev.subject,
+                concept: location.state.topic || prev.concept
+            }));
+        }
+    }, [location.state]);
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState('');
     const [generatedAtoms, setGeneratedAtoms] = useState(null);
@@ -330,6 +341,7 @@ const StartAnyConceptSession = () => {
                                     autoComplete="off"
                                     placeholder="e.g., Microprocessor, Mathematics, Physics"
                                     className="w-full px-4 py-2 bg-theme-bg border border-theme-border rounded-theme-lg focus:ring-2 focus:ring-primary/50 focus:border-primary text-theme-text placeholder:text-theme-text-muted transition-colors"
+                                    readOnly={!!location.state && !!location.state.subject}
                                 />
                                 <SuggestionDropdown
                                     suggestions={subjectSuggestions}
@@ -359,6 +371,9 @@ const StartAnyConceptSession = () => {
                                     placeholder={formData.subject ? `Concepts in ${formData.subject}…` : 'Enter a subject first'}
                                     disabled={!formData.subject.trim()}
                                     className="w-full px-4 py-2 bg-theme-bg border border-theme-border rounded-theme-lg focus:ring-2 focus:ring-primary/50 focus:border-primary text-theme-text placeholder:text-theme-text-muted transition-colors disabled:opacity-50"
+                                    // placeholder="e.g., Memory Organization, Calculus, Quantum Mechanics"
+                                    // className="w-full px-4 py-2 bg-theme-bg border border-theme-border rounded-theme-lg focus:ring-2 focus:ring-primary/50 focus:border-primary text-theme-text placeholder:text-theme-text-muted transition-colors"
+                                    readOnly={!!location.state && !!location.state.topic}
                                 />
                                 {formData.subject.trim() && (
                                     <SuggestionDropdown
@@ -434,7 +449,7 @@ const StartAnyConceptSession = () => {
                                 <h4 className="font-medium text-theme-text-secondary mb-3">Atomic Concepts:</h4>
                                 <div className="space-y-2">
                                     {generatedAtoms.atoms.map((atom, index) => (
-                                        <div 
+                                        <div
                                             key={atom.id}
                                             className="flex items-center p-3 bg-theme-bg rounded-theme-lg"
                                         >
@@ -463,6 +478,7 @@ const StartAnyConceptSession = () => {
                     )}
                 </div>
             </div>
+
         </div>
     );
 };

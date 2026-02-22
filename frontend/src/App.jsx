@@ -33,6 +33,8 @@ import ParentRegister from './components/Parent/ParentRegister';
 import ParentDashboard from './components/Parent/ParentDashboard';
 import ParentChildInsights from './components/Parent/ParentChildInsights';
 import ParentProtectedRoute from './components/Parent/ParentProtectedRoute';
+// StudyPlanner import
+import StudyPlanner from './components/Planner/StudyPlanner';
 
 function App() {
     return (
@@ -44,7 +46,7 @@ function App() {
                         <Route path="/" element={<Home />} />
                         <Route path="/login" element={<Login />} />
                         <Route path="/register" element={<Register />} />
-                        
+
                         <Route
                             path="/dashboard"
                             element={
@@ -134,8 +136,41 @@ function App() {
                                 <ParentProtectedRoute><ParentChildInsights /></ParentProtectedRoute>
                             } />
                         </Route>
+                        {/* Teacher Routes */}
+                        <Route path="/teacher/login" element={
+                            <TeacherProvider><TeacherLogin /></TeacherProvider>
+                        } />
+                        <Route path="/teacher/register" element={
+                            <TeacherProvider><TeacherRegister /></TeacherProvider>
+                        } />
+                        <Route path="/teacher/dashboard" element={
+                            <TeacherProvider><TeacherProtectedRoute><TeacherDashboard /></TeacherProtectedRoute></TeacherProvider>
+                        } />
+                        <Route path="/teacher/students" element={
+                            <TeacherProvider><TeacherProtectedRoute><StudentAnalytics /></TeacherProtectedRoute></TeacherProvider>
+                        } />
+                        <Route path="/teacher/content" element={
+                            <TeacherProvider><TeacherProtectedRoute><ContentManagement /></TeacherProtectedRoute></TeacherProvider>
+                        } />
+                        <Route path="/teacher/questions" element={
+                            <TeacherProvider><TeacherProtectedRoute><QuestionManagement /></TeacherProtectedRoute></TeacherProvider>
+                        } />
+                        <Route path="/teacher/analytics" element={
+                            <TeacherProvider><TeacherProtectedRoute><ClassAnalytics /></TeacherProtectedRoute></TeacherProvider>
+                        } />
+                        <Route path="/teacher/goals" element={
+                            <TeacherProvider><TeacherProtectedRoute><GoalsManagement /></TeacherProtectedRoute></TeacherProvider>
+                        } />
+                        <Route
+                            path="/planner"
+                            element={
+                                <ProtectedRoute>
+                                    <StudyPlanner />
+                                </ProtectedRoute>
+                            }
+                        />
                     </Routes>
-                         <AIAssistantPage /> 
+                    <AIAssistantPage />
                 </AuthProvider>
             </Router>
         </ThemeProvider>
