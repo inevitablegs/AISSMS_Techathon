@@ -1697,6 +1697,35 @@ class SubmitAtomAnswerView(APIView):
                 xp_profile.award_xp(xp_amount, category='questions')
             
             session.save()
+
+            # ── Live cognitive load and session-shape ──
+            from learning_engine.cognitive_load import compute_cognitive_load, get_session_shape_message
+            elapsed_minutes = (timezone.now() - session.start_time).total_seconds() / 60.0
+            answers = session.session_data.get('answers', [])
+            last_5 = answers[-5:] if len(answers) >= 5 else answers
+            recent_accuracy = (sum(1 for a in last_5 if a.get('correct')) / len(last_5)) if last_5 else (1.0 if result['correct'] else 0.0)
+            hint_usage_ratio = (session.hints_used or 0) / max(1, session.questions_answered)
+            expected_time = float(question.get('estimated_time', 60))
+            fatigue_val = result.get('fatigue')
+            fatigue_level_str = fatigue_val.get('level', 'fresh') if isinstance(fatigue_val, dict) else (fatigue_val or 'fresh')
+            load_score, session_shape_action = compute_cognitive_load(
+                elapsed_minutes,
+                session.questions_answered,
+                time_taken,
+                expected_time,
+                recent_accuracy,
+                hint_usage_ratio,
+                fatigue_level_str,
+            )
+            if 'cognitive_load_history' not in session.session_data:
+                session.session_data['cognitive_load_history'] = []
+            session.session_data['cognitive_load_history'].append({
+                'timestamp': timezone.now().isoformat(),
+                'score': load_score,
+                'action': session_shape_action,
+            })
+            session_shape_message = get_session_shape_message(session_shape_action)
+            session.save()
             
             # Determine next steps based on pacing
             explanation = ''
@@ -1734,6 +1763,10 @@ class SubmitAtomAnswerView(APIView):
                 'velocity_snapshot': result.get('velocity_snapshot'),
                 'engagement_adjustment': result.get('engagement_adjustment'),
                 'mastery_verdict': result.get('mastery_verdict'),
+                # ── Cognitive load and session-shape ──
+                'cognitive_load_score': load_score,
+                'cognitive_load_action': session_shape_action,
+                'session_shape_message': session_shape_message,
             }
             
             # Persist enriched data to session-level fatigue/velocity
@@ -1747,13 +1780,15 @@ class SubmitAtomAnswerView(APIView):
             
             # If atom complete, use ADAPTIVE ENGINE to find next best atom
             # atom_complete comes from pacing engine's should_exit_atom.
-            # Sync: if pacing says complete but state machine didn't mark it yet,
-            # explicitly mark complete. (update_atom_state may lag by one streak)
+            # Only mark 'complete' if mastery genuinely meets the threshold;
+            # otherwise the student just hit max-questions and must move on
+            # without an artificial mastery boost.
             if result['atom_complete'] and progress.phase != 'complete':
-                progress.phase = 'complete'
-                progress.mastery_score = max(
-                    float(progress.mastery_score), MASTERY_THRESHOLD
-                )
+                if float(progress.mastery_score) >= MASTERY_THRESHOLD:
+                    progress.phase = 'complete'
+                else:
+                    # Max-questions reached but mastery is low — don't fake it
+                    progress.phase = 'practice'
                 progress.save()
 
             if result['atom_complete'] or progress.phase == 'complete':
@@ -1791,14 +1826,17 @@ class SubmitAtomAnswerView(APIView):
                     response_data['concept_complete'] = True
                     response_data['concept_final_challenge_ready'] = True
             
+            # Sync response mastery with actual DB value
+            # (may differ due to fragile decay or completion boost)
+            response_data['updated_mastery'] = float(progress.mastery_score)
+
             return Response(response_data)
             
         except Exception as e:
             print(f"Error submitting answer: {e}")
             import traceback
             traceback.print_exc()
-            return Response({'error': str(e)}, status=500)
-        
+            return Response({'error': str(e)}, status=500)   
 
 class CompleteAtomView(APIView):
     """Step 6: Complete atom - CALCULATE EVERYTHING and DECIDE next action"""
@@ -2053,13 +2091,13 @@ class CompleteAtomView(APIView):
         if all_completed:
             next_action = 'concept_complete'
             action_reason = 'All atoms in this concept have been mastered.'
-        elif adaptive_action == 'teach':
+        elif adaptive_action in ('TEACH', 'teach'):
             next_action = 'auto_advance'
             action_reason = f'Moving to {next_atom.name} — teaching phase.'
-        elif adaptive_action == 'practice':
+        elif adaptive_action in ('PRACTICE', 'practice'):
             next_action = 'auto_advance'
             action_reason = f'Moving to {next_atom.name} — practice phase.'
-        elif adaptive_action == 'advance':
+        elif adaptive_action in ('ADVANCE', 'advance'):
             next_action = 'auto_advance'
             action_reason = f'{next_atom.name} is ready — advancing.'
         else:
@@ -2468,6 +2506,23 @@ class GetAllAtomsMasteryView(APIView):
             })
 
         avg_mastery = total_mastery / max(len(atoms), 1)
+        completed_count = sum(1 for a in atom_data if a['phase'] == 'complete')
+
+        # Get user theta & total XP
+        try:
+            profile = request.user.learning_profile
+            user_theta = float(profile.overall_theta)
+        except Exception:
+            user_theta = 0.0
+        try:
+            xp_profile = UserXP.objects.get(user=request.user)
+            total_xp = xp_profile.total_xp
+        except UserXP.DoesNotExist:
+            total_xp = 0
+
+        # Add 'mastery' alias on each atom for frontend compatibility
+        for a in atom_data:
+            a['mastery'] = a['mastery_score']
 
         # Suggestions based on overall performance
         weak_atoms = [a for a in atom_data if a['mastery_score'] < 0.6]
@@ -2489,8 +2544,12 @@ class GetAllAtomsMasteryView(APIView):
             'subject': concept.subject,
             'atoms': atom_data,
             'avg_mastery': round(avg_mastery, 4),
+            'overall_mastery': round(avg_mastery, 4),
             'total_atoms': len(atoms),
-            'completed_atoms': sum(1 for a in atom_data if a['phase'] == 'complete'),
+            'completed_atoms': completed_count,
+            'atoms_mastered': completed_count,
+            'theta': user_theta,
+            'total_xp': total_xp,
             'strong_atoms': len(strong_atoms),
             'weak_atoms': len(weak_atoms),
             'suggestions': suggestions,
@@ -3360,12 +3419,10 @@ class CompleteConceptFinalChallengeView(APIView):
         for atom in concept_atoms:
             try:
                 prog = StudentProgress.objects.get(user=request.user, atom=atom)
-
                 mastery = float(prog.mastery_score)
-                
             except StudentProgress.DoesNotExist:
-                 mastery = 0.0
-            atom_masteries.append(0.0)
+                mastery = 0.0
+            atom_masteries.append(mastery)
 
             if mastery < lowest_mastery:
                 lowest_mastery = mastery
@@ -3398,14 +3455,14 @@ class CompleteConceptFinalChallengeView(APIView):
             'final_mastery': final_mastery,
             'passed': passed,
             'xp_earned': concept_xp,
-            'weakest_atom': weakest_atom.title if weakest_atom else None,
+            'weakest_atom': weakest_atom.name if weakest_atom else None,
             'lowest_mastery': lowest_mastery,
         }
         session.session_data = session_data
         session.save()
         if accuracy < 0.6 and weakest_atom:
             recommendation = (
-                f" We recommend revising '{weakest_atom.title}' "
+                f" We recommend revising '{weakest_atom.name}' "
                 f"(Mastery: {lowest_mastery:.0%}) before continuing."
             )
 
@@ -3425,7 +3482,8 @@ class CompleteConceptFinalChallengeView(APIView):
             'final_mastery': final_mastery,
             'concept_xp': concept_xp,
             'recommendation': recommendation,
-            weakest_atom: weakest_atom.title if weakest_atom else None,
+            'weakest_atom': weakest_atom.name if weakest_atom else None,
+            'lowest_mastery': lowest_mastery,
         })
     # ==================== AI Assistance ====================
 
@@ -4673,4 +4731,150 @@ class ParentChildInsightsView(APIView):
             'insight_messages': insights,
             'velocity_snapshots': velocity_snapshots,
             'weekly_summary': weekly_summary,
+        })
+
+
+
+
+class LearningCalendarView(APIView):
+    """GET learning calendar for a month: sessions per day, review_due, suggested, streak_days."""
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        now = timezone.now().date()
+        try:
+            year = int(request.query_params.get('year', now.year))
+            month = int(request.query_params.get('month', now.month))
+        except (TypeError, ValueError):
+            year, month = now.year, now.month
+        if month < 1 or month > 12:
+            year, month = now.year, now.month
+        first_day = date(year, month, 1)
+        last_day = date(year, month, cal_module.monthrange(year, month)[1])
+
+        user = request.user
+        days = {}
+
+        # Sessions in range: group by start_time date
+        sessions = LearningSession.objects.filter(
+            user=user,
+            start_time__date__gte=first_day,
+            start_time__date__lte=last_day,
+        ).select_related('concept').order_by('start_time')
+
+        streak_days = []
+        for s in sessions:
+            d = s.start_time.date()
+            key = d.isoformat()
+            if key not in streak_days:
+                streak_days.append(key)
+            if key not in days:
+                days[key] = {'sessions': [], 'review_due': [], 'suggested': []}
+            duration_mins = None
+            if s.end_time and s.start_time:
+                duration_mins = round((s.end_time - s.start_time).total_seconds() / 60, 1)
+            days[key]['sessions'].append({
+                'id': s.id,
+                'concept_id': s.concept_id,
+                'concept_name': s.concept.name,
+                'subject': s.concept.subject,
+                'start_time': s.start_time.isoformat(),
+                'end_time': s.end_time.isoformat() if s.end_time else None,
+                'questions_answered': s.questions_answered,
+                'correct_answers': s.correct_answers,
+                'duration_mins': duration_mins,
+                'accuracy': round(s.correct_answers / s.questions_answered, 2) if s.questions_answered > 0 else 0,
+            })
+
+        # Review due: StudentProgress with next_review_at in range
+        review_progress = StudentProgress.objects.filter(
+            user=user,
+            next_review_at__isnull=False,
+            next_review_at__date__gte=first_day,
+            next_review_at__date__lte=last_day,
+        ).select_related('atom__concept')
+
+        for p in review_progress:
+            key = p.next_review_at.date().isoformat()
+            if key not in days:
+                days[key] = {'sessions': [], 'review_due': [], 'suggested': []}
+            days[key]['review_due'].append({
+                'atom_id': p.atom_id,
+                'atom_name': p.atom.name,
+                'concept_name': p.atom.concept.name,
+                'concept_id': p.atom.concept_id,
+                'mastery_score': round(p.mastery_score, 3),
+            })
+            days[key]['suggested'].append({
+                'atom_id': p.atom_id,
+                'atom_name': p.atom.name,
+                'concept_name': p.atom.concept.name,
+                'concept_id': p.atom.concept_id,
+                'reason': 'review_due',
+            })
+
+        # Suggested "continue": atoms in practice/teaching for today
+        today_key = now.isoformat()
+        if first_day <= now <= last_day:
+            continue_progress = StudentProgress.objects.filter(
+                user=user,
+                phase__in=('practice', 'teaching'),
+                atom__concept__isnull=False,
+            ).select_related('atom__concept').order_by('mastery_score', 'last_practiced')[:5]
+            if today_key not in days:
+                days[today_key] = {'sessions': [], 'review_due': [], 'suggested': []}
+            for p in continue_progress:
+                days[today_key]['suggested'].append({
+                    'atom_id': p.atom_id,
+                    'atom_name': p.atom.name,
+                    'concept_name': p.atom.concept.name,
+                    'concept_id': p.atom.concept_id,
+                    'reason': 'continue',
+                })
+
+        # Streak: consecutive days with at least one session ending today
+        distinct_dates_set = set(
+            LearningSession.objects.filter(
+                user=user,
+                start_time__date__lte=now,
+            ).values_list('start_time__date', flat=True).distinct()
+        )
+        streak_count = 0
+        d = now
+        while d in distinct_dates_set:
+            streak_count += 1
+            d -= timedelta(days=1)
+
+        # This week summary (Mon–Sun)
+        week_start = now - timedelta(days=now.weekday())
+        week_end = week_start + timedelta(days=6)
+        sessions_this_week = LearningSession.objects.filter(
+            user=user,
+            start_time__date__gte=week_start,
+            start_time__date__lte=week_end,
+        ).count()
+        review_due_this_week = StudentProgress.objects.filter(
+            user=user,
+            next_review_at__isnull=False,
+            next_review_at__date__gte=week_start,
+            next_review_at__date__lte=week_end,
+        ).count()
+        continue_today = StudentProgress.objects.filter(
+            user=user,
+            phase__in=('practice', 'teaching'),
+            atom__concept__isnull=False,
+        ).count() if now <= week_end else 0
+        suggested_this_week = review_due_this_week + (continue_today if week_start <= now <= week_end else 0)
+        this_week_summary = {
+            'sessions': sessions_this_week,
+            'suggested': suggested_this_week,
+        }
+
+        return Response({
+            'year': year,
+            'month': month,
+            'days': days,
+            'streak_days': streak_days,
+            'streak_count': streak_count,
+            'this_week_summary': this_week_summary,
         })

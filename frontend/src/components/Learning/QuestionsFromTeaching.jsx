@@ -28,7 +28,10 @@ const QuestionsFromTeaching = ({
         pacingDecision,
         nextAction,
         metrics,
-        loading 
+        loading,
+        cognitiveLoadScore,
+        sessionShapeAction,
+        sessionShapeMessage,
     } = useLearning();
 
     const submitFn = onSubmitAnswer || submitAtomAnswer;
@@ -191,6 +194,32 @@ const QuestionsFromTeaching = ({
                 </div>
             )}
 
+            {/* Session-shape message (cognitive load) */}
+            {isSubmitted && sessionShapeMessage && (
+                <div className={`mb-4 p-3 rounded-lg border ${
+                    sessionShapeAction === 'suggest_end' || sessionShapeAction === 'suggest_break'
+                        ? 'bg-amber-500/10 text-amber-700 dark:text-amber-400 border-amber-500/30'
+                        : sessionShapeAction === 'offer_one_more'
+                        ? 'bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 border-emerald-500/30'
+                        : 'bg-primary/10 text-primary border-primary/30'
+                }`}>
+                    <p className="text-sm font-medium">{sessionShapeMessage}</p>
+                </div>
+            )}
+
+            {/* Load indicator (optional) */}
+            {showMetrics && isSubmitted && cognitiveLoadScore != null && (
+                <div className="mb-4 flex items-center gap-2 text-xs text-theme-text-muted">
+                    <span>Focus:</span>
+                    <span className={`font-medium ${
+                        cognitiveLoadScore < 0.4 ? 'text-emerald-500' :
+                        cognitiveLoadScore < 0.7 ? 'text-amber-500' : 'text-amber-600 dark:text-amber-400'
+                    }`}>
+                        {cognitiveLoadScore < 0.4 ? 'Low load' : cognitiveLoadScore < 0.7 ? 'Medium' : 'High load'}
+                    </span>
+                </div>
+            )}
+
             {/* Question Header */}
             <div className="mb-4 flex justify-between items-center">
                 <div>
@@ -302,12 +331,22 @@ const QuestionsFromTeaching = ({
                         {loading ? 'Submitting...' : 'Submit Answer'}
                     </button>
                 ) : (
-                    <button
-                        onClick={handleNext}
-                        className="px-6 py-2 bg-emerald-500 text-white rounded-theme-lg hover:bg-emerald-600 transition-colors"
-                    >
-                        {currentIndex < questions.length - 1 ? 'Next Question →' : 'Complete Atom →'}
-                    </button>
+                    <div className="flex items-center gap-2">
+                        {sessionShapeAction === 'suggest_end' && (
+                            <button
+                                onClick={() => onComplete?.()}
+                                className="px-4 py-2 bg-amber-500/20 text-amber-700 dark:text-amber-400 border border-amber-500/40 rounded-theme-lg hover:bg-amber-500/30 transition-colors"
+                            >
+                                End session
+                            </button>
+                        )}
+                        <button
+                            onClick={handleNext}
+                            className="px-6 py-2 bg-emerald-500 text-white rounded-theme-lg hover:bg-emerald-600 transition-colors"
+                        >
+                            {currentIndex < questions.length - 1 ? 'Next Question →' : 'Complete Atom →'}
+                        </button>
+                    </div>
                 )}
             </div>
 

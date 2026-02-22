@@ -239,6 +239,7 @@ const TeachingFirstFlow = ({ conceptId, knowledgeLevel = 'intermediate' }) => {
     const [finalRecommendation, setFinalRecommendation] = useState('');
     const [nextAtomAfterFinal, setNextAtomAfterFinal] = useState(null);
     const [conceptFinalResult, setConceptFinalResult] = useState(null);
+    const [pendingCompletionData, setPendingCompletionData] = useState(null);
 
     // Get all context values
     const {
@@ -585,7 +586,7 @@ const TeachingFirstFlow = ({ conceptId, knowledgeLevel = 'intermediate' }) => {
         });
     }, [currentSession, currentAtomData, submitAtomAnswer]);
 
-    // Handle questions complete
+    // Handle questions complete — ALWAYS show compulsory review
     const handleQuestionsComplete = useCallback(async () => {
         if (!currentSession?.session_id || !currentAtomData?.id) return;
 
@@ -607,98 +608,48 @@ const TeachingFirstFlow = ({ conceptId, knowledgeLevel = 'intermediate' }) => {
 
             const data = completeResult.data;
 
-            if (data.all_completed || data.next_action?.action === 'concept_complete' || data.concept_final_challenge_ready) {
-                // All atoms done — generate atom summary first, then go to all_atoms_mastery
-                try {
-                    await generateAtomSummary({
-                        session_id: currentSession.session_id,
-                        atom_id: currentAtomData.id
-                    });
-                } catch (e) {
-                    console.warn('Atom summary generation failed:', e);
-                }
-                setFlowState('atom_summary');
-                return;
-            }
+            // ALWAYS build review metrics (compulsory review after every atom)
+            const totalAnswers = answers.length;
+            const correctCount = answers.filter(a => a.correct).length;
+            const accuracy = totalAnswers > 0 ? correctCount / totalAnswers : 0;
 
-            const action = data.next_action?.action;
-            const reviewActions = new Set([
-                'review_current',
-                'recommend_review',
-                'recommend_practice'
-            ]);
+            const errorCounts = {
+                conceptual: answers.filter(a => a.error_type === 'conceptual').length,
+                procedural: answers.filter(a => a.error_type === 'procedural').length,
+                factual: answers.filter(a => a.error_type === 'factual').length,
+                guessing: answers.filter(a => a.error_type === 'guessing').length,
+                attentional: answers.filter(a => a.error_type === 'attentional').length
+            };
 
-            if (reviewActions.has(action)) {
-                // Build review metrics from latest answers
-                const totalAnswers = answers.length;
-                const correctCount = answers.filter(a => a.correct).length;
-                const accuracy = totalAnswers > 0 ? correctCount / totalAnswers : 0;
+            // Use backend's authoritative mastery (fixes mastery inconsistency)
+            const authoritativeMastery = data.metrics?.final_mastery ?? atomMastery;
 
-                const errorCounts = {
-                    conceptual: answers.filter(a => a.error_type === 'conceptual').length,
-                    procedural: answers.filter(a => a.error_type === 'procedural').length,
-                    factual: answers.filter(a => a.error_type === 'factual').length,
-                    guessing: answers.filter(a => a.error_type === 'guessing').length,
-                    attentional: answers.filter(a => a.error_type === 'attentional').length
-                };
+            setReviewMetrics({
+                accuracy,
+                final_mastery: authoritativeMastery,
+                error_count: totalAnswers - correctCount,
+                conceptual_errors: errorCounts.conceptual,
+                procedural_errors: errorCounts.procedural,
+                factual_errors: errorCounts.factual,
+                guessing_errors: errorCounts.guessing,
+                attentional_errors: errorCounts.attentional,
+                time_ratio: answers.length > 0
+                    ? answers.reduce((sum, a) => sum + (a.time_taken / 60), 0) / answers.length
+                    : 1.0,
+                theta_change: data.metrics?.theta_change || metrics?.theta_change || 0
+            });
 
-                setReviewMetrics({
-                    accuracy,
-                    final_mastery: atomMastery,
-                    error_count: totalAnswers - correctCount,
-                    conceptual_errors: errorCounts.conceptual,
-                    procedural_errors: errorCounts.procedural,
-                    factual_errors: errorCounts.factual,
-                    guessing_errors: errorCounts.guessing,
-                    attentional_errors: errorCounts.attentional,
-                    time_ratio: answers.length > 0
-                        ? answers.reduce((sum, a) => sum + (a.time_taken / 60), 0) / answers.length
-                        : 1.0,
-                    theta_change: data.metrics?.theta_change || metrics?.theta_change || 0
-                });
+            // Store completion data for navigation after compulsory review
+            setPendingCompletionData(data);
 
-                setFlowState('review');
-                return;
-            }
-
-            if (action === 'final_challenge') {
-                const finalResult = await generateFinalChallenge({
-                    session_id: currentSession.session_id,
-                    atom_id: currentAtomData.id
-                });
-
-                if (finalResult.success) {
-                    setFlowState('final_challenge');
-                } else {
-                    setError('Failed to generate final challenge');
-                    setFlowState('error');
-                }
-                return;
-            }
-
-            if (data.next_atom) {
-                // Generate atom summary before going to next atom
-                setNextAtomAfterFinal(data.next_atom);
-                try {
-                    await generateAtomSummary({
-                        session_id: currentSession.session_id,
-                        atom_id: currentAtomData.id
-                    });
-                } catch (e) {
-                    console.warn('Atom summary generation failed:', e);
-                }
-                setFlowState('atom_summary');
-                return;
-            }
-
-            // Default fallback
-            setFlowState('concept_complete');
+            // ALWAYS show compulsory review page
+            setFlowState('review');
         } catch (err) {
             console.error('Error completing atom:', err);
             setError('Failed to complete atom');
             setFlowState('error');
         }
-    }, [currentSession, currentAtomData, answers, atomMastery, metrics, completeAtom, resetForNewAtom, generateFinalChallenge, generateAtomSummary]);
+    }, [currentSession, currentAtomData, answers, atomMastery, metrics, completeAtom]);
 
     // Launch concept final challenge (after all atoms done)
     const launchConceptFinalChallenge = useCallback(async () => {
@@ -848,67 +799,72 @@ const TeachingFirstFlow = ({ conceptId, knowledgeLevel = 'intermediate' }) => {
             }
 
         } else if (action === 'skip') {
-            // Force continue despite low mastery — complete current atom, move to next
-            setFlowState('completing');
+            // Continue after compulsory review — use stored completion data
+            const data = pendingCompletionData;
+            setPendingCompletionData(null);
+
+            if (!data) {
+                // Fallback: no stored data
+                setFlowState('concept_complete');
+                return;
+            }
 
             try {
-                const completeResult = await completeAtom({
-                    session_id: currentSession.session_id,
-                    atom_id: currentAtomData.id,
-                    continue_learning: true,
-                    force_continue: true
-                });
-
-                if (completeResult.success) {
-                    if (completeResult.data.next_atom) {
-                        const nextAtom = completeResult.data.next_atom;
-                        setCurrentAtomData(nextAtom);
-                        resetForNewAtom();
-
-                        // Actually load teaching content for the NEW atom
-                        setFlowState('loading');
-                        try {
-                            const contentResult = await getTeachingContent({
-                                session_id: currentSession.session_id,
-                                atom_id: nextAtom.id
-                            });
-                            if (contentResult.success) {
-                                setFlowState('teaching');
-                            } else {
-                                setError('Failed to load teaching content for next atom');
-                                setFlowState('error');
-                            }
-                        } catch (contentErr) {
-                            console.error('Error loading next atom content:', contentErr);
-                            setError('Failed to load next atom');
-                            setFlowState('error');
-                        }
-                    } else if (completeResult.data.all_completed || completeResult.data.concept_final_challenge_ready) {
-                        // No next atom — all atoms done
-                        setFlowState('loading');
-                        try {
-                            await getAllAtomsMastery({
-                                session_id: currentSession.session_id,
-                                concept_id: conceptId
-                            });
-                            setFlowState('all_atoms_mastery');
-                        } catch (e) {
-                            await launchConceptFinalChallenge();
-                        }
-                    } else {
-                        setFlowState('concept_complete');
+                if (data.all_completed || data.next_action?.action === 'concept_complete' || data.concept_final_challenge_ready) {
+                    // All atoms done — generate atom summary, then go to all_atoms_mastery
+                    try {
+                        await generateAtomSummary({
+                            session_id: currentSession.session_id,
+                            atom_id: currentAtomData.id
+                        });
+                    } catch (e) {
+                        console.warn('Atom summary generation failed:', e);
                     }
-                } else {
-                    setError('Failed to continue');
-                    setFlowState('error');
+                    setFlowState('atom_summary');
+                    return;
                 }
+
+                const nextActionType = data.next_action?.action;
+
+                if (nextActionType === 'final_challenge') {
+                    setFlowState('loading');
+                    const finalResult = await generateFinalChallenge({
+                        session_id: currentSession.session_id,
+                        atom_id: currentAtomData.id
+                    });
+                    if (finalResult.success) {
+                        setFlowState('final_challenge');
+                    } else {
+                        setError('Failed to generate final challenge');
+                        setFlowState('error');
+                    }
+                    return;
+                }
+
+                if (data.next_atom) {
+                    // Generate atom summary before going to next atom
+                    setNextAtomAfterFinal(data.next_atom);
+                    try {
+                        await generateAtomSummary({
+                            session_id: currentSession.session_id,
+                            atom_id: currentAtomData.id
+                        });
+                    } catch (e) {
+                        console.warn('Atom summary generation failed:', e);
+                    }
+                    setFlowState('atom_summary');
+                    return;
+                }
+
+                // Default fallback
+                setFlowState('concept_complete');
             } catch (err) {
-                console.error('Error skipping review:', err);
+                console.error('Error continuing after review:', err);
                 setError('Failed to continue');
                 setFlowState('error');
             }
         }
-    }, [currentSession, currentAtomData, conceptId, getTeachingContent, generateQuestionsFromTeaching, completeAtom, resetForNewAtom, adaptiveReteach, getAllAtomsMastery, launchConceptFinalChallenge]);
+    }, [currentSession, currentAtomData, conceptId, pendingCompletionData, getTeachingContent, generateQuestionsFromTeaching, adaptiveReteach, generateFinalChallenge, generateAtomSummary]);
 
     // Handle atom summary continue → next atom or all_atoms_mastery
     const handleAtomSummaryContinue = useCallback(async () => {
@@ -954,12 +910,12 @@ const TeachingFirstFlow = ({ conceptId, knowledgeLevel = 'intermediate' }) => {
             // Fallback: go directly to concept final challenge
             await launchConceptFinalChallenge();
         }
-    }, [currentSession, conceptId, nextAtomAfterFinal, resetForNewAtom, getTeachingContent, getAllAtomsMastery]);
+    }, [currentSession, conceptId, nextAtomAfterFinal, resetForNewAtom, getTeachingContent, getAllAtomsMastery, launchConceptFinalChallenge]);
 
     // Handle all atoms mastery continue → concept final challenge
     const handleAllAtomsMasteryContinue = useCallback(async () => {
         await launchConceptFinalChallenge();
-    }, []);
+    }, [launchConceptFinalChallenge]);
 
     // Handle atom complete - continue or go to dashboard
     const handleAtomCompleteContinue = useCallback(() => {

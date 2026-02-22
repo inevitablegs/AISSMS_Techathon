@@ -33,6 +33,11 @@ export const LearningProvider = ({ children }) => {
     const [masteryVerdict, setMasteryVerdict] = useState(null);
     const [showBreakModal, setShowBreakModal] = useState(false);
 
+    // Cognitive load and session-shape (live)
+    const [cognitiveLoadScore, setCognitiveLoadScore] = useState(0);
+    const [sessionShapeAction, setSessionShapeAction] = useState('continue');
+    const [sessionShapeMessage, setSessionShapeMessage] = useState('');
+
     // Adaptive flow state
     const [conceptOverview, setConceptOverview] = useState(null);
     const [atomSummaries, setAtomSummaries] = useState({});
@@ -389,8 +394,12 @@ export const LearningProvider = ({ children }) => {
             setMetrics(data.metrics || {});
 
             // Enhanced pacing engine updates
-            if (data.fatigue) setFatigueLevel(data.fatigue);
+            const fatigueVal = data.fatigue;
+            if (fatigueVal) setFatigueLevel(typeof fatigueVal === 'object' ? fatigueVal.level : fatigueVal);
             if (data.retention_action) setRetentionAction(data.retention_action);
+            if (data.cognitive_load_score != null) setCognitiveLoadScore(data.cognitive_load_score);
+            if (data.cognitive_load_action) setSessionShapeAction(data.cognitive_load_action);
+            if (data.session_shape_message != null) setSessionShapeMessage(data.session_shape_message);
             if (data.hint_warning) setHintWarning(data.hint_warning);
             if (data.engagement_adjustment) setEngagementScore(data.engagement_adjustment.score ?? engagementScore);
             if (data.mastery_verdict) setMasteryVerdict(data.mastery_verdict);
@@ -463,6 +472,11 @@ export const LearningProvider = ({ children }) => {
             });
             
             const data = response.data;
+
+            // Sync mastery with backend's authoritative value
+            if (data.metrics?.final_mastery !== undefined) {
+                setAtomMastery(data.metrics.final_mastery);
+            }
             
             // Handle next steps based on pacing
             if (data.next_action === 'next_atom' && data.next_atom) {
@@ -670,6 +684,9 @@ export const LearningProvider = ({ children }) => {
         setAtomMastery(0.0);          // <-- critical: reset mastery for new atom
         setShowTeaching(true);
         setPacingDecision('stay');
+        setCognitiveLoadScore(0);
+        setSessionShapeAction('continue');
+        setSessionShapeMessage('');
         questionStartTime.current = null;
     }, []);
 
@@ -702,6 +719,9 @@ export const LearningProvider = ({ children }) => {
         engagementScore,
         masteryVerdict,
         showBreakModal,
+        cognitiveLoadScore,
+        sessionShapeAction,
+        sessionShapeMessage,
 
         // Adaptive flow state
         conceptOverview,
@@ -771,6 +791,9 @@ export const LearningProvider = ({ children }) => {
         engagementScore,
         masteryVerdict,
         showBreakModal,
+        cognitiveLoadScore,
+        sessionShapeAction,
+        sessionShapeMessage,
         conceptOverview,
         atomSummaries,
         allAtomsMastery,

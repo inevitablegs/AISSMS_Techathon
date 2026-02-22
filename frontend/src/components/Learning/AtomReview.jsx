@@ -1,24 +1,27 @@
 import React from 'react';
 
 const AtomReview = ({ atom, metrics, onComplete, onSkip }) => {
+    const isHighPerformance = metrics.accuracy >= 0.8 && metrics.final_mastery >= 0.7;
 
     return (
         <div className="bg-surface rounded-theme-xl shadow-theme border border-theme-border p-6 animate-fade-in-up">
-            <h2 className="text-2xl font-bold text-theme-text mb-4">Review Required: {atom.name}</h2>
+            <h2 className="text-2xl font-bold text-theme-text mb-4">
+                {isHighPerformance ? `Great Work: ${atom.name}` : `Review Required: ${atom.name}`}
+            </h2>
             
             {/* Performance Summary */}
-            <div className="bg-error/10 border border-error/20 rounded-theme-lg p-4 mb-6">
-                <h3 className="font-semibold text-error mb-2">Performance Analysis</h3>
+            <div className={`${isHighPerformance ? 'bg-emerald-500/10 border-emerald-500/20' : 'bg-error/10 border-error/20'} border rounded-theme-lg p-4 mb-6`}>
+                <h3 className={`font-semibold ${isHighPerformance ? 'text-emerald-600 dark:text-emerald-400' : 'text-error'} mb-2`}>Performance Analysis</h3>
                 <div className="grid grid-cols-2 gap-4 text-sm">
                     <div>
                         <p className="text-theme-text-muted">Accuracy</p>
-                        <p className="text-xl font-bold text-error">
+                        <p className={`text-xl font-bold ${metrics.accuracy >= 0.8 ? 'text-emerald-500' : metrics.accuracy >= 0.6 ? 'text-amber-500' : 'text-error'}`}>
                             {Math.round(metrics.accuracy * 100)}%
                         </p>
                     </div>
                     <div>
                         <p className="text-theme-text-muted">Mastery</p>
-                        <p className="text-xl font-bold text-orange-500">
+                        <p className={`text-xl font-bold ${metrics.final_mastery >= 0.7 ? 'text-emerald-500' : metrics.final_mastery >= 0.5 ? 'text-orange-500' : 'text-error'}`}>
                             {Math.round(metrics.final_mastery * 100)}%
                         </p>
                     </div>
@@ -84,7 +87,7 @@ const AtomReview = ({ atom, metrics, onComplete, onSkip }) => {
                     onClick={onSkip}
                     className="w-full bg-theme-bg text-theme-text-secondary py-3 rounded-theme font-semibold border border-theme-border hover:bg-surface-alt transition-colors"
                 >
-                    Skip Review (Not Recommended)
+                    Continue to Next Step →
                 </button>
             </div>
         </div>
