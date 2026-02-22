@@ -26,8 +26,6 @@ const Home = () => {
         },
     ];
 
-    
-
     return (
         <div className="min-h-screen bg-theme-bg overflow-hidden">
             {/* Navbar */}
